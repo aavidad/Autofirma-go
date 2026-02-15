@@ -42,6 +42,9 @@ go build -o autofirma-host ./cmd/autofirma-host
 go build -o autofirma-desktop ./cmd/gui
 ```
 
+### Generación del Instalador (Windows)
+El proyecto incluye scripts NSIS o similar para generar el instalador `setup.exe`. Consulte la carpeta `packaging/` para más detalles.
+
 ## 📄 Licencia
 
 Este proyecto es software libre distribuido bajo la licencia **GPLv3** (GNU General Public License v3.0). Consulte el archivo `LICENSE` para más detalles.

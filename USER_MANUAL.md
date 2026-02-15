@@ -33,9 +33,9 @@ Antes de empezar, asegúrese de cumplir estos requisitos:
 4.  Reinicie su navegador.
 
 ### En Windows
-1.  Descargue el archivo `.zip` de la última versión.
-2.  Descomprima el contenido en una carpeta (ej: `C:\AutoFirma-Go`).
-3.  Ejecute una vez el archivo `autofirma-desktop.exe` para registrar la aplicación.
+1.  Descargue el instalador `.exe` de la última versión (ej: `AutoFirma-Go-Setup.exe`).
+2.  Ejecute el archivo descargado y siga las instrucciones del asistente.
+3.  La aplicación quedará instalada en su menú de inicio y configurada automáticamente.
 
 ---
 
