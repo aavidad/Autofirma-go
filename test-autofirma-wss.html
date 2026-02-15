@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test AutoFirma WebSocket</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+
+        .log {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #ccc;
+        }
+
+        .log-entry.success {
+            border-color: #4CAF50;
+            color: #2E7D32;
+        }
+
+        .log-entry.error {
+            border-color: #f44336;
+            color: #C62828;
+        }
+
+        .log-entry.info {
+            border-color: #2196F3;
+            color: #1565C0;
+        }
+
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #1976D2;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🔐 Test AutoFirma WebSocket</h1>
+
+    <div>
+        <h3>1. Conectar al servidor WSS</h3>
+        <button id="connectBtn" onclick="connect()">Conectar a wss://127.0.0.1:63117/</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Desconectar</button>
+    </div>
+
+    <div>
+        <h3>2. Test Echo</h3>
+        <button id="echoBtn" onclick="sendEcho()" disabled>Enviar Echo Test</button>
+    </div>
+
+    <div>
+        <h3>3. Firmar documento</h3>
+        <p>Pega aquí la URI afirma:// de la página oficial:</p>
+        <input type="text" id="afirmaUri" placeholder="afirma://sign?jvc=3&fileid=...&rtservlet=...&key=...">
+        <button id="signBtn" onclick="sendSign()" disabled>Firmar</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <script>
+        let ws = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateButtons() {
+            const connected = ws && ws.readyState === WebSocket.OPEN;
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('echoBtn').disabled = !connected;
+            document.getElementById('signBtn').disabled = !connected;
+        }
+
+        function connect() {
+            log('🔌 Conectando a wss://127.0.0.1:63117/...', 'info');
+
+            ws = new WebSocket('wss://127.0.0.1:63117/');
+
+            ws.onopen = () => {
+                log('✅ Conectado al servidor WSS', 'success');
+                updateButtons();
+            };
+
+            ws.onmessage = (event) => {
+                log(`📥 Respuesta: ${event.data}`, 'success');
+                if (event.data === 'OK') {
+                    log('✅ Operación completada exitosamente', 'success');
+                } else if (event.data.startsWith('ERR-')) {
+                    log(`❌ Error: ${event.data}`, 'error');
+                }
+            };
+
+            ws.onerror = (error) => {
+                log('❌ Error de WebSocket', 'error');
+                log('💡 Asegúrate de haber aceptado el certificado en https://127.0.0.1:63117/', 'info');
+                updateButtons();
+            };
+
+            ws.onclose = () => {
+                log('🔌 Conexión cerrada', 'info');
+                updateButtons();
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                updateButtons();
+            }
+        }
+
+        function sendEcho() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('📤 Enviando: echo=test', 'info');
+                ws.send('echo=test');
+            }
+        }
+
+        function sendSign() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const uri = document.getElementById('afirmaUri').value.trim();
+                if (!uri) {
+                    log('❌ Por favor, pega una URI afirma://', 'error');
+                    return;
+                }
+                if (!uri.startsWith('afirma://')) {
+                    log('❌ La URI debe comenzar con afirma://', 'error');
+                    return;
+                }
+                log(`📤 Enviando petición de firma...`, 'info');
+                log(`URI: ${uri.substring(0, 50)}...`, 'info');
+                ws.send(uri);
+                log('⏳ Esperando respuesta del servidor (puede tardar unos segundos)...', 'info');
+            }
+        }
+
+        // Auto-connect on load
+        window.addEventListener('load', () => {
+            log('💡 Haz clic en "Conectar" para empezar', 'info');
+            log('💡 Si falla, abre https://127.0.0.1:63117/ y acepta el certificado', 'info');
+        });
+    </script>
+</body>
+
+</html>

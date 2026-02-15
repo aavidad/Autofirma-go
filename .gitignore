@@ -1,0 +1,42 @@
+# Binarios y ejecutables
+autofirma-desktop
+autofirma-host*
+autofirma-web-compat
+gui
+gui.exe
+*.exe
+*.zip
+*.tar.gz
+*.o
+*.a
+*.so
+
+# Certificados y Claves (MUY IMPORTANTE)
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+.ssl-key.log
+rootCA.*
+server.*
+
+# Directorios de trabajo y temporales
+backups/
+dist/
+out/
+release/
+.gocache/
+.gomodcache/
+vendor/
+testdata/
+
+# IDEs y SO
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+EOF
