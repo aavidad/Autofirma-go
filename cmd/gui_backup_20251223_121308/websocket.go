@@ -1,6 +1,3 @@
-//go:build ignore
-// +build ignore
-
 package main
 
 import (
@@ -181,7 +178,7 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 
 	// Sign
 	dataB64 := base64.StdEncoding.EncodeToString(data)
-	signatureB64, err := signer.SignData(dataB64, certID, "", format)
+	signatureB64, err := signer.SignData(dataB64, certID, "", format, nil)
 	if err != nil {
 		return s.formatError("ERROR_SIGNING", err.Error())
 	}

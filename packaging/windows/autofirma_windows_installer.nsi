@@ -29,6 +29,9 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN "$INSTDIR\autofirma-desktop.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Iniciar ${APPNAME} ahora"
+!define MUI_FINISHPAGE_RUN_CHECKED
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES

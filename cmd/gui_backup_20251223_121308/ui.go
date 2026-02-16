@@ -1,6 +1,3 @@
-//go:build ignore
-// +build ignore
-
 package main
 
 import (
@@ -15,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gioui.org/app"
@@ -83,18 +81,12 @@ func (ui *UI) browseFile() {
 	if ui.Mode == 1 {
 		title = "Seleccionar PDF para verificar"
 	}
-	// Try zenity
-	out, err := exec.Command("zenity", "--file-selection", "--file-filter=*.pdf", "--title="+title).Output()
+	path, err := selectPDFWithSystemDialog(title)
 	if err != nil {
-		// Try kdialog
-		out, err = exec.Command("kdialog", "--getopenfilename", ".", "*.pdf").Output()
-		if err != nil {
-			ui.StatusMsg = "Error: No se pudo abrir el diálogo de archivo (instale zenity o kdialog)"
-			ui.Window.Invalidate()
-			return
-		}
+		ui.StatusMsg = "Error: No se pudo abrir el dialogo de seleccion de fichero: " + err.Error()
+		ui.Window.Invalidate()
+		return
 	}
-	path := strings.TrimSpace(string(out))
 	if path != "" {
 		ui.InputFile.SetText(path)
 		ui.Window.Invalidate()
@@ -114,11 +106,22 @@ func (ui *UI) loadCertificates() {
 }
 
 func (ui *UI) openFile() {
-	exec.Command("xdg-open", ui.SignedFile).Start()
+	_ = openWithSystem(ui.SignedFile)
 }
 
 func (ui *UI) openFolder() {
-	exec.Command("xdg-open", filepath.Dir(ui.SignedFile)).Start()
+	_ = openWithSystem(filepath.Dir(ui.SignedFile))
+}
+
+func openWithSystem(target string) error {
+	switch runtime.GOOS {
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", target).Start()
+	case "darwin":
+		return exec.Command("open", target).Start()
+	default:
+		return exec.Command("xdg-open", target).Start()
+	}
 }
 
 func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
@@ -216,7 +219,7 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 										if ui.BtnView.Clicked(gtx) {
 											path := ui.InputFile.Text()
 											if path != "" {
-												go exec.Command("xdg-open", path).Start()
+												go openWithSystem(path)
 											}
 										}
 										viewBtn := material.Button(ui.Theme, &ui.BtnView, "Ver")
@@ -338,7 +341,7 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 										}),
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											if ui.BtnValide.Clicked(gtx) {
-												exec.Command("xdg-open", "https://valide.redsara.es/valide/validarFirma/ejecutar.html").Start()
+												_ = openWithSystem("https://valide.redsara.es/valide/validarFirma/ejecutar.html")
 											}
 											valideBtn := material.Button(ui.Theme, &ui.BtnValide, "Validación Oficial (Valide)")
 											valideBtn.Background = color.NRGBA{R: 200, G: 0, B: 0, A: 255} // Dark Red
@@ -507,7 +510,7 @@ func (ui *UI) signCurrentFile() {
 		}()
 
 		// PIN is not needed for system store usually, or handled by OS prompt
-		signatureB64, err := signer.SignData(dataB64, certID, "", format)
+		signatureB64, err := signer.SignData(dataB64, certID, "", format, nil)
 		if err != nil {
 			ui.StatusMsg = "Error al firmar: " + err.Error()
 			ui.Window.Invalidate()

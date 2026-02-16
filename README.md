@@ -43,7 +43,22 @@ go build -o autofirma-desktop ./cmd/gui
 ```
 
 ### Generación del Instalador (Windows)
-El proyecto incluye scripts NSIS o similar para generar el instalador `setup.exe`. Consulte la carpeta `packaging/` para más detalles.
+El proyecto incluye script NSIS para generar el instalador `.exe`.
+
+```bash
+# Desde la raiz del proyecto
+./packaging/windows/make_windows_release.sh
+```
+
+Si su paquete GUI no esta en `cmd/gui` (por ejemplo `cmd/gui_backup_20251223_121308`), indique el paquete manualmente:
+
+```bash
+GUI_CMD_PKG=./cmd/gui_backup_20251223_121308 ./packaging/windows/make_windows_release.sh
+```
+
+Salida esperada:
+* `release/windows/bundle/AutofirmaDipgra/autofirma-desktop.exe`
+* `release/windows/AutofirmaDipgra-windows-installer.exe`
 
 ## 📄 Licencia
 
