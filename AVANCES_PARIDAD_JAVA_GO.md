@@ -510,3 +510,23 @@ Alcanzar paridad funcional progresiva con la app Java de AutoFirma, con trazabil
 - Validación ejecutada:
   - `GOCACHE=/tmp/go-build go test ./cmd/gui -run TestParseProtocolURI_AliasAndRequiredParams -v` OK.
   - `GOCACHE=/tmp/go-build go test ./cmd/gui/...` OK.
+
+## Pendiente para mañana
+- Ejecutar pruebas E2E completas en sedes reales (al menos Valide + una sede adicional):
+  - flujo `sign -> save -> upload/retorno`.
+  - revisar logs para confirmar ausencia de `SAF_03`/`ERR-` no esperados.
+- Completar robustez final de `service`/legacy:
+  - cubrir variantes de framing/comandos que aparezcan en logs reales.
+  - añadir test de regresión por cada variante nueva detectada.
+- Cerrar batch “real” end-to-end:
+  - validar prefirma/postfirma contra servicio real.
+  - ajustar/revisar timeouts y reintentos.
+- Validación ampliada de certificados/dispositivos:
+  - escenarios NSS/PKCS#11 adicionales.
+  - verificación de manejo de errores PIN/CAN y mensajes de UI.
+- Empaquetado e instalación final:
+  - generar artefactos de release (`.deb`/`.run`) con binario actualizado.
+  - validar instalación limpia y asociación `afirma://` en otro equipo.
+- QA y cierre de bloque:
+  - ejecutar `scripts/run_full_validation.sh`.
+  - anotar resultados y bloqueantes de release en este mismo archivo.
