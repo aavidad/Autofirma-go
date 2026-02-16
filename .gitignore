@@ -1,6 +1,8 @@
 # Binarios y ejecutables
 autofirma-desktop
 autofirma-host*
+!cmd/autofirma-host/
+!cmd/autofirma-host/main.go
 autofirma-web-compat
 /gui
 /gui.exe

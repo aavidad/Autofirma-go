@@ -60,6 +60,19 @@ Salida esperada:
 * `release/windows/bundle/AutofirmaDipgra/autofirma-desktop.exe`
 * `release/windows/AutofirmaDipgra-windows-installer.exe`
 
+### Generación de artefactos Linux (autocontenidos)
+
+Para Linux se usa un empaquetado que fuerza compilación nativa Go sin CGO y verifica que el binario no dependa de librerías compartidas del sistema:
+
+```bash
+./packaging/linux/make_linux_release.sh
+```
+
+Salida esperada:
+* `release/linux/bundle/AutofirmaDipgra/autofirma-desktop`
+* `release/linux/AutofirmaDipgra-linux-x64.tar.gz`
+* `release/linux/AutofirmaDipgra-linux-installer.run`
+
 ## 📄 Licencia
 
 Este proyecto es software libre distribuido bajo la licencia **GPLv3** (GNU General Public License v3.0). Consulte el archivo `LICENSE` para más detalles.

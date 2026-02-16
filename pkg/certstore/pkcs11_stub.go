@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Diputacion de Granada
 // Autor: Alberto Avidad Fernandez (Oficina de Software Libre de la Diputacion de Granada)
 
-//go:build !linux
-// +build !linux
+//go:build !linux || !cgo
+// +build !linux !cgo
 
 package certstore
 
