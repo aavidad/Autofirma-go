@@ -5,6 +5,7 @@
 package signer
 
 import (
+	"crypto"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -18,7 +19,7 @@ import (
 	"autofirma-host/pkg/protocol"
 )
 
-func signXadesWithGo(inputFile, p12Path, p12Password string) ([]byte, error) {
+func signXadesWithGo(inputFile, p12Path, p12Password string, options map[string]interface{}) ([]byte, error) {
 	xmlData, err := os.ReadFile(inputFile)
 	if err != nil {
 		return nil, err
@@ -48,6 +49,10 @@ func signXadesWithGo(inputFile, p12Path, p12Password string) ([]byte, error) {
 	ctx, err := dsig.NewSigningContext(signer, certChain)
 	if err != nil {
 		return nil, err
+	}
+	digest := resolveDigestHash(options, crypto.SHA256)
+	if digest == crypto.SHA1 || digest == crypto.SHA256 || digest == crypto.SHA384 || digest == crypto.SHA512 {
+		ctx.Hash = digest
 	}
 	ctx.Prefix = ""
 	ctx.Canonicalizer = dsig.MakeC14N10RecCanonicalizer()

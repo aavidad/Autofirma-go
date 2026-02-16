@@ -28,7 +28,7 @@ El proyecto consta de dos binarios principales que comparten la misma lógica de
 .
 ├── cmd/
 │   ├── autofirma-host/      # Punto de entrada del Native Host (CLI sin UI)
-│   │   └── main.go          # Bucle de lectura Stdin/Stdout y routing de acciones
+│   │   └── main.go          # Bucle de lectura Stdin/Stdout, routing y chunking
 │   └── gui/                 # Punto de entrada de la aplicación de Escritorio
 │       └── main.go          # Inicialización de GioUI y Servidor WebSocket
 ├── pkg/
@@ -36,9 +36,12 @@ El proyecto consta de dos binarios principales que comparten la misma lógica de
 │   ├── signer/              # Lógica CORE de firma (PAdES, XAdES, CAdES)
 │   ├── certstore/           # Abstracción para acceder a almacenes de certificados
 │   ├── applog/              # Sistema de logs rotatorios
-│   └── updater/             # Lógica de auto-actualización
-├── scripts/                 # Scripts de ayuda (instalación, empaquetado)
-├── build.sh                 # Script de compilación maestro
+│   ├── updater/             # Lógica de auto-actualización
+│   └── version/             # Control de versiones del proyecto
+├── packaging/               # Scripts de empaquetado y release
+│   ├── linux/               # Generador de instalador .run y scripts de registro
+│   └── windows/             # Scripts NSIS para instalador .exe
+├── build.sh                 # Script de compilación simple (Legacy/Dev)
 └── go.mod                   # Definición de módulos y dependencias
 ```
 
@@ -118,14 +121,29 @@ Estructura básica de una petición:
 
 ## 5. Guía para Programadores
 
-### Cómo compilar
-Desde la raíz (`work/native-host-src`):
+### Cómo compilar y empaquetar
+
+Existen scripts dedicados para generar releases listos para distribución:
+
+**Para Linux:**
+Genera un instalador `.run` autocontenido y un `.tar.gz`.
 ```bash
-# Compilar Host Nativo
+./packaging/linux/make_linux_release.sh
+```
+
+**Para Windows (vía NSIS):**
+Requiere `makensis` instalado.
+```bash
+./packaging/windows/make_windows_release.sh
+```
+
+**Compilación manual para desarrollo:**
+```bash
+# Host Nativo
 go build -o autofirma-host ./cmd/autofirma-host
 
-# Compilar GUI
-go build -o gui ./cmd/gui
+# Aplicación Desktop
+go build -o autofirma-desktop ./cmd/gui
 ```
 
 ### Cómo añadir un nuevo formato de firma

@@ -42,19 +42,25 @@ import (
 //go:embed logo.png
 var embeddedHeaderLogo []byte
 
+type SignatureResult struct {
+	SignatureB64 string
+	CertDER      []byte
+}
+
 type UI struct {
 	Theme  *material.Theme
 	Window *app.Window
 
 	// State for widgets
-	BtnSign       widget.Clickable
-	BtnVerify     widget.Clickable
-	BtnCheckCerts widget.Clickable
-	BtnBrowse     widget.Clickable
-	BtnView       widget.Clickable // View current file
-	BtnOpen       widget.Clickable // Open Signed PDF
-	BtnOpenFolder widget.Clickable // Open Containing Folder
-	BtnValide     widget.Clickable // Open Valide URL
+	BtnSign         widget.Clickable
+	BtnVerify       widget.Clickable
+	BtnCheckCerts   widget.Clickable
+	BtnBrowse       widget.Clickable
+	BtnView         widget.Clickable // View current file
+	BtnOpen         widget.Clickable // Open Signed PDF
+	BtnOpenFolder   widget.Clickable // Open Containing Folder
+	BtnValide       widget.Clickable // Open Valide URL
+	BtnSignProtocol widget.Clickable // Sign button for protocol mode
 
 	BtnModeSign   widget.Clickable
 	BtnModeVerify widget.Clickable
@@ -112,6 +118,10 @@ type UI struct {
 	// Background task coordination
 	PendingWork sync.WaitGroup
 	ShouldClose bool
+
+	// WebSocket interaction
+	SignatureDone chan SignatureResult // Sends the results when done
+	IsServerMode  bool                 // True if launched via afirma://websocket or --server
 }
 
 func NewUI(w *app.Window) *UI {
@@ -127,6 +137,8 @@ func NewUI(w *app.Window) *UI {
 		PadesSealPage:   1,
 		PDFPageWidthPt:  595.28,
 		PDFPageHeightPt: 841.89,
+		SignatureDone:   make(chan SignatureResult, 1),
+		IsServerMode:    false, // Default
 	}
 
 	ui.ListCerts.Axis = layout.Vertical
@@ -209,8 +221,8 @@ func (ui *UI) openFolder() {
 }
 
 func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
-	// SPECIAL MINIMALIST LAYOUT FOR PROTOCOL MODE
-	if ui.Protocol != nil {
+	// SPECIAL MINIMALIST LAYOUT FOR PROTOCOL MODE OR SERVER MODE
+	if ui.Protocol != nil || ui.IsServerMode {
 		return layout.Stack{}.Layout(gtx,
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				paint.Fill(gtx.Ops, color.NRGBA{R: 245, G: 245, B: 245, A: 255})
@@ -228,7 +240,37 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Instruction
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return material.Body1(ui.Theme, "El sitio web solicita firmar un documento. Seleccione un certificado para continuar:").Layout(gtx)
+							msg := "El sitio web solicita firmar un documento."
+							if ui.InputFile.Text() != "" {
+								msg = fmt.Sprintf("Documento listo: %s", filepath.Base(ui.InputFile.Text()))
+							}
+							return material.Body1(ui.Theme, msg).Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx)
+						}),
+						// File selector if empty (for local file flows)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if ui.InputFile.Text() != "" {
+								return layout.Dimensions{}
+							}
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									lbl := material.Body2(ui.Theme, "No se ha descargado ningún documento automáticamente. Seleccione el archivo a firmar:")
+									lbl.Color = color.NRGBA{R: 100, G: 100, B: 100, A: 255}
+									return lbl.Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.BtnBrowse.Clicked(gtx) {
+										go ui.browseFile()
+									}
+									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										btn := material.Button(ui.Theme, &ui.BtnBrowse, "Examinar archivo local...")
+										btn.Background = color.NRGBA{R: 0, G: 120, B: 180, A: 255}
+										return btn.Layout(gtx)
+									})
+								}),
+							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
@@ -247,20 +289,23 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 										return layout.Dimensions{}
 									}
 									ui.SelectedCert = index
-									// Immediate action in protocol mode
-									ui.signCurrentFile()
 									ui.Window.Invalidate()
 								}
 
 								label := certificateDisplayLabel(ui.Certs[index])
 								// Simple card style for certs
 								btn := material.Button(ui.Theme, &ui.CertClicks[index], label)
-								if ui.Certs[index].CanSign {
+								if ui.SelectedCert == index {
+									// Highlight selected
+									btn.Background = color.NRGBA{R: 0, G: 120, B: 180, A: 255}
+									btn.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+								} else if ui.Certs[index].CanSign {
 									btn.Background = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+									btn.Color = color.NRGBA{A: 255}
 								} else {
 									btn.Background = color.NRGBA{R: 245, G: 230, B: 230, A: 255}
+									btn.Color = color.NRGBA{R: 100, G: 100, B: 100, A: 255}
 								}
-								btn.Color = color.NRGBA{A: 255}
 								btn.Inset = layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(16), Right: unit.Dp(16)}
 
 								return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -268,7 +313,50 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 								})
 							})
 						}),
-						// Status/Spinner
+						// Visible Seal Checkbox (only if PAdES)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								isPades := false
+								if ui.Protocol != nil {
+									isPades = normalizeProtocolFormat(ui.Protocol.SignFormat) == "pades" || normalizeProtocolFormat(ui.Protocol.Params.Get("format")) == "pades"
+								}
+							if !isPades {
+								return layout.Dimensions{}
+							}
+							return material.CheckBox(ui.Theme, &ui.ChkVisibleSeal, "Añadir sello visible al PDF").Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
+						}),
+						// Status/Spinner/Sign Button
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if ui.IsSigning {
+								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										gtx.Constraints.Max.X = gtx.Dp(24)
+										gtx.Constraints.Max.Y = gtx.Dp(24)
+										return material.Loader(ui.Theme).Layout(gtx)
+									}),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return material.Body2(ui.Theme, "Firmando documento...").Layout(gtx)
+									}),
+								)
+							}
+
+							if ui.BtnSignProtocol.Clicked(gtx) {
+								if ui.SelectedCert >= 0 {
+									go ui.signCurrentFile()
+								}
+							}
+
+							btn := material.Button(ui.Theme, &ui.BtnSignProtocol, "Firmar documento")
+							if ui.SelectedCert < 0 || ui.InputFile.Text() == "" {
+								btn.Background = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
+							} else {
+								btn.Background = color.NRGBA{R: 0, G: 150, B: 0, A: 255}
+							}
+							return btn.Layout(gtx)
+						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if ui.StatusMsg != "" {
 								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -708,13 +796,13 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												if ui.BtnViewLogs.Clicked(gtx) {
-													logPath := resolveLogDirectory()
-													_ = os.MkdirAll(logPath, 0755)
-													if err := openExternal(logPath); err != nil {
-														ui.UpdateStatus = "No se pudo abrir la carpeta de logs: " + err.Error()
-													}
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnViewLogs.Clicked(gtx) {
+														logPath := resolveLogDirectory()
+														_ = os.MkdirAll(logPath, 0755)
+														if err := openExternal(logPath); err != nil {
+															ui.UpdateStatus = "No se pudo abrir la carpeta de logs: " + err.Error()
+														}
 													}
 													btn := material.Button(ui.Theme, &ui.BtnViewLogs, "Ver logs")
 													btn.Background = color.NRGBA{R: 70, G: 70, B: 70, A: 255}
@@ -1020,6 +1108,9 @@ func (ui *UI) signCurrentFile() {
 		ui.Window.Invalidate()
 		return
 	}
+	if ui.IsSigning {
+		return
+	}
 
 	filePath := ui.InputFile.Text()
 	if filePath == "" {
@@ -1028,52 +1119,8 @@ func (ui *UI) signCurrentFile() {
 		return
 	}
 
-	// Read file
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		ui.StatusMsg = "Error leyendo el archivo: " + err.Error()
-		ui.Window.Invalidate()
-		return
-	}
-
-	// Convert to Base64
-	dataB64 := base64.StdEncoding.EncodeToString(data)
-
-	// Determine format based on extension or protocol
-	ext := strings.ToLower(filepath.Ext(filePath))
-	format := "pades" // Default
-
-	// If in protocol mode and format was specified, use that
-	if ui.Protocol != nil && ui.Protocol.SignFormat != "" {
-		format = strings.ToLower(ui.Protocol.SignFormat)
-		log.Printf("[UI] Using protocol-specified format: %s", format)
-	} else {
-		// Auto-detect from extension
-		if ext == ".xml" {
-			format = "xades"
-		}
-	}
-
-	confirmingCades := runtime.GOOS == "windows" &&
-		ui.Protocol == nil &&
-		strings.EqualFold(format, "pades") &&
-		ui.PendingCadesConfirm &&
-		ui.PendingCadesFile == filePath &&
-		ui.PendingCadesCertID == certID
-	if ui.PendingCadesConfirm && !confirmingCades {
-		ui.PendingCadesConfirm = false
-		ui.PendingCadesFile = ""
-		ui.PendingCadesCertID = ""
-	}
-	if confirmingCades {
-		format = "cades"
-		ui.PendingCadesConfirm = false
-		ui.PendingCadesFile = ""
-		ui.PendingCadesCertID = ""
-	}
-
 	// Sign
-	ui.StatusMsg = fmt.Sprintf("Firmando (%s)...", format)
+	ui.StatusMsg = "Iniciando proceso de firma..."
 	ui.SignedFile = "" // Reset previous signed file
 	ui.IsSigning = true
 	ui.Window.Invalidate()
@@ -1086,6 +1133,56 @@ func (ui *UI) signCurrentFile() {
 			ui.Window.Invalidate()
 		}()
 		defer ui.PendingWork.Done()
+
+		// 1. Read file inside goroutine
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			ui.StatusMsg = "Error leyendo el archivo: " + err.Error()
+			return
+		}
+
+		// 2. Convert to Base64
+		dataB64 := base64.StdEncoding.EncodeToString(data)
+
+		// 3. Determine format based on extension or protocol
+		ext := strings.ToLower(filepath.Ext(filePath))
+		format := "pades" // Default
+
+		// If in protocol mode and format was specified, use that
+		if ui.Protocol != nil && ui.Protocol.SignFormat != "" {
+			format = normalizeProtocolFormat(ui.Protocol.SignFormat)
+			log.Printf("[UI] Using protocol-specified format: %s", format)
+		} else {
+			// Auto-detect from extension
+			if ext == ".xml" {
+				format = "xades"
+			} else if ext == ".csig" || ext == ".sig" {
+				format = "cades"
+			}
+		}
+		format = normalizeProtocolFormat(format)
+
+		// Handling of Windows re-prompt for CAdES if PAdES is non-exportable
+		confirmingCades := runtime.GOOS == "windows" &&
+			ui.Protocol == nil &&
+			strings.EqualFold(format, "pades") &&
+			ui.PendingCadesConfirm &&
+			ui.PendingCadesFile == filePath &&
+			ui.PendingCadesCertID == certID
+		if ui.PendingCadesConfirm && !confirmingCades {
+			ui.PendingCadesConfirm = false
+			ui.PendingCadesFile = ""
+			ui.PendingCadesCertID = ""
+		}
+		if confirmingCades {
+			format = "cades"
+			ui.PendingCadesConfirm = false
+			ui.PendingCadesFile = ""
+			ui.PendingCadesCertID = ""
+		}
+
+		ui.StatusMsg = fmt.Sprintf("Firmando (%s)...", format)
+		ui.Window.Invalidate()
 
 		var stopWait chan struct{}
 		defer func() {
@@ -1125,10 +1222,17 @@ func (ui *UI) signCurrentFile() {
 		// PIN is not needed for system store usually, or handled by OS prompt
 		effectiveFormat := format
 		var signOptions map[string]interface{}
-		if strings.EqualFold(effectiveFormat, "pades") {
-			signOptions = ui.buildPadesSignatureOptions()
+		if ui.Protocol != nil {
+			signOptions = buildProtocolSignOptions(ui.Protocol, effectiveFormat)
 		}
-		signatureB64, err := signer.SignData(dataB64, certID, "", effectiveFormat, signOptions)
+		if strings.EqualFold(effectiveFormat, "pades") && ui.Protocol == nil {
+			signOptions = mergeSignOptions(signOptions, ui.buildPadesSignatureOptions())
+		}
+		opAction := "sign"
+		if ui.Protocol != nil {
+			opAction = ui.Protocol.Action
+		}
+		signatureB64, err := protocolSignOperation(opAction, dataB64, certID, "", effectiveFormat, signOptions)
 		if err != nil {
 			// Desktop prompt for Windows with non-exportable key:
 			// PAdES requires P12 in current implementation.
@@ -1156,7 +1260,7 @@ func (ui *UI) signCurrentFile() {
 		}
 
 		// Append _firmado, adapting extension to actual signature format
-		ext := filepath.Ext(filePath)
+		ext = filepath.Ext(filePath)
 		base := strings.TrimSuffix(filePath, ext)
 		outPath := base + "_firmado" + ext
 		switch strings.ToLower(effectiveFormat) {
@@ -1166,17 +1270,29 @@ func (ui *UI) signCurrentFile() {
 			outPath = base + "_firmado.xsig"
 		}
 
-		if err := os.WriteFile(outPath, signature, 0644); err != nil {
-			ui.StatusMsg = "Error guardando el archivo firmado: " + err.Error()
-			ui.Window.Invalidate()
-			return
+		// Only save to disk if NOT in Server/Protocol mode (unless it's a temp file, but here we mean user output)
+		// Actually, standard Autofirma MIGHT save it to a temp path, but users complain about "Saved in..." message.
+		// If we are in Protocol mode, we usually don't want to persist the file in the input directory OR we want to suppress the message.
+		// BUT: The original logic replaced extension.
+
+		saveToDisk := true
+		if ui.IsServerMode || (ui.Protocol != nil) {
+			saveToDisk = false
+		}
+
+		if saveToDisk {
+			if err := os.WriteFile(outPath, signature, 0644); err != nil {
+				ui.StatusMsg = "Error guardando el archivo firmado: " + err.Error()
+				ui.Window.Invalidate()
+				return
+			}
 		}
 
 		// Handle Web Protocol Upload
 		if ui.Protocol != nil {
-			// Signal window to close immediately for "instant" feel
-			ui.ShouldClose = true
-			ui.Window.Invalidate()
+			// Signal window to close immediately for "instant" feel if it was a one-shot launch
+			// BUT if we are in WebSocket mode (server running), we don't want to close the whole app.
+			// However, for now, afirma://sign? one-shot is the primary use of ShouldClose.
 
 			log.Println("[UI] Attempting to upload signature to server...")
 
@@ -1184,13 +1300,59 @@ func (ui *UI) signCurrentFile() {
 			certDER := ui.Certs[ui.SelectedCert].Content
 			certB64 := base64.StdEncoding.EncodeToString(certDER)
 
-			err := ui.Protocol.UploadSignature(signatureB64, certB64)
-			if err != nil {
-				log.Printf("[UI] Upload failed: %v", err)
-				// We can't show error in UI because window is closed.
-				// Log is the only way.
+			// 1. Send to external callers (like WebSocket server)
+			res := SignatureResult{
+				SignatureB64: signatureB64,
+				CertDER:      ui.Certs[ui.SelectedCert].Content,
+			}
+
+			// Non-blocking send if possible, but for WebSocket flow we rely on this.
+			// The WebSocket server loop waits on this channel.
+			select {
+			case ui.SignatureDone <- res:
+				log.Println("[UI] Signature sent to internal channel (WebSocket listener).")
+			default:
+				log.Println("[UI] Warning: No listener on SignatureDone channel (not in WS mode or blocked?).")
+				// If we are strictly in server mode, we really should have a listener.
+				if ui.IsServerMode {
+					// Force send? Or just log warning.
+					// If we block here, we might freeze UI if server logic died.
+				}
+			}
+
+			// 2. Perform server upload only if legacy protocol parameters are present
+			// AND we are NOT prioritizing the WebSocket return channel logic above.
+			// Actually, legacy protocols (afirma://sign?...) might use HTTP upload via RTServlet/STServlet.
+			// WebSocket flows usually get the result back via the socket, NOT via upload.
+			// We check if we have Servlets defined.
+			isLegacyUpload := ui.Protocol.STServlet != "" || ui.Protocol.RTServlet != ""
+
+			if isLegacyUpload {
+				log.Println("[UI] Performing legacy HTTP upload...")
+				err := ui.Protocol.UploadSignature(signatureB64, certB64)
+				if err != nil {
+					log.Printf("[UI] Upload failed: %v", err)
+				} else {
+					log.Println("[UI] Upload successful.")
+				}
 			} else {
-				log.Println("[UI] Upload successful.")
+				log.Println("[UI] No STServlet/RTServlet, skipping legacy upload (assuming WebSocket return).")
+			}
+
+			// 3. Manage Window State
+			// If ServerMode (WebSocket), we DO NOT close. We reset state.
+			// If One-Shot Protocol (afirma://sign...), we close.
+			if ui.IsServerMode || (serverModeFlag != nil && *serverModeFlag) {
+				// Reset for next WS request
+				ui.Protocol = nil
+				ui.InputFile.SetText("")
+				ui.StatusMsg = "¡Firma completada! Esperando nueva solicitud..."
+				ui.IsSigning = false // IMPORTANT: Release lock
+				ui.Window.Invalidate()
+			} else {
+				// One-shot mode
+				ui.ShouldClose = true
+				ui.Window.Invalidate()
 			}
 
 			return

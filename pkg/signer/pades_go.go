@@ -78,7 +78,7 @@ func signPadesWithGo(inputFile, p12Path, p12Password string, options map[string]
 			DocMDPPerm: pdfsign.AllowFillingExistingFormFieldsAndSignaturesPerms,
 		},
 		Signer:            signer,
-		DigestAlgorithm:   crypto.SHA256,
+		DigestAlgorithm:   resolveDigestHash(options, crypto.SHA256),
 		Certificate:       cert,
 		CertificateChains: chains,
 	}
@@ -132,7 +132,7 @@ func signPadesWithWindowsStoreGo(inputFile string, certInfo *protocol.Certificat
 			DocMDPPerm: pdfsign.AllowFillingExistingFormFieldsAndSignaturesPerms,
 		},
 		Signer:          &windowsStorePadesSigner{thumbprint: thumbprint, publicKey: leaf.PublicKey},
-		DigestAlgorithm: crypto.SHA256,
+		DigestAlgorithm: resolveDigestHash(options, crypto.SHA256),
 		Certificate:     leaf,
 	}
 	applyPadesAppearanceOptions(&signData, options)

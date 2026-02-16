@@ -57,30 +57,110 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 	state := &ProtocolState{
 		IsActive:  true,
 		SourceURL: uriString,
-		Action:    u.Host,
+		Action:    normalizeProtocolAction(extractProtocolAction(u)),
 		Params:    q, // Keep all params
 	}
+	if state.Action == "" {
+		state.Action = normalizeProtocolAction(getQueryParam(q, "op", "operation", "action"))
+	}
 
-	state.FileID = q.Get("fileid")
+	state.FileID = getQueryParam(q, "fileid", "id", "fileId", "requestId")
 	state.RequestID = state.FileID
-	state.Key = q.Get("key")
-	state.RTServlet = q.Get("rtservlet")
 
-	if state.RTServlet == "" && state.FileID == "" {
-		return nil, fmt.Errorf("missing required parameters (rtservlet, fileid)")
+	state.Key = getQueryParam(q, "key", "cipherKey")
+
+	state.RTServlet = getQueryParam(q, "rtservlet", "retrieveservlet", "rtServlet", "retrieveServlet")
+
+	state.STServlet = getQueryParam(q, "stservlet", "storageservlet", "stServlet", "storageServlet")
+
+	state.SignFormat = getQueryParam(q, "format", "signFormat")
+
+	// Java protocol in WebSocket mode allows sign/cosign/countersign without
+	// servlet/id (servicesRequired=false) and resolves data through other flows.
+	// Also allows local interactive ops (save/load/selectcert/signandsave/batch).
+	// Keep strictness when absolutely no useful routing/session params are present.
+	if state.RTServlet == "" && state.STServlet == "" && state.FileID == "" {
+		switch normalizeProtocolAction(state.Action) {
+		case "sign", "cosign", "countersign":
+			if getQueryParam(q, "idsession", "idSession", "dat", "data", "ksb64", "properties") == "" {
+				return nil, fmt.Errorf("parámetros insuficientes en la solicitud (falta id, rtservlet o stservlet)")
+			}
+		case "save", "load", "selectcert", "signandsave", "batch":
+			// Allowed in WebSocket/local mode.
+		default:
+			return nil, fmt.Errorf("parámetros insuficientes en la solicitud (falta id, rtservlet o stservlet)")
+		}
 	}
 
 	if state.RTServlet == "" {
-		// Log warning but proceed, some flows might not strictly need it if data is otherwise available
-		// or will fail later at DownloadFile if really needed.
-		log.Printf("[Protocol] Warning: 'rtservlet' parameter is missing. Download might fail if implicit URL is not found.")
+		log.Printf("[Protocol] 'rtservlet' not provided. This might be a local file sign or session-based flow.")
 	}
 
 	return state, nil
 }
 
-// DownloadFile retrieves the file to sign
+func extractProtocolAction(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	action := strings.TrimSpace(u.Host)
+	if action != "" {
+		return action
+	}
+	path := strings.TrimSpace(u.Path)
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return ""
+	}
+	if i := strings.Index(path, "/"); i >= 0 {
+		path = path[:i]
+	}
+	return strings.TrimSpace(path)
+}
+
+func getQueryParam(q url.Values, keys ...string) string {
+	if q == nil || len(keys) == 0 {
+		return ""
+	}
+	for _, k := range keys {
+		if v := strings.TrimSpace(q.Get(k)); v != "" {
+			return v
+		}
+	}
+	for rawKey, vals := range q {
+		if len(vals) == 0 {
+			continue
+		}
+		for _, k := range keys {
+			if strings.EqualFold(strings.TrimSpace(rawKey), strings.TrimSpace(k)) {
+				v := strings.TrimSpace(vals[len(vals)-1])
+				if v != "" {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeProtocolAction(action string) string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "firmar":
+		return "sign"
+	case "cofirmar":
+		return "cosign"
+	case "contrafirmar", "contrafirmar_arbol", "contrafirmar_hojas":
+		return "countersign"
+	default:
+		return strings.ToLower(strings.TrimSpace(action))
+	}
+}
+
 func (p *ProtocolState) DownloadFile() (string, error) {
+	if p.RTServlet == "" {
+		log.Println("[Protocol] RTServlet is empty, skipping download.")
+		return "", nil // No error, just nothing to download
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Helper to attempt download
@@ -369,6 +449,16 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	// If p.Key is present, both parts must be Encrypted (then Base64 encoded)
 	// Separator is "|"
 
+	// Decode inputs to bytes for uniform processing
+	certBytes, err := base64.StdEncoding.DecodeString(certB64)
+	if err != nil {
+		return fmt.Errorf("invalid cert base64: %v", err)
+	}
+	sigBytes, err := base64.StdEncoding.DecodeString(signatureB64)
+	if err != nil {
+		return fmt.Errorf("invalid sig base64: %v", err)
+	}
+
 	var payload string
 	if p.Key != "" {
 		// Encryption required with specific AutoFirma format:
@@ -377,41 +467,12 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 
 		keyBytes := []byte(p.Key)
 
-		// Helper to encrypt and format
-		encryptAndFormat := func(data []byte) (string, error) {
-			padLen := (8 - (len(data) % 8)) % 8
-			// Pad with Zeros
-			if padLen > 0 {
-				padding := make([]byte, padLen)
-				data = append(data, padding...)
-			}
-
-			encBytes, err := encryptDES(data, keyBytes)
-			if err != nil {
-				return "", err
-			}
-
-			// Use URL Safe Base64
-			b64 := base64.URLEncoding.EncodeToString(encBytes)
-			return fmt.Sprintf("%d.%s", padLen, b64), nil
-		}
-
-		// 1. Decode inputs to bytes
-		certBytes, err := base64.StdEncoding.DecodeString(certB64)
-		if err != nil {
-			return fmt.Errorf("invalid cert base64: %v", err)
-		}
-		sigBytes, err := base64.StdEncoding.DecodeString(signatureB64)
-		if err != nil {
-			return fmt.Errorf("invalid sig base64: %v", err)
-		}
-
 		// 2. Encrypt both
-		encCertVal, err := encryptAndFormat(certBytes)
+		encCertVal, err := AutoFirmaEncryptAndFormat(certBytes, keyBytes)
 		if err != nil {
 			return fmt.Errorf("encrypt cert failed: %v", err)
 		}
-		encSigVal, err := encryptAndFormat(sigBytes)
+		encSigVal, err := AutoFirmaEncryptAndFormat(sigBytes, keyBytes)
 		if err != nil {
 			return fmt.Errorf("encrypt sig failed: %v", err)
 		}
@@ -419,16 +480,8 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		payload = encCertVal + "|" + encSigVal
 		log.Printf("[Protocol] Uploading Encrypted payload (Cert|Sig): %s", payload)
 	} else {
-		// Plain: Cert|Sig
-		// Note: Java might use URL Safe Base64 here too?
-		// NativeSignDataProcessor: dataToSend.append(Base64.encode(certEncoded, true)); (True = URL Safe usually)
-		// We safely assume URL Safe is better, or Standard.
-		// But UploadSignature mainly hit when Key is present (DGSFP uses keys).
-		// If no key, we keep as is or switch to URL Safe?
-		// Let's keep Standard for now as non-encrypted flows might differ,
-		// but given the Encryption path uses URL Safe, likely everything does.
-		// However, I don't want to break non-encrypted if it wasn't broken.
-		payload = certB64 + "|" + signatureB64
+		// Plain: Cert|Sig (AutoFirma usually uses URL Safe Base64 even without encryption)
+		payload = base64.URLEncoding.EncodeToString(certBytes) + "|" + base64.URLEncoding.EncodeToString(sigBytes)
 		log.Printf("[Protocol] Uploading Plain payload (Cert|Sig)")
 	}
 
@@ -585,44 +638,50 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 			return
 		}
 
-		// Check if the downloaded file is an AutoFirma XML request
-		content, err := os.ReadFile(path)
-		if err == nil && strings.HasPrefix(string(content), "<sign>") {
-			log.Printf("[Protocol] Detected AutoFirma XML request, parsing...")
-			// Parse XML to extract actual data AND update Protocol State (stservlet)
-			actualData, format, err := parseAutoFirmaXML(content, ui.Protocol)
-			if err != nil {
-				log.Printf("[Protocol] XML parsing failed: %v", err)
-				ui.StatusMsg = "Error parseando XML: " + err.Error()
-				ui.Window.Invalidate()
-				return
+		if path != "" {
+			// Check if the downloaded file is an AutoFirma XML request
+			content, err := os.ReadFile(path)
+			if err == nil && strings.HasPrefix(string(content), "<sign>") {
+				log.Printf("[Protocol] Detected AutoFirma XML request, parsing...")
+				// Parse XML to extract actual data AND update Protocol State (stservlet)
+				actualData, format, err := parseAutoFirmaXML(content, ui.Protocol)
+				if err != nil {
+					log.Printf("[Protocol] XML parsing failed: %v", err)
+					ui.StatusMsg = "Error parseando XML: " + err.Error()
+					ui.Window.Invalidate()
+					return
+				}
+				log.Printf("[Protocol] XML parsed successfully, format=%s, data size=%d", format, len(actualData))
+
+				// Store the format in protocol state
+				ui.Protocol.SignFormat = format
+
+				// Save the actual data to a new file
+				ext := ".bin"
+				if format == "PAdES" {
+					ext = ".pdf"
+				} else if format == "XAdES" {
+					ext = ".xml"
+				}
+
+				actualPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_data" + ext
+				if err := os.WriteFile(actualPath, actualData, 0644); err != nil {
+					ui.StatusMsg = "Error guardando datos: " + err.Error()
+					ui.Window.Invalidate()
+					return
+				}
+
+				path = actualPath
+				log.Printf("[Protocol] Extracted %s data from XML request (%d bytes)", format, len(actualData))
 			}
-			log.Printf("[Protocol] XML parsed successfully, format=%s, data size=%d", format, len(actualData))
-
-			// Store the format in protocol state
-			ui.Protocol.SignFormat = format
-
-			// Save the actual data to a new file
-			ext := ".bin"
-			if format == "PAdES" {
-				ext = ".pdf"
-			} else if format == "XAdES" {
-				ext = ".xml"
-			}
-
-			actualPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_data" + ext
-			if err := os.WriteFile(actualPath, actualData, 0644); err != nil {
-				ui.StatusMsg = "Error guardando datos: " + err.Error()
-				ui.Window.Invalidate()
-				return
-			}
-
-			path = actualPath
-			log.Printf("[Protocol] Extracted %s data from XML request (%d bytes)", format, len(actualData))
+			ui.InputFile.SetText(path)
+			ui.StatusMsg = "Documento descargado. Seleccione certificado y firme."
+		} else {
+			// No file downloaded (local file flow)
+			log.Println("[Protocol] No document downloaded. Waiting for manual selection.")
+			ui.StatusMsg = "Iniciado modo firma local web. Seleccione archivo y certificado."
 		}
 
-		ui.InputFile.SetText(path)
-		ui.StatusMsg = "Documento descargado. Seleccione certificado y firme."
 		ui.Mode = 0 // Ensure Sign mode
 		ui.Window.Invalidate()
 	}()
@@ -726,4 +785,23 @@ func encryptDES(plaintext []byte, key []byte) ([]byte, error) {
 	}
 
 	return ciphertext, nil
+}
+
+// AutoFirmaEncryptAndFormat encrypts and formats data following the Java AutoFirma pattern: [PaddingCount].[UrlSafeBase64(EncryptedData)]
+func AutoFirmaEncryptAndFormat(data []byte, keyBytes []byte) (string, error) {
+	padLen := (8 - (len(data) % 8)) % 8
+	// Pad with Zeros (standard AutoFirma Java behavior for DES ECB)
+	if padLen > 0 {
+		padding := make([]byte, padLen)
+		data = append(data, padding...)
+	}
+
+	encBytes, err := encryptDES(data, keyBytes)
+	if err != nil {
+		return "", err
+	}
+
+	// Use URL Safe Base64 WITH PADDING (AutoFirma Java pattern)
+	b64 := base64.URLEncoding.EncodeToString(encBytes)
+	return fmt.Sprintf("%d.%s", padLen, b64), nil
 }

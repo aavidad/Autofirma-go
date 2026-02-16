@@ -14,7 +14,7 @@ import (
 	"autofirma-host/pkg/protocol"
 )
 
-func signCadesDetachedOpenSSL(inputFile, p12Path, p12Password string) ([]byte, error) {
+func signCadesDetachedOpenSSL(inputFile, p12Path, p12Password string, options map[string]interface{}) ([]byte, error) {
 	certPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-cert-%d.pem", time.Now().UnixNano()))
 	keyPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-key-%d.pem", time.Now().UnixNano()))
 	outFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-cades-%d.p7s", time.Now().UnixNano()))
@@ -50,18 +50,22 @@ func signCadesDetachedOpenSSL(inputFile, p12Path, p12Password string) ([]byte, e
 		return nil, err
 	}
 
+	args := []string{
+		"openssl", "cms",
+		"-sign",
+		"-binary",
+		"-in", inputFile,
+		"-signer", certPEM,
+		"-inkey", keyPEM,
+		"-outform", "DER",
+		"-out", outFile,
+		"-md", resolveDigestName(options, "sha256"),
+	}
+	if strings.EqualFold(optionString(options, "mode", ""), "implicit") {
+		args = append(args, "-nodetach")
+	}
 	if _, err := runCommandWithRetry(
-		[]string{
-			"openssl", "cms",
-			"-sign",
-			"-binary",
-			"-in", inputFile,
-			"-signer", certPEM,
-			"-inkey", keyPEM,
-			"-outform", "DER",
-			"-out", outFile,
-			"-md", "sha256",
-		},
+		args,
 		timeout,
 		retries,
 		"openssl cms sign",

@@ -5,14 +5,19 @@
 package main
 
 import (
+	"autofirma-host/pkg/applog"
 	"autofirma-host/pkg/certstore"
+	"autofirma-host/pkg/protocol"
 	"autofirma-host/pkg/signer"
 	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -34,19 +39,38 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+var (
+	getSystemCertificatesFunc = certstore.GetSystemCertificates
+	selectCertDialogFunc      = protocolSelectCertDialog
+	saveDialogFunc            = protocolSaveDialog
+	loadDialogFunc            = protocolLoadDialog
+	signDataFunc              = signer.SignData
+	coSignDataFunc            = signer.CoSignData
+	counterSignDataFunc       = signer.CounterSignData
+	signPKCS1Func             = signer.SignPKCS1
+)
+
 type WebSocketServer struct {
 	ports    []int
+	session  string
 	conn     *websocket.Conn
 	connMux  sync.Mutex
 	ui       *UI
 	stopChan chan struct{}
 	storeMux sync.Mutex
 	store    map[string]string
+	stickyID string
+
+	serviceMux           sync.Mutex
+	serviceListener      net.Listener
+	serviceFragments     []string
+	serviceResponseParts []string
 }
 
-func NewWebSocketServer(ports []int, ui *UI) *WebSocketServer {
+func NewWebSocketServer(ports []int, sessionID string, ui *UI) *WebSocketServer {
 	return &WebSocketServer{
 		ports:    ports,
+		session:  strings.TrimSpace(sessionID),
 		ui:       ui,
 		stopChan: make(chan struct{}),
 		store:    make(map[string]string),
@@ -223,6 +247,12 @@ func (s *WebSocketServer) handleRetrieveService(w http.ResponseWriter, r *http.R
 }
 
 func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRemoteAddr(r.RemoteAddr) {
+		http.Error(w, "SAF_47: Peticion externa no permitida", http.StatusForbidden)
+		log.Printf("[WebSocket] Rejected external remote addr: %s", r.RemoteAddr)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[WebSocket] Upgrade error: %v", err)
@@ -258,7 +288,16 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		if strings.HasPrefix(msg, EchoRequestPrefix) {
 			// log.Printf("[WebSocket] Received echo: %s", msg)
 		} else {
-			log.Printf("[WebSocket] Received: %s", msg)
+			log.Printf("[WebSocket] Received: %s", applog.SanitizeURI(msg))
+		}
+
+		if s.session != "" {
+			msgSession := extractMessageSessionID(msg)
+			if msgSession == "" || msgSession != s.session {
+				_ = conn.WriteMessage(messageType, []byte("SAF_46: Id de sesion invalido"))
+				log.Printf("[WebSocket] Invalid session id (expected=%s got=%s)", applog.MaskID(s.session), applog.MaskID(msgSession))
+				continue
+			}
 		}
 
 		// LOGIC FROM AfirmaWebSocketServer.java:
@@ -284,7 +323,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 
 		// In Java: broadcast(ProtocolInvocationLauncher.launch(message, protocolVersion, true), ...)
 		// We implement that logic here:
-		log.Printf("[WebSocket] Processing afirma protocol request: %s", msg)
+		log.Printf("[WebSocket] Processing afirma protocol request: %s", applog.SanitizeURI(msg))
 		result := s.processProtocolRequest(msg)
 
 		// Send result back
@@ -292,7 +331,12 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 			log.Printf("[WebSocket] Write error: %v", err)
 			break
 		}
-		log.Printf("[WebSocket] Sent result: %s", result)
+		upper := strings.ToUpper(result)
+		log.Printf(
+			"[WebSocket] Sent result len=%d protocol_error=%t",
+			len(result),
+			strings.HasPrefix(upper, "SAF_") || strings.HasPrefix(upper, "ERR-"),
+		)
 	}
 }
 
@@ -301,13 +345,56 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 	// Using our ProtocolState logic which mimics ProtocolInvocationLauncher
 
 	// Basic check
-	if !strings.HasPrefix(uriString, "afirma://") {
-		return s.formatError("ERROR_INVALID_PROTOCOL", "URI must start with afirma://")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(uriString)), "afirma://") {
+		return s.formatError("ERROR_INVALID_PROTOCOL", "")
 	}
-
+	// Java treats service/websocket launch independently from the standard sign URI parser.
+	if u, perr := url.Parse(uriString); perr == nil {
+		action := normalizeProtocolAction(extractProtocolAction(u))
+		if action == "" {
+			action = normalizeProtocolAction(getQueryParam(u.Query(), "op", "operation", "action"))
+		}
+		if action == "service" || action == "websocket" {
+			state := &ProtocolState{
+				IsActive:  true,
+				SourceURL: uriString,
+				Action:    action,
+				Params:    u.Query(),
+			}
+			if action == "service" {
+				return s.processServiceRequest(state)
+			}
+			return s.processWebSocketLaunchRequest(state)
+		}
+	}
 	state, err := ParseProtocolURI(uriString)
 	if err != nil {
 		return s.formatError("ERROR_PARSING_URI", err.Error())
+	}
+	action := normalizeProtocolAction(state.Action)
+	switch action {
+	case "sign", "cosign", "countersign":
+		// Supported path in current Go implementation (single interactive signing flow).
+	case "selectcert":
+		return s.processSelectCertRequest(state)
+	case "save":
+		return s.processSaveRequest(state)
+	case "load":
+		return s.processLoadRequest(state)
+	case "signandsave":
+		return s.processSignAndSaveRequest(state)
+	case "batch":
+		return s.processBatchRequest(state)
+	case "service":
+		return s.processServiceRequest(state)
+	case "websocket":
+		return s.processWebSocketLaunchRequest(state)
+	default:
+		return s.formatError("ERROR_UNSUPPORTED_OPERATION", "Codigo de operacion no soportado")
+	}
+
+	if s.ui == nil {
+		return "SAF_09: Interfaz de firma no disponible"
 	}
 
 	// In Java: ProtocolInvocationLauncherSignAndSave.process(...)
@@ -343,60 +430,387 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 		state.SignFormat = format
 	}
 
-	// Read file to sign
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return s.formatError("ERROR_READING_FILE", err.Error())
-	}
-
-	// Get certificate (use first available for WebSocket mode)
-	// AutoFirma Java uses a UI selection dialog or defaults if pre-selected.
-	// We default to first system cert for now.
-	certs, err := certstore.GetSystemCertificates()
-	if err != nil || len(certs) == 0 {
-		return s.formatError("ERROR_NO_CERTIFICATES", "No certificates available")
-	}
-
-	certID := certs[0].ID
-
-	// Determine format
-	format := strings.ToLower(state.SignFormat)
+	// 4. Determine format
+	format := normalizeProtocolFormat(state.SignFormat)
 	if format == "" {
 		format = "cades" // Default fallback
 	}
 
-	// Sign
-	dataB64 := base64.StdEncoding.EncodeToString(data)
+	// 5. TRIGGER UI for user selection and signing
+	s.ui.Protocol = state
+	s.ui.InputFile.SetText(filePath)
+	s.ui.StatusMsg = "Solicitud de firma recibida. Seleccione su certificado."
+	s.ui.Window.Invalidate()
 
-	// Extract signature options if provided (for PDF)
-	var signatureOptions map[string]interface{}
+	// Wait for user to finish signing via UI
+	log.Printf("[WebSocket] Waiting for user signature via UI...")
+	s.ui.PendingWork.Add(1)
+	defer s.ui.PendingWork.Done()
+	sigResult := <-s.ui.SignatureDone
+	log.Printf("[WebSocket] Signature received from UI.")
 
-	signatureB64, err := signer.SignData(dataB64, certID, "", format, signatureOptions)
-	if err != nil {
-		return s.formatError("ERROR_SIGNING", err.Error())
-	}
+	sigBytes, _ := base64.StdEncoding.DecodeString(sigResult.SignatureB64)
 
-	// Decode signature back to bytes to handle flexible formatting if needed,
-	// but signer.SignData returns Base64.
-	// We need raw bytes for formatting if we were to re-encode or encrypt.
-	// But formatResponse takes bytes.
-	sigBytes, _ := base64.StdEncoding.DecodeString(signatureB64)
-
-	// Get the cert raw bytes (DER)
-	// We need to fetch the cert again by ID or keep it from before.
-	// Use the certificate object we already have
-	certObj := certs[0]
-
-	// Helper to encrypt/encode
-	resp, err := s.buildResponse(certObj.Content, sigBytes, state.Key)
+	// Helper to encrypt/encode depending on 'key' param
+	resp, err := s.buildResponse(sigResult.CertDER, sigBytes, state.Key)
 	if err != nil {
 		return s.formatError("ERROR_BUILD_RESP", err.Error())
 	}
 
+	// Reset UI Status
+	s.ui.StatusMsg = "¡Firma completada con éxito!"
+	s.ui.Window.Invalidate()
+
 	// Logging
-	log.Printf("[WebSocket] Returning format: Cert|Signature (len=%d)", len(resp))
+	log.Printf("[WebSocket] Returning result (len=%d)", len(resp))
 
 	return resp
+}
+
+func (s *WebSocketServer) processSelectCertRequest(state *ProtocolState) string {
+	certs, err := getSystemCertificatesFunc()
+	if err != nil {
+		return "SAF_08: Error accediendo al almacen de certificados"
+	}
+	if len(certs) == 0 {
+		return "SAF_19: No hay certificados disponibles"
+	}
+
+	resetSticky := parseBoolParam(getQueryParam(state.Params, "resetsticky", "resetSticky"))
+	sticky := parseBoolParam(getQueryParam(state.Params, "sticky"))
+	if resetSticky {
+		s.stickyID = ""
+		log.Printf("[WebSocket] selectcert resetsticky=true")
+	}
+	if sticky && s.stickyID != "" {
+		if stickyIdx := findCertificateIndexByID(certs, s.stickyID); stickyIdx >= 0 {
+			log.Printf("[WebSocket] selectcert sticky hit cert=%s", applog.MaskID(certs[stickyIdx].ID))
+			resp, err := buildSelectCertResponse(certs[stickyIdx].Content, state.Key)
+			if err != nil {
+				return "SAF_12: Error preparando respuesta de certificado"
+			}
+			return resp
+		}
+		log.Printf("[WebSocket] selectcert sticky miss cert=%s", applog.MaskID(s.stickyID))
+	}
+	filtered, filterOpts := applySelectCertFilters(certs, state)
+	log.Printf(
+		"[WebSocket] selectcert candidates total=%d filtered=%d auto_selection=%t sticky=%t",
+		len(certs),
+		len(filtered),
+		filterOpts.forceAutoSelection,
+		sticky,
+	)
+	if len(filtered) == 0 {
+		return "SAF_19: No hay certificados disponibles"
+	}
+
+	idx := findPreferredCertificateIndex(filtered)
+	if idx < 0 {
+		return "SAF_19: No hay certificados disponibles"
+	}
+
+	if s.ui != nil && !filterOpts.forceAutoSelection {
+		if !(sticky && s.stickyID != "" && findCertificateIndexByID(certs, s.stickyID) >= 0) {
+			chosenIdx, canceled, selErr := selectCertDialogFunc(filtered)
+			if canceled {
+				return "CANCEL"
+			}
+			if selErr != nil {
+				log.Printf("[WebSocket] selectcert dialog error: %v", selErr)
+				return "SAF_08: Error accediendo al almacen de certificados"
+			}
+			if chosenIdx < 0 || chosenIdx >= len(filtered) || len(filtered[chosenIdx].Content) == 0 {
+				return "SAF_19: No hay certificados disponibles"
+			}
+			idx = chosenIdx
+		}
+	}
+	if sticky && idx >= 0 && idx < len(filtered) {
+		s.stickyID = filtered[idx].ID
+		log.Printf("[WebSocket] selectcert sticky set cert=%s", applog.MaskID(s.stickyID))
+	}
+
+	resp, err := buildSelectCertResponse(filtered[idx].Content, state.Key)
+	if err != nil {
+		return "SAF_12: Error preparando respuesta de certificado"
+	}
+	return resp
+}
+
+func buildSelectCertResponse(certDER []byte, key string) (string, error) {
+	if len(certDER) == 0 {
+		return "", fmt.Errorf("empty certificate")
+	}
+	if strings.TrimSpace(key) == "" {
+		return base64.URLEncoding.EncodeToString(certDER), nil
+	}
+	return AutoFirmaEncryptAndFormat(certDER, []byte(key))
+}
+
+func (s *WebSocketServer) processSaveRequest(state *ProtocolState) string {
+	raw := getQueryParam(state.Params, "dat", "data")
+	if raw == "" {
+		return "SAF_05: No se han proporcionado datos para guardar"
+	}
+
+	data, err := decodeAutoFirmaB64(raw)
+	if err != nil {
+		return "SAF_03: Datos de guardado invalidos"
+	}
+
+	targetPath, err := buildSaveTargetPath(
+		getQueryParam(state.Params, "filename", "fileName"),
+		getQueryParam(state.Params, "exts", "extensions"),
+	)
+	if err != nil {
+		return "SAF_05: No se pudo determinar ruta de guardado"
+	}
+	if s.ui != nil {
+		selectedPath, canceled, selErr := saveDialogFunc(targetPath, getQueryParam(state.Params, "exts", "extensions"))
+		if canceled {
+			return "CANCEL"
+		}
+		if selErr != nil {
+			log.Printf("[WebSocket] save dialog error: %v", selErr)
+			return "SAF_05: No se pudo guardar el fichero"
+		}
+		if strings.TrimSpace(selectedPath) != "" {
+			targetPath = strings.TrimSpace(selectedPath)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "SAF_05: No se pudo crear carpeta de destino"
+	}
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		return "SAF_05: No se pudo guardar el fichero"
+	}
+
+	log.Printf("[WebSocket] save completed file=%s bytes=%d", targetPath, len(data))
+	return "SAVE_OK"
+}
+
+func decodeAutoFirmaB64(v string) ([]byte, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, fmt.Errorf("empty")
+	}
+	// Legacy web invocations may arrive with '+' converted to space after query parsing.
+	normalized := strings.ReplaceAll(v, " ", "+")
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.RawURLEncoding,
+	} {
+		out, err := enc.DecodeString(normalized)
+		if err == nil {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid base64")
+}
+
+func buildSaveTargetPath(filename string, exts string) (string, error) {
+	filename = strings.TrimSpace(filename)
+	exts = strings.TrimSpace(exts)
+	if filename == "" {
+		filename = "autofirma_guardado"
+	}
+	filename = filepath.Base(filename)
+	filename = strings.ReplaceAll(filename, "..", "_")
+	if filename == "." || filename == "" || filename == "/" {
+		filename = "autofirma_guardado"
+	}
+
+	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(filename)))
+	if ext == "" && exts != "" {
+		parts := strings.Split(exts, ",")
+		if len(parts) > 0 {
+			cand := strings.TrimSpace(parts[0])
+			cand = strings.TrimPrefix(cand, ".")
+			if cand != "" {
+				ext = "." + cand
+			}
+		}
+	}
+	if ext == "" {
+		ext = ".bin"
+	}
+	if filepath.Ext(filename) == "" {
+		filename += ext
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("home not available")
+	}
+	return filepath.Join(home, "Descargas", filename), nil
+}
+
+func (s *WebSocketServer) processLoadRequest(state *ProtocolState) string {
+	filePathRaw := getQueryParam(state.Params, "filePath", "filepath", "file", "fileName")
+
+	var paths []string
+	if s.ui != nil {
+		multiload := parseBoolParam(
+			getQueryParam(state.Params, "multiload", "multiLoad", "multiple", "multi"),
+		)
+		loadedPaths, canceled, loadErr := loadDialogFunc(filePathRaw, getQueryParam(state.Params, "exts", "extensions"), multiload)
+		if canceled {
+			return "CANCEL"
+		}
+		if loadErr != nil {
+			log.Printf("[WebSocket] load dialog error: %v", loadErr)
+			return "SAF_25: No se pudo cargar el fichero"
+		}
+		paths = loadedPaths
+	} else {
+		paths = splitLoadPaths(filePathRaw)
+	}
+
+	if len(paths) == 0 {
+		return "SAF_25: No se ha indicado la ruta del fichero"
+	}
+
+	items := make([]string, 0, len(paths))
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return "SAF_25: No se pudo cargar el fichero"
+		}
+		name := filepath.Base(p)
+		b64 := base64.URLEncoding.EncodeToString(data)
+		items = append(items, name+":"+b64)
+	}
+	return strings.Join(items, "|")
+}
+
+func findPreferredCertificateIndex(certs []protocol.Certificate) int {
+	for i := range certs {
+		if certs[i].CanSign && len(certs[i].Content) > 0 {
+			return i
+		}
+	}
+	for i := range certs {
+		if len(certs[i].Content) > 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+func findCertificateIndexByID(certs []protocol.Certificate, id string) int {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return -1
+	}
+	for i := range certs {
+		if certs[i].ID == id && len(certs[i].Content) > 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+func parseBoolParam(values ...string) bool {
+	for _, v := range values {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "si":
+			return true
+		}
+	}
+	return false
+}
+
+func splitLoadPaths(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, "|")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (s *WebSocketServer) processSignAndSaveRequest(state *ProtocolState) string {
+	raw := getQueryParam(state.Params, "dat", "data")
+	if raw == "" {
+		return "SAF_44: Operacion de firma sin datos"
+	}
+	data, err := decodeAutoFirmaB64(raw)
+	if err != nil {
+		return "SAF_30: Datos de firma invalidos"
+	}
+	if s.ui == nil {
+		return "SAF_09: Interfaz de firma no disponible"
+	}
+
+	format := getQueryParam(state.Params, "format", "signFormat")
+	if format == "" {
+		format = "CAdES"
+	}
+	format = normalizeProtocolFormat(format)
+	tmpExt := ".bin"
+	switch format {
+	case "pades":
+		tmpExt = ".pdf"
+	case "xades":
+		tmpExt = ".xml"
+	case "cades":
+		tmpExt = ".csig"
+	}
+	tmpFile, err := os.CreateTemp("", "autofirma-signandsave-*"+tmpExt)
+	if err != nil {
+		return "SAF_05: No se pudo preparar el fichero temporal"
+	}
+	tmpPath := tmpFile.Name()
+	_ = tmpFile.Close()
+	defer os.Remove(tmpPath)
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+		return "SAF_05: No se pudo preparar el fichero temporal"
+	}
+
+	s.ui.Protocol = &ProtocolState{
+		IsActive:   true,
+		Action:     "signandsave",
+		Params:     state.Params,
+		SignFormat: format,
+	}
+	s.ui.InputFile.SetText(tmpPath)
+	s.ui.StatusMsg = "Solicitud de firma y guardado recibida. Seleccione su certificado."
+	s.ui.Window.Invalidate()
+
+	log.Printf("[WebSocket] Waiting for user signature (signandsave) via UI...")
+	s.ui.PendingWork.Add(1)
+	defer s.ui.PendingWork.Done()
+	sigResult := <-s.ui.SignatureDone
+	log.Printf("[WebSocket] Signature received from UI (signandsave).")
+
+	sigBytes, err := base64.StdEncoding.DecodeString(sigResult.SignatureB64)
+	if err != nil {
+		return "SAF_09: Error al procesar la firma generada"
+	}
+
+	targetPath, err := buildSaveTargetPath(getQueryParam(state.Params, "filename", "fileName"), "")
+	if err != nil {
+		return "SAF_05: No se pudo determinar ruta de guardado"
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "SAF_05: No se pudo crear carpeta de destino"
+	}
+	if err := os.WriteFile(targetPath, sigBytes, 0o644); err != nil {
+		return "SAF_05: No se pudo guardar el fichero firmado"
+	}
+
+	log.Printf("[WebSocket] signandsave completed file=%s bytes=%d", targetPath, len(sigBytes))
+	return "SAVE_OK"
 }
 
 func (s *WebSocketServer) buildResponse(certDER []byte, sigBytes []byte, key string) (string, error) {
@@ -409,34 +823,82 @@ func (s *WebSocketServer) buildResponse(certDER []byte, sigBytes []byte, key str
 		// For now, let's try to reuse or implement locally.
 
 		// Move encrypt/decrypt to a utility if possible, but for this edit:
-		cCert, err := encryptDES(certDER, []byte(key))
+		keyBytes := []byte(key)
+		cCert, err := AutoFirmaEncryptAndFormat(certDER, keyBytes)
 		if err != nil {
 			return "", err
 		}
-
-		cSig, err := encryptDES(sigBytes, []byte(key))
+		cSig, err := AutoFirmaEncryptAndFormat(sigBytes, keyBytes)
 		if err != nil {
 			return "", err
 		}
-
-		// Return Base64 of Encrypted
-		// Java: this.cipher.cipher(data) -> returns Base64 string of encrypted data
-		// Our encryptDES returns bytes? Java's CipherData.cipher returns String (Base64).
-		// So:
-		return base64.StdEncoding.EncodeToString(cCert) + "|" + base64.StdEncoding.EncodeToString(cSig), nil
+		return cCert + "|" + cSig, nil
 	}
-
-	// No key -> Plain Base64
-	return base64.StdEncoding.EncodeToString(certDER) + "|" + base64.StdEncoding.EncodeToString(sigBytes), nil
+	// No key -> Plain URL Safe Base64 (Standard Java AutoFirma behavior)
+	return base64.URLEncoding.EncodeToString(certDER) + "|" + base64.URLEncoding.EncodeToString(sigBytes), nil
 }
 
 func (s *WebSocketServer) formatError(code string, message string) string {
-	// AutoFirma returns error messages often URL encoded or plain depending on context.
-	// But mostly "ERR-" prefix is what autoscript.js looks for in some versions,
-	// or simple strings.
-	// The autoscript.js we read handles "SAF_" as error prefix too.
-	// But "ERR-" is a safe bet standard.
-	return fmt.Sprintf("ERR-%s: %s", code, message)
+	// WebSocket protocol errors follow Java SAF_* family.
+	errCode := "SAF_03"
+	defaultMsg := "Parametros incorrectos"
+	switch code {
+	case "ERROR_INVALID_PROTOCOL":
+		errCode = "SAF_02"
+		defaultMsg = "Protocolo no soportado"
+	case "ERROR_PARSING_URI":
+		errCode = "SAF_03"
+		defaultMsg = "Parametros incorrectos"
+	case "ERROR_DOWNLOAD":
+		errCode = "SAF_16"
+		defaultMsg = "Error recuperando los datos"
+	case "ERROR_PARSING_XML":
+		errCode = "SAF_03"
+		defaultMsg = "Parametros incorrectos"
+	case "ERROR_SAVING_DATA":
+		errCode = "SAF_05"
+		defaultMsg = "Error guardando los datos"
+	case "ERROR_BUILD_RESP":
+		errCode = "SAF_12"
+		defaultMsg = "Error preparando la respuesta"
+	case "ERROR_UNSUPPORTED_OPERATION":
+		errCode = "SAF_04"
+		defaultMsg = "Codigo de operacion no soportado"
+	case "ERROR_SIGNATURE_FAILED":
+		errCode = "SAF_09"
+		defaultMsg = "Error en la operacion de firma"
+	case "ERROR_CANNOT_ACCESS_KEYSTORE":
+		errCode = "SAF_08"
+		defaultMsg = "Error accediendo al almacen de certificados"
+	case "ERROR_NO_CERTIFICATES_SYSTEM":
+		errCode = "SAF_10"
+		defaultMsg = "No hay certificados disponibles"
+	case "ERROR_NO_CERTIFICATES_KEYSTORE":
+		errCode = "SAF_19"
+		defaultMsg = "No hay certificados disponibles"
+	case "ERROR_LOCAL_BATCH_SIGN":
+		errCode = "SAF_20"
+		defaultMsg = "Error en firma local de lote"
+	case "ERROR_CONTACT_BATCH_SERVICE":
+		errCode = "SAF_26"
+		defaultMsg = "Error contactando servicio de lote"
+	case "ERROR_BATCH_SIGNATURE":
+		errCode = "SAF_27"
+		defaultMsg = "Error en firma de lote"
+	case "ERROR_CANNOT_OPEN_SOCKET":
+		errCode = "SAF_45"
+		defaultMsg = "No se pudo abrir el socket"
+	case "ERROR_INVALID_SESSION_ID":
+		errCode = "SAF_46"
+		defaultMsg = "Id de sesion invalido"
+	case "ERROR_EXTERNAL_REQUEST_TO_SOCKET":
+		errCode = "SAF_47"
+		defaultMsg = "Peticion externa no permitida"
+	}
+	if strings.TrimSpace(message) == "" {
+		message = defaultMsg
+	}
+	return errCode + ": " + message
 }
 
 func (s *WebSocketServer) Stop() {
@@ -446,4 +908,46 @@ func (s *WebSocketServer) Stop() {
 		s.conn.Close()
 	}
 	s.connMux.Unlock()
+	s.serviceMux.Lock()
+	if s.serviceListener != nil {
+		_ = s.serviceListener.Close()
+		s.serviceListener = nil
+	}
+	s.serviceMux.Unlock()
+}
+
+func extractMessageSessionID(message string) string {
+	lower := strings.ToLower(message)
+	idx := strings.Index(lower, "idsession=")
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len("idsession=")
+	end := strings.Index(message[start:], "&")
+	if end < 0 {
+		id := message[start:]
+		id = strings.TrimSuffix(id, "@EOF")
+		return strings.TrimSpace(id)
+	}
+	return strings.TrimSpace(message[start : start+end])
+}
+
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func parseProtocolVersion(v string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return 4
+	}
+	return n
 }

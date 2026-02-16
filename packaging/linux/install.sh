@@ -120,8 +120,15 @@ fi
 # Generate local certificates for the installing user (best effort).
 if [[ -n "${USER_NAME}" ]] && command -v runuser >/dev/null 2>&1; then
   runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
+  runuser -u "${USER_NAME}" -- env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
 else
   "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
+  env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+fi
+
+# System-wide trust (best effort, needs root)
+if [[ "$(id -u)" -eq 0 ]]; then
+  env AUTOFIRMA_TRUST_SKIP_NSS=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
 fi
 
 mkdir -p /usr/local/bin

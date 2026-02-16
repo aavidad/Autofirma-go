@@ -18,10 +18,15 @@ import (
 	"gioui.org/unit"
 )
 
+var (
+	serverModeFlag    = flag.Bool("server", false, "Run as WebSocket server on port 63117")
+	generateCertsFlag = flag.Bool("generate-certs", false, "Generate local TLS certificates and exit")
+	installTrustFlag  = flag.Bool("install-trust", false, "Install local Root CA into trust stores (Linux)")
+	trustStatusFlag   = flag.Bool("trust-status", false, "Print trust status of local Root CA (Linux)")
+)
+
 func main() {
 	// Parse command-line flags
-	serverMode := flag.Bool("server", false, "Run as WebSocket server on port 63117")
-	generateCerts := flag.Bool("generate-certs", false, "Generate local TLS certificates and exit")
 	flag.Parse()
 
 	// Setup logging
@@ -34,7 +39,7 @@ func main() {
 
 	log.Printf("Launched with args: %v", os.Args)
 
-	if *generateCerts {
+	if *generateCertsFlag {
 		certFile, keyFile, err := ensureLocalTLSCerts()
 		if err != nil {
 			log.Printf("Error generando certificados locales: %v", err)
@@ -44,8 +49,36 @@ func main() {
 		return
 	}
 
+	if *installTrustFlag {
+		if _, _, err := ensureLocalTLSCerts(); err != nil {
+			log.Printf("No se pudieron preparar certificados locales: %v", err)
+			os.Exit(1)
+		}
+		lines, err := installLocalTLSTrust()
+		for _, line := range lines {
+			log.Printf("%s", line)
+		}
+		if err != nil {
+			log.Printf("Fallo instalando confianza TLS local: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *trustStatusFlag {
+		lines, err := localTLSTrustStatus()
+		for _, line := range lines {
+			log.Printf("%s", line)
+		}
+		if err != nil {
+			log.Printf("Fallo comprobando confianza TLS local: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// WebSocket Server Mode
-	if *serverMode {
+	if *serverModeFlag {
 		log.Println("Starting in WebSocket server mode")
 		runWebSocketServer()
 		return
@@ -82,9 +115,10 @@ func runWebSocketServer() {
 	)
 
 	ui := NewUI(w)
+	ui.IsServerMode = true
 
 	// Start WebSocket server
-	server := NewWebSocketServer([]int{DefaultWebSocketPort}, ui)
+	server := NewWebSocketServer([]int{DefaultWebSocketPort}, "", ui)
 	if err := server.Start(); err != nil {
 		log.Fatalf("Failed to start WebSocket server: %v", err)
 	}
@@ -135,8 +169,9 @@ func loop(w *app.Window, ui *UI) error {
 			return e.Err
 		case app.FrameEvent:
 			// Check if we should close the window (e.g. after silent sign click)
-			if ui.ShouldClose {
-				log.Println("[Loop] ShouldClose flag set. Closing window.")
+			// But do NOT close if we are in server mode
+			if ui.ShouldClose && !ui.IsServerMode && !*serverModeFlag {
+				log.Println("[Loop] ShouldClose flag set and not in ServerMode. Closing window.")
 				return nil
 			}
 
@@ -171,6 +206,8 @@ func handleWebSocketLaunch(uriString string, ui *UI) {
 
 	params := PartsToValues(parts[1])
 	portsStr := params.Get("ports")
+	sessionID := params.Get("idsession")
+	version := parseProtocolVersion(params.Get("v"))
 
 	if portsStr == "" {
 		log.Println("[Launcher] No 'ports' parameter found via params.Get('ports')")
@@ -202,14 +239,19 @@ func handleWebSocketLaunch(uriString string, ui *UI) {
 		return
 	}
 
-	log.Printf("[Launcher] Starting WebSocket server on one of requested ports: %v", ports)
+	log.Printf("[Launcher] Starting WebSocket server on one of requested ports: %v (v=%d session=%s)", ports, version, maskSessionForLog(sessionID))
 
 	// Start server (async)
-	server := NewWebSocketServer(ports, ui)
+	server := NewWebSocketServer(ports, sessionID, ui)
 	if err := server.Start(); err != nil {
 		log.Printf("[Launcher] Failed to start WebSocket server via launch: %v", err)
 	} else {
 		log.Printf("[Launcher] WebSocket server launched successfully via protocol request")
+		// Enter minimalist mode
+		ui.IsServerMode = true
+		ui.Protocol = &ProtocolState{IsActive: true, Action: "websocket"}
+		ui.StatusMsg = "Servidor AutoFirma activo. Esperando solicitudes del navegador..."
+		ui.Window.Invalidate()
 	}
 }
 
@@ -231,4 +273,15 @@ func PartsToValues(query string) url.Values {
 		v.Add(key, val)
 	}
 	return v
+}
+
+func maskSessionForLog(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "-"
+	}
+	if len(v) <= 8 {
+		return v
+	}
+	return v[:4] + "..." + v[len(v)-2:]
 }

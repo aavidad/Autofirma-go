@@ -26,16 +26,23 @@ Antes de empezar, asegúrese de cumplir estos requisitos:
 
 ## 3. Instalación
 
-### En Linux
-1.  Descargue el paquete de instalación (`.zip` o `.tar.gz`) desde la página de versiones.
-2.  Descomprima el archivo.
-3.  Ejecute el script de instalación `install_desktop.sh` (si está disponible) o siga las instrucciones específicas de su distribución.
-4.  Reinicie su navegador.
+### En Linux (Recomendado)
+1.  Descargue el instalador de última versión (`AutofirmaDipgra-linux-installer.run`).
+2.  Abra una terminal y dé permisos de ejecución al archivo:
+    ```bash
+    chmod +x AutofirmaDipgra-linux-installer.run
+    ```
+3.  Ejecute el instalador (le pedirá la contraseña de administrador si es necesario):
+    ```bash
+    ./AutofirmaDipgra-linux-installer.run
+    ```
+4.  El instalador configurará automáticamente el protocolo `afirma://` y registrará el conector para sus navegadores instalados (Chrome, Firefox, Brave, Edge).
+5.  Reinicie su navegador para completar la integración.
 
 ### En Windows
-1.  Descargue el instalador `.exe` de la última versión (ej: `AutoFirma-Go-Setup.exe`).
+1.  Descargue el instalador `.exe` (ej: `AutofirmaDipgra-windows-installer.exe`).
 2.  Ejecute el archivo descargado y siga las instrucciones del asistente.
-3.  La aplicación quedará instalada en su menú de inicio y configurada automáticamente.
+3.  La aplicación se instalará y configurará el sistema automáticamente.
 
 ---
 

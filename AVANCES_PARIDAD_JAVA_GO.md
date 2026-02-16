@@ -1,0 +1,512 @@
+# Avances Paridad Java -> Go (AutoFirma)
+
+Fecha de inicio: 2026-02-16  
+Workspace: `/home/alberto/Trabajo/AutoFirma_Dipgra/autofirma_migracion/work/native-host-src`
+
+## Objetivo
+Alcanzar paridad funcional progresiva con la app Java de AutoFirma, con trazabilidad por bloques y sesiones.
+
+## Reglas de trabajo
+- Hacer cambios por partes pequeñas y verificables.
+- Tras cada cambio terminado: marcar checklist y añadir entrada en la bitácora.
+- No registrar secretos en texto plano (PIN, claves privadas, payloads completos).
+
+## Estado global
+- [ ] P0 - Estabilidad WebSocket y confianza TLS local
+- [ ] P1 - Compatibilidad completa de protocolo `afirma://`
+- [ ] P2 - Paridad de formatos de firma (CAdES/PAdES/XAdES avanzados)
+- [ ] P3 - Certificados/dispositivos (NSS, PKCS#11, DNIe, smartcards)
+- [ ] P4 - Packaging e integración sistema/navegadores
+- [ ] P5 - Pruebas E2E de regresión contra sedes reales
+
+## Checklist detallado
+
+### P0 - Estabilidad WebSocket y TLS
+- [x] Evitar cierre forzado del servidor WSS tras firma.
+- [x] Añadir comandos de trust local (`--install-trust`, `--trust-status`).
+- [x] Integrar trust en instalador Linux.
+- [x] Detectar NSS en rutas base (Firefox/Chromium).
+- [x] Añadir detección Snap/Flatpak para perfiles NSS.
+- [ ] Validar en navegador objetivo sin `unknown certificate authority`.
+
+### P1 - Protocolo `afirma://`
+- [x] Soporte alias de parámetros (`id/fileid`, `stservlet/storageservlet`, `rtservlet/retrieveservlet`).
+- [x] Flujo local sin `rtservlet` (selección manual de fichero).
+- [ ] Cobertura de variantes legacy pendientes de sedes.
+- [x] Matriz de errores/retornos alineada con Java en flujo WSS/`service` crítico.
+
+### P2 - Firma avanzada
+- [x] CAdES/PAdES/XAdES funcionales en baseline.
+- [ ] CAdES avanzada (atributos/cadena/paridad ASN.1 completa).
+- [ ] PAdES avanzada (políticas, sellos, LTV según alcance).
+- [ ] XAdES avanzada (perfiles y variantes requeridas por sede).
+
+### P3 - Certificados y dispositivos
+- [x] NSS Linux base.
+- [x] PKCS#11 base.
+- [ ] Robustez multi-token y errores PIN/CAN.
+- [ ] Cobertura ampliada de proveedores/entornos.
+
+### P4 - Packaging e integración
+- [x] Instalador Linux `.run` y bundle.
+- [x] Instalador Windows `.exe`.
+- [ ] Paridad completa de comportamiento postinst con Java (todos los navegadores/escenarios).
+
+### P5 - Validación E2E
+- [ ] Suite de regresión reproducible para web compat.
+- [ ] Casos de sedes reales con evidencias en logs saneados.
+- [ ] Criterios de salida por bloque (Go/No-Go).
+
+## Bitácora de avances
+
+### 2026-02-16
+- Creado este archivo de seguimiento de paridad Java->Go.
+- Se registran bloques P0..P5 y checklist inicial.
+- Estado inicial cargado con avances ya completados en sesiones previas.
+- Mejorada detección de NSS para Snap/Flatpak (Firefox/Chromium) en trust local.
+- Validación local con binario actualizado:
+  - `--trust-status` => `NSS OK` en `~/.pki/nssdb`
+  - `--trust-status` => `NSS OK` en perfil `~/snap/firefox/common/.mozilla/firefox/...`
+- Hallazgo operativo: los errores `tls: unknown certificate authority` vistos en logs corresponden a ejecuciones previas del binario instalado en `/opt`, antes de aplicar estas mejoras.
+- Inicio de P1 (compatibilidad protocolo):
+  - Normalizado formato de error de protocolo WebSocket a estilo Java `SAF_xx: ...`.
+  - Mapeo inicial aplicado:
+    - `ERROR_INVALID_PROTOCOL` -> `SAF_02`
+    - `ERROR_PARSING_URI` -> `SAF_03`
+    - `ERROR_DOWNLOAD` -> `SAF_16`
+    - `ERROR_SAVING_DATA` -> `SAF_05`
+    - `ERROR_BUILD_RESP` -> `SAF_12`
+    - `ERROR_UNSUPPORTED_OPERATION` -> `SAF_04`
+    - resto -> `SAF_03`
+  - Añadido test `TestFormatErrorReturnsJavaStyleSAF` en `cmd/gui/websocket_compat_test.go`.
+  - Sanitizado log de URIs `afirma://` en servidor WebSocket.
+  - Añadidos tests de parsing de URI para alias y mínimos requeridos:
+    - `cmd/gui/protocol_parse_test.go`
+  - Añadida matriz base de variantes y estado:
+    - `docs/AFIRMA_URI_MATRIX.md`
+  - `batch` ahora responde de forma explícita y controlada en WSS:
+    - `SAF_04: Codigo de operacion no soportado`
+  - Tests añadidos:
+    - `TestProcessProtocolRequestBatchReturnsSaf04`
+    - `TestProcessProtocolRequestNeedsUIForSign`
+  - Revisión directa de Java (`clienteafirma-master`) completada:
+    - referencia creada en `docs/JAVA_PARITY_REFERENCE.md`
+  - Ajustes de paridad WebSocket con Java:
+    - errores de protocolo WSS con prefijo `SAF_xx` (no `ERR-xx`)
+    - validación de `idsession` por mensaje
+    - rechazo de peticiones no loopback en WSS
+  - Test añadido:
+    - `TestExtractMessageSessionID`
+  - Dispatch explícito por operación `afirma://` en WSS:
+    - soportadas en este flujo: `sign`, `cosign`, `countersign`
+    - no soportadas (respuesta controlada `SAF_04`): `batch`, `service`, `websocket`
+  - `selectcert` en WSS implementado en básico:
+    - devuelve certificado (URL-safe Base64)
+    - si llega `key`, responde cifrado con formato AutoFirma
+    - en modo UI abre diálogo de selección y soporta cancelación (`CANCEL`)
+    - soporte `sticky/resetsticky` para reutilizar certificado entre llamadas
+    - soporte `properties` (base64) para filtros y auto-selección:
+      - `filter` / `filters` / `filters.N`
+      - filtros actuales: `subject.contains`, `issuer.contains`, `subject.rfc2254`, `issuer.rfc2254`, `issuer.rfc2254.recurse` (best-effort), `nonexpired`, `signingcert` (por `nonRepudiation/contentCommitment`), `thumbprint`, `encodedcert`, `policyid`, `keyusage.*`, `pseudonym:only`, `pseudonym:andothers`, `dnie`, `authcert`, `qualified` (serial + emparejado por emisor/SN/caducidad), `ssl` (serial + emparejado por emisor/SN/caducidad), `sscd`
+      - auto-selección sin diálogo con `headless=true` o `mandatoryCertSelection=false`
+    - trazas saneadas añadidas para depuración:
+      - total/filtrados por operación
+      - uso de sticky (hit/miss/set)
+      - sin exposición de datos sensibles
+  - `save` en WSS implementado en mínimo funcional:
+    - procesa `dat` en Base64 (std/url/raw)
+    - en modo UI abre diálogo de guardado (con cancelación `CANCEL`)
+    - sin UI guarda en `~/Descargas` con nombre saneado
+    - devuelve `SAVE_OK`
+  - `load` en WSS implementado en mínimo funcional:
+    - procesa `filePath` (y lista con `|`)
+    - en modo UI permite selección interactiva de ficheros (single/múltiple `multiload`) con cancelación (`CANCEL`)
+    - con UI abre siempre diálogo (paridad Java), usando `filePath/filepath` como ruta inicial
+    - devuelve `filename:dataB64` (múltiples separados por `|`)
+  - `signandsave` en WSS implementado en mínimo funcional:
+    - valida `dat` y dispara flujo interactivo de firma
+    - guarda firma resultante en `~/Descargas`
+    - devuelve `SAVE_OK`
+  - `sign` en WSS/protocolo: aplicación de `properties/extraParams` en la firma Go (paridad crítica):
+    - parseo de `properties` (base64 properties) + parámetros directos de la petición
+    - mapeo activo para PAdES visible/metadatos:
+      - `signReason` -> `reason`
+      - `signatureProductionCity` -> `location`
+      - `signerContact` -> `contactInfo`
+      - `tsaURL` -> `tsaURL`
+      - `signaturePage`/`page`
+      - `signaturePositionOnPageLowerLeftX/Y` + `UpperRightX/Y` -> `x/y/width/height` + `visibleSignature=true`
+    - prioridad de resolución: parámetros directos de petición sobre `properties`
+    - pruebas añadidas:
+      - `TestBuildProtocolSignOptionsFromProperties`
+      - `TestBuildProtocolSignOptionsParamsOverrideProperties`
+      - `TestMergeSignOptions`
+  - `sign` en WSS/protocolo: soporte de algoritmo de firma (`algorithm`) propagado al backend:
+    - parseo de `algorithm` en `properties` y parámetros directos
+    - resolución de digest para firma real:
+      - CAdES OpenSSL: `-md sha1|sha256|sha384|sha512`
+      - CAdES Windows Store: `CmsSigner.DigestAlgorithm` (OID según algoritmo)
+      - PAdES (Go y Windows Store): `DigestAlgorithm` dinámico en `pdfsign`
+    - soporte adicional:
+      - `mode=implicit` en CAdES OpenSSL -> `-nodetach`
+      - XAdES Go: hash de firma configurable por `algorithm` (SHA1/SHA256/SHA384/SHA512)
+    - tests añadidos:
+      - `pkg/signer/algorithm_options_test.go`
+  - `sign` en WSS/protocolo: expansión de `expPolicy` AGE (paridad con Java `ExtraParamsProcessor` parcial):
+    - soporte de `expPolicy=FirmaAGE|FirmaAGE19|FirmaAGE18`
+    - inyección automática de:
+      - `policyIdentifier`
+      - `policyQualifier`
+      - `policyIdentifierHashAlgorithm`
+      - `policyIdentifierHash` dependiente de formato (`CAdES/PAdES/XAdES`)
+    - test añadido:
+      - `TestBuildProtocolSignOptionsExpPolicyAGE18ByFormat`
+  - Robustez de parseo `properties` (compatibilidad integradores legacy):
+    - `properties` aceptado en base64 (previo), texto plano y URL-encoded
+    - soporte de saltos de línea escapados (`\\n`) en entrada no base64
+    - tests extendidos en `TestDecodeProtocolProperties`
+  - Normalización de formatos de firma (compatibilidad con alias Java/trifase):
+    - mapeo de aliases a formatos efectivos soportados:
+      - `CAdEStri`, `CAdES-ASiC-S(-tri)` -> `cades`
+      - `PAdEStri`, `PDF`, `PDFtri` -> `pades`
+      - `XAdEStri`, `XMLDSIG*` -> `xades`
+    - aplicado tanto en `cmd/gui` (flujo protocolo/web) como en `pkg/signer`
+    - tests añadidos:
+      - `cmd/gui/format_normalize_test.go`
+      - `pkg/signer/format_normalize_test.go`
+  - `batch` en WSS: soporte funcional de lote local JSON/XML (P1 crítico):
+    - habilitado `afirma://batch` en canal WSS cuando:
+      - `localBatchProcess=true`
+      - JSON: `jsonbatch=true`
+      - XML: `jsonbatch` ausente/false
+    - flujo implementado:
+      - obtención de lote por `dat` o descarga (`rtservlet`)
+      - decodificación robusta de `dat` (incluye `+` transportado como espacio en query)
+      - resolución de `datareference/datasource` en batch local:
+        - Base64 (std/url-safe)
+        - rutas locales (`/`, `./`, `../`)
+        - URI `file://`
+      - selección de certificado única (con sticky/resetsticky y filtros)
+      - firma de `singlesigns` con `stoponerror` (JSON/XML)
+      - estados Java por firma:
+        - `DONE_AND_SAVED`
+        - `ERROR_PRE`
+        - `SKIPPED`
+      - serialización de respuesta:
+        - JSON: `{"signs":[...]}`
+        - XML: `<?xml ...?><signs><signresult .../></signs>`
+      - lote trifásico JSON (avance parcial):
+        - `localBatchProcess=false` + `jsonbatch=true`
+        - llamada remota `pre` (`json` + `certs`) y `post` (`json` + `certs` + `tridata`)
+        - firma cliente de `PRE` -> `PK1` en Go (PKCS#1 RSA) por certificado seleccionado
+        - merge de resultados parciales de prefirma en `singlesigns` antes de `post`
+      - lote trifásico XML (avance parcial):
+        - `localBatchProcess=false` + `jsonbatch` ausente/false
+        - llamada remota `pre` (`xml` + `certs`) y `post` (`xml` + `certs` + `tridata`)
+        - parseo/serialización de `tridata` XML (`<xml><firmas><firma><param .../>...`)
+        - firma cliente de `PRE` -> `PK1` en Go (PKCS#1 RSA) por certificado seleccionado
+      - salida en Base64 estándar, con soporte de cifrado `key` y `needcert`
+    - pruebas añadidas:
+      - `TestProcessProtocolRequestBatchLocalJSONNeedsUI`
+      - `TestProcessProtocolRequestBatchLocalJSONSuccess`
+      - `TestProcessProtocolRequestBatchStopOnErrorMarksSkipped`
+      - `TestProcessProtocolRequestBatchLocalXMLSuccess`
+      - `TestProcessProtocolRequestBatchLocalXMLStopOnError`
+      - `TestResolveBatchDataReferenceFromFilePath`
+      - `TestResolveBatchDataReferenceUnsupportedScheme`
+      - `TestProcessProtocolRequestBatchRemoteJSONSuccess`
+      - `TestProcessProtocolRequestBatchRemoteJSONRequiresURLs`
+      - `TestProcessProtocolRequestBatchRemoteXMLSuccess`
+    - pendiente en batch:
+      - afinado fino final de casuística remota trifásica frente a sedes concretas
+    - `batch` en local: paridad de `suboperation` por elemento y global (avance crítico):
+    - dispatch real en Go por operación:
+      - `sign` -> firma monofásica actual
+      - `cosign` -> ruta específica de cofirma local
+      - `countersign` -> contrafirma CMS real CAdES en Go (atributo `counterSignature` sobre `SignerInfo`)
+    - normalización de alias de operación compatibles:
+      - `sign|firmar`
+      - `cosign|cofirmar`
+      - `countersign|contrafirmar|contrafirmar_arbol|contrafirmar_hojas`
+    - prioridad de resolución alineada con Java:
+      - `singlesign.suboperation` tiene prioridad sobre `signbatch.suboperation`
+      - si no se indica ninguna, por defecto `sign`
+    - cofirma CAdES local añadida en backend `pkg/signer` mediante OpenSSL (`cms -resign`).
+    - contrafirma CAdES real añadida en backend `pkg/signer`:
+      - construcción de `SignerInfo` de contrafirma
+      - inserción en atributo CMS `counterSignature` (`1.2.840.113549.1.9.6`) como unsigned attribute
+      - `messageDigest` calculado sobre `EncryptedDigest` del firmante objetivo
+      - soporte de `target` para contrafirma:
+        - `leafs` (por defecto) contrafirma solo hojas del árbol de firmas
+        - `tree` contrafirma todo el árbol (nodos y hojas)
+        - `signers` contrafirma firmantes concretos seleccionados por `targets`/`signers`
+          (selección por CN, Subject DN, número de serie o huella SHA-1)
+      - alineación de alcance con Java protocolo:
+        - en Java protocolario el uso efectivo estándar es `tree/leafs`; `nodes/signers` no se emplea por defecto.
+    - tests añadidos:
+      - `TestExecuteBatchSingleUsesGlobalSubOperationCosign`
+      - `TestExecuteBatchSingleEntrySubOperationOverridesGlobal`
+      - `TestExecuteBatchSingleUnsupportedSubOperation`
+      - `TestExecuteBatchSingleUsesCounterSignSubOperation`
+      - `TestCounterSignCadesDERAddsCounterSignatureAttr`
+      - `TestCounterSignCadesDERTargetLeafsOnlySignsLeaves`
+      - `TestCounterSignCadesDERTargetTreeSignsWholeTree`
+      - `TestCounterSignCadesDERTargetSignersByCN`
+  - `batch` trifásico remoto: afinado de matriz de errores (avance crítico):
+    - mapeo por HTTP status en `pre/post`:
+      - `400` -> `SAF_03`
+      - `4xx` -> `SAF_26`
+      - `5xx` -> `SAF_27`
+      - error de red/transporte -> `SAF_26`
+    - detección de errores de protocolo devueltos por servicio remoto:
+      - `SAF_xx` se propaga como error de protocolo
+      - `ERR-xx` se normaliza a `SAF_27`
+    - tests añadidos:
+      - `TestProcessProtocolRequestBatchRemoteJSONPre400ReturnsSaf03`
+      - `TestProcessProtocolRequestBatchRemoteJSONPre5xxReturnsSaf27`
+      - `TestProcessProtocolRequestBatchRemoteJSONPostErrProtocolReturnsSaf27`
+  - `service` / `websocket` en canal WSS:
+    - `afirma://service?...` soportado en modo compatibilidad de lanzador:
+      - respuesta `OK`
+      - validación de `ports`
+      - fijación de `idsession` si no estaba establecida
+    - `afirma://websocket?...` devuelve `OK` en canal WSS (ack de lanzamiento)
+    - tests añadidos:
+      - `TestProcessProtocolRequestServiceRequiresPorts`
+      - `TestProcessProtocolRequestServiceReturnsOK`
+      - `TestProcessProtocolRequestWebSocketReturnsOK`
+      - `TestParsePortsList`
+    - ampliado: modo socket TLS legado de `service` implementado (parcial avanzado):
+      - listener TLS en `127.0.0.1` sobre puertos solicitados
+      - procesamiento de comandos legacy:
+        - `echo=`
+        - `cmd=`
+        - `fragment=`
+        - `firm=`
+        - `send=`
+      - alineación de flujo legacy con Java:
+        - parseo de payload HTTP body (`POST`) y extracción robusta de `idsession`/`@EOF`
+        - lectura de socket alineada con Java:
+          - `READ_BUFFER_SIZE=2048`
+          - `BUFFERED_SECURITY_RANGE=36`
+          - `MAX_READING_BUFFER_TRIES=10` para evitar lecturas vacías indefinidas
+        - en `cmd=` y `firm=`:
+          - `save` mapeado a `SAVE_OK` / `CANCEL`
+          - errores de `save` mapeados a `SAF_03` (paridad con `IllegalArgumentException` Java)
+          - respuesta vacía no fatal en no-`save`: total de partes `"0"` (paridad Java)
+          - resto de operaciones devuelven número de partes y entrega posterior por `send=`
+        - rechazo de `afirma://service?...` dentro de `cmd=` (igual que Java)
+      - validación de `idsession` en canal legado
+      - respuesta HTTP con cuerpo Base64 URL-safe
+      - tests añadidos:
+        - `TestLegacyServiceSessionValidation`
+        - `TestLegacyServiceCmdFlow`
+        - `TestLegacyServiceFragmentFirmSendFlow`
+        - `TestLegacyServiceFragmentHTTPBodyFlow`
+        - `TestLegacyServiceCmdSaveErrorMapsToSaf03`
+        - `TestExtractLegacySessionID`
+        - `TestExtractLegacyPayload`
+        - `TestLegacyServiceUnsupportedCommandReturnsSaf03`
+        - `TestLegacyServiceFirmWithoutFragmentsReturnsSaf03`
+        - `TestLegacyServiceSendInvalidRangeReturnsSaf03`
+        - `TestLegacyServiceFragmentInvalidReturnsSaf03`
+        - `TestLegacyServiceCmdInvalidBase64ReturnsSaf03`
+        - `TestLegacyServiceCmdNonAfirmaURIReturnsSaf03`
+        - `TestLegacyServiceCmdServiceURIReturnsSaf03`
+    - estado: flujo `service` legacy operativo y alineado en rutas críticas Java (`echo/cmd/fragment/firm/send` + framing lectura)
+    - ajuste de paridad legacy:
+      - comando no reconocido en canal `service` legacy mapeado a `SAF_03` (parámetros incorrectos), en línea con gestión de errores Java.
+      - casos límite de `cmd/fragment/firm/send` mapeados a `SAF_03` y cubiertos por tests de regresión.
+    - corrección de código de error de apertura de socket:
+      - fallo de arranque `service` -> `SAF_45` (antes erróneamente `SAF_28`)
+  - Ajuste adicional de paridad WSS:
+    - cuando falta UI en operaciones de firma, se devuelve `SAF_09` (ya no `ERR-*`)
+  - Tests añadidos:
+    - `TestProcessProtocolRequestCosignUsesSignFlowAndNeedsUI`
+    - `TestProcessProtocolRequestUnsupportedOperationsReturnSaf04`
+    - `TestProcessProtocolRequestNeedsUIForSign` (`SAF_09` cuando no hay UI)
+    - `TestProcessProtocolRequestSignAndSaveWithoutDataReturnsSaf44`
+    - `TestBuildSelectCertResponsePlain`
+    - `TestBuildSelectCertResponseEncrypted`
+    - `TestDecodeAutoFirmaB64`
+    - `TestBuildSaveTargetPath`
+    - `TestProcessSaveRequestReturnsSaveOK`
+    - `TestSplitLoadPaths`
+    - `TestProcessLoadRequestSingle`
+    - `TestProcessLoadRequestCancelReturnsCancel`
+    - `TestProcessLoadRequestWithUIUsesDialogEvenWithFilePath`
+    - `TestProcessSaveRequestCancelReturnsCancel`
+    - `TestProcessSelectCertRequestCancelReturnsCancel`
+    - `TestProcessSelectCertRequestStickyReuse`
+    - `TestParseBoolParam`
+    - `TestDecodeProtocolProperties`
+    - `TestApplySelectCertFiltersSubjectContains`
+    - `TestProcessSelectCertRequestMandatorySelectionFalseSkipsDialog`
+    - `selectcert_filters_test.go`:
+      - `TestEvalRFC2254ExpressionBasic`
+      - `TestMatchesPolicyID`
+      - `TestMatchesKeyUsage`
+      - `TestMatchesPseudonymOnly`
+      - `TestMatchesDNIeAndAuthCert`
+      - `TestQualifiedFilterMatchesSerial`
+      - `TestSSLFilterMatchesSerial`
+      - `TestMatchesSSCD`
+      - `TestApplySelectCertFiltersPromotesDNIePairForSSL`
+      - `TestApplySelectCertFiltersQualifiedKeepsNonDNIeWithoutPair`
+      - `TestApplySelectCertFiltersPseudonymAndOthersDropsEquivalentNormal`
+      - `TestSigningCertFilterUsesNonRepudiationUsage`
+    - `TestProcessProtocolRequestLoadWithoutPathReturnsSaf25`
+  - Cierre adicional de matriz de errores WSS (alineación Java):
+    - ampliado mapeo `formatError` con códigos Java usados en protocolo:
+      - `ERROR_SIGNATURE_FAILED` -> `SAF_09`
+      - `ERROR_CANNOT_ACCESS_KEYSTORE` -> `SAF_08`
+      - `ERROR_NO_CERTIFICATES_SYSTEM` -> `SAF_10`
+      - `ERROR_NO_CERTIFICATES_KEYSTORE` -> `SAF_19`
+      - `ERROR_LOCAL_BATCH_SIGN` -> `SAF_20`
+      - `ERROR_CONTACT_BATCH_SERVICE` -> `SAF_26`
+      - `ERROR_BATCH_SIGNATURE` -> `SAF_27`
+      - `ERROR_CANNOT_OPEN_SOCKET` -> `SAF_45`
+      - `ERROR_INVALID_SESSION_ID` -> `SAF_46`
+      - `ERROR_EXTERNAL_REQUEST_TO_SOCKET` -> `SAF_47`
+    - tests añadidos/extendidos:
+      - `TestFormatErrorReturnsJavaStyleSAF` (nuevos códigos)
+      - `TestProcessProtocolRequestServiceStartErrorReturnsSaf45`
+    - homogeneización de textos canónicos de error en `formatError`:
+      - mensajes por defecto por código `SAF_xx` cuando no llega detalle
+      - `ERROR_INVALID_PROTOCOL` ahora devuelve mensaje canónico (`SAF_02: Protocolo no soportado`)
+    - test añadido:
+      - `TestProcessProtocolRequestInvalidProtocolReturnsSaf02CanonicalMessage`
+  - Documentación alineada con estado real:
+    - `P1 / Matriz de errores` marcado como completado para flujo WSS/`service` crítico.
+    - retirado pendiente obsoleto de contrafirma por elemento en `batch` local (ya implementado).
+  - Script de validación de código activo creado:
+    - `scripts/test_active_go.sh` (ejecuta tests en `./cmd/...` y `./pkg/...`, excluyendo ruido de `backups/`).
+  - Validación final de código activo ejecutada:
+    - `scripts/test_active_go.sh` -> `OK` (`cmd/gui`, `pkg/protocol`, `pkg/signer` en verde).
+  - `sign/cosign/countersign` en flujo protocolario UI:
+    - implementación de despacho real por operación (`protocolSignOperation`) en lugar de usar siempre `SignData`.
+    - `afirma://cosign` -> `CoSignData`
+    - `afirma://countersign` -> `CounterSignData`
+    - tests añadidos:
+      - `TestProtocolSignOperationDispatchSign`
+      - `TestProtocolSignOperationDispatchCoSign`
+      - `TestProtocolSignOperationDispatchCounterSign`
+    - validación:
+      - `go test ./cmd/gui/...` -> `OK`
+  - `properties/params` protocolarios (paridad de claves):
+    - normalización a claves canónicas internas para opciones avanzadas:
+      - `policyIdentifier*`, `policyQualifier`, `expPolicy`
+      - `precalculatedHashAlgorithm`, `signatureSubFilter`
+      - `target`, `targets`, `signers`
+    - impacto: `countersign` recibe correctamente selectores de firmantes desde URI/properties.
+    - tests añadidos:
+      - `TestBuildProtocolSignOptionsCanonicalizesCounterSignAndDigestKeys`
+  - Cobertura adicional de variantes legacy `afirma://`:
+    - parser con alias/case-insensitive en parámetros críticos:
+      - `fileid/id/fileId/requestId`
+      - `rtservlet/retrieveservlet/rtServlet/retrieveServlet`
+      - `stservlet/storageservlet/stServlet/storageServlet`
+      - `format/signFormat`
+      - `idsession/idSession`
+      - `ports/port/portsList`
+    - soporte de acción en `path` cuando no viene en host (`afirma:///sign`, `afirma:///websocket`, etc.).
+    - tests añadidos:
+      - `TestParseProtocolURI_AliasAndRequiredParams/legacy_camelCase_aliases_and_action_in_path`
+      - `TestProcessProtocolRequestWebSocketLegacyPathAndAliasParams`
+  - Compatibilidad adicional de esquema/acciones legacy:
+    - esquema `afirma://` ahora case-insensitive (acepta `AFIRMA://...`).
+    - alias de acción normalizados:
+      - `firmar` -> `sign`
+      - `cofirmar` -> `cosign`
+      - `contrafirmar[_arbol|_hojas]` -> `countersign`
+    - `service` legacy (`cmd=`/`firm=`) valida prefijos `service/save` de forma case-insensitive.
+    - tests añadidos:
+      - `TestProcessProtocolRequestUppercaseSchemeAccepted`
+      - `TestLegacyServiceCmdFlowUppercaseScheme`
+      - `TestProcessProtocolRequestSpanishActionAliasesNeedUI`
+      - `TestParseProtocolURI_AliasAndRequiredParams/legacy_action_alias_firmar_maps_to_sign`
+  - Compatibilidad de sesión (`idsession`) ampliada:
+    - extracción de sesión case-insensitive para `idsession`/`idSession` en:
+      - mensajes WSS (`extractMessageSessionID`)
+      - payload legacy service (`extractLegacySessionID`, lectura socket)
+    - evita falsos `SAF_46` cuando integradores usan `idSession`.
+    - tests añadidos:
+      - `TestExtractMessageSessionID` (casos `idSession`)
+      - `TestLegacyServiceSessionValidation` (case `idSession`)
+      - `TestExtractLegacySessionID` (case `idSession`)
+      - `TestReadLegacySocketPayloadExtractsCamelCaseSession`
+  - Fallback de acción por query:
+    - cuando URI no trae acción en host/path, se usa `op/operation/action`.
+    - compatibilidad añadida para patrones legacy tipo `afirma://?op=websocket...`.
+    - tests añadidos:
+      - `TestParseProtocolURI_AliasAndRequiredParams/action_from_query_op_fallback`
+      - `TestProcessProtocolRequestWebSocketActionInQueryOp`
+  - Compatibilidad de origen local en sockets:
+    - validación loopback ampliada para aceptar también `localhost` (además de `127.0.0.1`/`::1`) en WSS/service.
+    - test añadido:
+      - `TestIsLoopbackRemoteAddr`
+  - Robustez extra de parseo legacy `service`:
+    - `extractLegacyParam` ahora corta parámetros también con sufijos en camelCase (`idSession`) y variantes de mayúsculas/minúsculas de `@EOF`.
+    - evita fallos de parseo en `cmd/fragment/send` cuando integradores no usan `idsession` exacto.
+    - tests añadidos:
+      - `TestLegacyServiceCmdFlowCamelCaseSessionSuffix`
+      - `TestLegacyServiceFragmentAndSendWithCamelCaseSessionSuffix`
+  - Paridad fina `service/send` con Java:
+    - `send=@part@total` ahora valida índice de parte solicitado y no exige que `total` coincida con el número real de partes preparadas (comportamiento Java).
+    - test añadido:
+      - `TestLegacyServiceSendAllowsMismatchedTotalWhenPartExists`
+  - Robustez Base64 en flujos protocolarios/legacy:
+    - `decodeAutoFirmaB64` tolera `+` convertido en espacio (típico tras parseo query legacy).
+    - impacto: menos fallos espurios en `save/signandsave` y comandos `cmd/fragment` cuando integradores envían base64 sin escapar `+`.
+    - test añadido:
+      - `TestDecodeAutoFirmaB64AcceptsPlusAsSpace`
+  - Alias adicionales en operaciones WSS interactivas:
+    - `save`: soporte `data`, `fileName`, `extensions`.
+    - `load`: soporte `file` (además de `filePath/filepath`) y `extensions`.
+    - `signandsave`: soporte `data`, `signFormat`, `fileName`.
+    - `selectcert`: lectura de `resetsticky/resetSticky` con resolución homogénea.
+    - tests añadidos:
+      - `TestProcessSaveRequestAliasParamsReturnsSaveOK`
+      - `TestProcessLoadRequestAliasFileParam`
+      - `TestProcessSignAndSaveRequestAliasDataReturnsSaf09WithoutUI`
+  - Paridad de reintento en `service` legacy (`firm=`):
+    - si la respuesta ya estaba preparada (`toSend` en Java / `serviceResponseParts` en Go), `firm=` devuelve directamente el numero de partes sin reprocesar.
+    - evita discrepancias en reintentos del cliente JS.
+    - test añadido:
+      - `TestLegacyServiceFirmReturnsPreparedPartsCountOnRetry`
+  - Alias adicional en `load`:
+    - soporte de bandera `multi=true` (además de `multiload/multiLoad/multiple`) para activar selección múltiple en diálogo.
+    - test añadido:
+      - `TestProcessLoadRequestAliasMultiEnablesMultiLoad`
+  - Paridad de prioridad de comandos en `service` legacy:
+    - orden alineado con Java `CommandProcessorThread`: `cmd` > `echo` > `fragment` > `firm` > `send`.
+    - evita desvíos en peticiones mixtas donde aparezcan varios patrones.
+    - test añadido:
+      - `TestLegacyServiceCommandPriorityCmdOverEcho`
+  - Framing `service` más robusto:
+    - detección de fin de mensaje `@EOF` ahora case-insensitive también en lectura de socket (`@eof`).
+    - extracción de `idsession` ajustada para recortar `@eof` en minúsculas.
+    - test añadido:
+      - `TestReadLegacySocketPayloadLowercaseEOF`
+  - Parseo de comandos legacy tolerante a mayúsculas/minúsculas:
+    - detección de `cmd/echo/fragment/firm/send` por clave case-insensitive.
+    - test añadido:
+      - `TestLegacyServiceCmdUppercaseCommandName`
+    - tests adicionales:
+      - `TestLegacyServiceEchoUppercaseResetsState`
+      - `TestLegacyServiceUppercaseFragmentFirmSendFlow`
+
+## Próximo cambio (en curso)
+- P1 siguiente tramo: cerrar variantes legacy de `afirma://` usadas por sedes concretas.
+- Brecha detectada tras revisión Java:
+  - faltan aspectos avanzados de `selectcert` Java (casuística completa de pares en almacenes reales multi-cert de todos los proveedores y control completo de apertura de almacenes externos por UI).
+
+### 2026-02-17
+- Corregido bloqueo en `afirma://save` (flujo WebSocket interactivo):
+  - `ParseProtocolURI` ya permite operaciones locales sin `id/rtservlet/stservlet` para `save`, `load`, `selectcert`, `signandsave` y `batch`.
+  - Se mantiene validación estricta para `sign/cosign/countersign` cuando no llegan parámetros mínimos de sesión/datos (`idsession`/`dat`/`ksb64`/`properties`).
+- Añadida cobertura en tests de parser:
+  - `cmd/gui/protocol_parse_test.go`: caso `websocket save without servlets is allowed`.
+- Validación ejecutada:
+  - `GOCACHE=/tmp/go-build go test ./cmd/gui -run TestParseProtocolURI_AliasAndRequiredParams -v` OK.
+  - `GOCACHE=/tmp/go-build go test ./cmd/gui/...` OK.

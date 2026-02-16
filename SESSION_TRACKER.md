@@ -68,3 +68,19 @@ Conseguir compatibilidad operativa con flujo de sede usando protocolo `afirma://
 ## Backups importantes
 - Full backup:
   - `/home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/backups/native-host-src_full_20260213_140342`
+- [X] Fix: Protocol sign requests now support manual file selection in minimalist mode.
+- [X] Fix: WebSocket requests now bridge to the UI for cert selection.
+- [X] Fix: Correctly handling multiple protocol URI aliases (id, stservlet, etc).
+- [x] Task: Investigate system-wide trust for the local WebSocket TLS certificate on Linux.
+
+## Avance sesion 2026-02-16
+- [x] Añadidos flags GUI para TLS local:
+  - `--install-trust`
+  - `--trust-status`
+- [x] Instalacion de confianza Linux implementada:
+  - NSS usuario (Chrome/Chromium y perfiles Firefox detectados)
+  - sistema (con root) via `update-ca-certificates` o `update-ca-trust`
+- [x] Instalador Linux actualizado para aplicar confianza:
+  - usuario (`AUTOFIRMA_TRUST_SKIP_SYSTEM=1`)
+  - sistema en ejecucion root (`AUTOFIRMA_TRUST_SKIP_NSS=1`)
+- [x] Guia web compat actualizada (`docs/WEB_COMPAT_TEST.md`) con pasos de confianza TLS.

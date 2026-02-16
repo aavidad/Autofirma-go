@@ -6,6 +6,9 @@ Directorio de trabajo aislado:
 ## 1) Arrancar servidor WebSocket seguro local
 ```bash
 cd /home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/work/native-host-src
+./autofirma-desktop --generate-certs
+./autofirma-desktop --install-trust
+./autofirma-desktop --trust-status
 ./scripts/run_web_compat_server.sh start
 ./scripts/run_web_compat_server.sh status
 ```
@@ -25,7 +28,7 @@ Pasos:
 2. Abrir la URL en navegador.
 3. Si el navegador bloquea el certificado local, abrir una vez:
    - `https://127.0.0.1:63117/`
-   y aceptar excepción de certificado.
+   y aceptar excepción de certificado (solo si `--trust-status` no aparece como `OK`).
 4. Inyectar `scripts/inject_webservice_compat.js` en consola del navegador.
 5. Pulsar "Firmar" y revisar respuesta.
 

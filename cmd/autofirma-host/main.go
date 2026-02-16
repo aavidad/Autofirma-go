@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,7 @@ func main() {
 			log.Printf("Error reading native message: %v", err)
 			break
 		}
+		log.Printf("[Host] Native message received: %s", applog.BytesMeta("payload", payload))
 
 		responses := handleMessage(payload)
 		for _, resp := range responses {
@@ -106,12 +108,24 @@ func errorResponse(reqID, msg string) protocol.Response {
 func handleMessage(data []byte) [][]byte {
 	var req protocol.Request
 	if err := json.Unmarshal(data, &req); err != nil {
+		log.Printf("[Host] Invalid JSON request: %s err=%v", applog.BytesMeta("payload", data), err)
 		resp := errorResponse("", "Invalid request format")
 		encoded, _ := json.Marshal(resp)
 		return [][]byte{encoded}
 	}
 
 	reqID := normalizeRequestID(req.RequestID)
+	log.Printf("[Host] Request: id=%s action=%s cert=%s format=%s pin_set=%t opts=%s data=%s orig=%s sig=%s",
+		applog.MaskID(reqID),
+		req.Action,
+		applog.MaskID(req.CertificateID),
+		req.Format,
+		strings.TrimSpace(req.PIN) != "",
+		applog.OptionKeys(req.SignatureOptions),
+		applog.SecretMeta("data", req.Data),
+		applog.SecretMeta("originalData", req.OriginalData),
+		applog.SecretMeta("signatureData", req.SignatureData),
+	)
 	resp := protocol.Response{
 		RequestID: reqID,
 		Chunk:     0,
@@ -159,11 +173,16 @@ func handleMessage(data []byte) [][]byte {
 
 	if len(resp.Signature) <= signatureChunkSize {
 		encoded, _ := json.Marshal(resp)
+		log.Printf("[Host] Response: id=%s action=%s success=%t err=%q certs=%d signature=%s chunking=single",
+			applog.MaskID(reqID), req.Action, resp.Success, resp.Error, len(resp.Certificates),
+			applog.SecretMeta("signature", resp.Signature))
 		return [][]byte{encoded}
 	}
 
 	totalLen := len(resp.Signature)
 	totalChunks := (totalLen + signatureChunkSize - 1) / signatureChunkSize
+	log.Printf("[Host] Response chunking: id=%s action=%s success=%t total_signature_len=%d total_chunks=%d",
+		applog.MaskID(reqID), req.Action, resp.Success, totalLen, totalChunks)
 	parts := make([][]byte, 0, totalChunks)
 	for i := 0; i < totalChunks; i++ {
 		start := i * signatureChunkSize
