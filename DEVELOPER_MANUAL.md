@@ -149,4 +149,4 @@ tail -f ~/.cache/autofirma-host/autofirma-host.log
 
 ---
 
-**Autor**: Equipo de Desarrollo - Diputación de Granada
+**Autor**: Equipo de Desarrollo - Oficina de Software Diputación de Granada

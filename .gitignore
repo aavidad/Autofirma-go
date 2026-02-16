@@ -2,8 +2,8 @@
 autofirma-desktop
 autofirma-host*
 autofirma-web-compat
-gui
-gui.exe
+/gui
+/gui.exe
 *.exe
 *.zip
 *.tar.gz
@@ -39,4 +39,3 @@ testdata/
 
 # Logs
 *.log
-EOF
