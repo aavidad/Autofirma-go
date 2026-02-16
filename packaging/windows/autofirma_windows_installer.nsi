@@ -39,6 +39,7 @@ Section "Install"
   SetRegView 64
   SetOutPath "$INSTDIR"
   File /r "${BUNDLE_DIR}/*"
+  ExecWait '"$INSTDIR\autofirma-desktop.exe" --generate-certs'
 
   ; Main executable
   WriteRegStr HKLM "Software\${COMPANY}\${APPNAME}" "Install_Dir" "$INSTDIR"

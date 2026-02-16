@@ -21,6 +21,7 @@ import (
 func main() {
 	// Parse command-line flags
 	serverMode := flag.Bool("server", false, "Run as WebSocket server on port 63117")
+	generateCerts := flag.Bool("generate-certs", false, "Generate local TLS certificates and exit")
 	flag.Parse()
 
 	// Setup logging
@@ -32,6 +33,16 @@ func main() {
 	}
 
 	log.Printf("Launched with args: %v", os.Args)
+
+	if *generateCerts {
+		certFile, keyFile, err := ensureLocalTLSCerts()
+		if err != nil {
+			log.Printf("Error generando certificados locales: %v", err)
+			os.Exit(1)
+		}
+		log.Printf("Certificados locales listos: cert=%s key=%s", certFile, keyFile)
+		return
+	}
 
 	// WebSocket Server Mode
 	if *serverMode {

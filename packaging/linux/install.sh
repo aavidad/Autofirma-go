@@ -19,6 +19,13 @@ mkdir -p "${PREFIX}"
 cp -a "${APP_SRC}/." "${PREFIX}/"
 chmod +x "${PREFIX}/autofirma-desktop"
 
+# Generate local certificates for the installing user (best effort).
+if [[ -n "${SUDO_USER:-}" ]] && command -v runuser >/dev/null 2>&1; then
+  runuser -u "${SUDO_USER}" -- "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
+else
+  "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
+fi
+
 mkdir -p /usr/local/bin
 ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
 

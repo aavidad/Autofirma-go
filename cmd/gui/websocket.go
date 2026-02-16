@@ -82,16 +82,13 @@ func (s *WebSocketServer) Start() error {
 		return fmt.Errorf("failed to bind to any of the requested ports: %v", s.ports)
 	}
 
+	certFile, keyFile, err := ensureLocalTLSCerts()
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("failed to prepare local TLS certificates: %w", err)
+	}
+
 	go func() {
-		// Use TLS for WSS
-		certFile := "server.crt"
-		keyFile := "server.key"
-
-		// Load keys for TLS config to use with Serve
-		// We use http.ServeTLS on the listener
-		// Note: http.Serve(ln) is for plaintext. We need ServeTLS with files or config.
-		// Since we have files, we can use a server with TLSConfig.
-
 		// Setup HTTPS server
 		srv := &http.Server{
 			Handler: mux,
