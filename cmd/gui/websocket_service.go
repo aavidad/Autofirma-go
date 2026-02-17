@@ -143,7 +143,7 @@ func (s *WebSocketServer) getServiceProtocolVersion() int {
 func parsePortsList(raw string) ([]int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, fmt.Errorf("empty")
+		return nil, fmt.Errorf("vacío")
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]int, 0, len(parts))

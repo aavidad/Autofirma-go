@@ -198,7 +198,7 @@ func handleMessage(data []byte) [][]byte {
 
 		encoded, err := json.Marshal(chunkResp)
 		if err != nil {
-			fallback, _ := json.Marshal(errorResponse(reqID, "Internal chunking error"))
+			fallback, _ := json.Marshal(errorResponse(reqID, "Error interno de fragmentación"))
 			return [][]byte{fallback}
 		}
 		parts = append(parts, encoded)

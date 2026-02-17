@@ -340,7 +340,7 @@ func signCadesWithWindowsStore(data []byte, thumbprint string, options map[strin
 		[]string{"powershell", "-NoProfile", "-NonInteractive", "-Command", ps},
 		timeout,
 		retries,
-		"SignedCms fallback",
+		"respaldo SignedCms",
 	)
 	if err != nil {
 		return nil, err

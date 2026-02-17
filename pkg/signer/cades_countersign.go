@@ -474,7 +474,7 @@ func mustParseOID(s string) asn1.ObjectIdentifier {
 func decodeAutoFirmaB64Local(v string) ([]byte, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return nil, fmt.Errorf("empty")
+		return nil, fmt.Errorf("vacío")
 	}
 	for _, enc := range []*base64.Encoding{
 		base64.StdEncoding,

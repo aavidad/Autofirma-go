@@ -417,7 +417,7 @@ func selectLeafForSigner(certs []*x509.Certificate, signer crypto.Signer) *x509.
 
 func buildCertChains(leaf *x509.Certificate, certs []*x509.Certificate) ([][]*x509.Certificate, error) {
 	if leaf == nil {
-		return nil, fmt.Errorf("leaf certificate missing")
+		return nil, fmt.Errorf("falta certificado hoja")
 	}
 	if len(certs) <= 1 {
 		return nil, nil

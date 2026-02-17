@@ -838,7 +838,7 @@ func (s *WebSocketServer) processSaveRequest(state *ProtocolState) string {
 func decodeAutoFirmaB64(v string) ([]byte, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return nil, fmt.Errorf("empty")
+		return nil, fmt.Errorf("vacío")
 	}
 	// Legacy web invocations may arrive with '+' converted to space after query parsing.
 	normalized := strings.ReplaceAll(v, " ", "+")
@@ -888,7 +888,7 @@ func buildSaveTargetPath(filename string, exts string) (string, error) {
 
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
-		return "", fmt.Errorf("home not available")
+		return "", fmt.Errorf("home no disponible")
 	}
 	return filepath.Join(home, "Descargas", filename), nil
 }

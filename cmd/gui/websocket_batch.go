@@ -99,7 +99,7 @@ type batchCircuitOpenError struct {
 
 func (e *batchHTTPError) Error() string {
 	if e == nil {
-		return "http error"
+		return "error http"
 	}
 	if strings.TrimSpace(e.Body) == "" {
 		return fmt.Sprintf("http status %d", e.StatusCode)
@@ -788,7 +788,7 @@ func extractBatchAlgorithm(rawBatch []byte) string {
 
 func signTriphaseData(td *triphaseDataResponse, certID, algorithm string, signOptions map[string]interface{}, perSignOptions map[string]map[string]interface{}) (*triphaseDataRequest, error) {
 	if td == nil {
-		return nil, fmt.Errorf("nil")
+		return nil, fmt.Errorf("nulo")
 	}
 	out := &triphaseDataRequest{
 		Format:   strings.TrimSpace(td.Format),
@@ -801,7 +801,7 @@ func signTriphaseData(td *triphaseDataResponse, certID, algorithm string, signOp
 		}
 		preB64 := strings.TrimSpace(params["PRE"])
 		if preB64 == "" {
-			return nil, fmt.Errorf("missing PRE")
+		return nil, fmt.Errorf("falta PRE")
 		}
 		preData, err := decodeAutoFirmaB64(strings.ReplaceAll(preB64, " ", "+"))
 		if err != nil {
@@ -848,7 +848,7 @@ func signTriphaseDataXML(rawTD []byte, certID, algorithm string, signOptions map
 			}
 		}
 		if preB64 == "" {
-			return nil, fmt.Errorf("missing PRE")
+			return nil, fmt.Errorf("falta PRE")
 		}
 		preData, err := decodeAutoFirmaB64(strings.ReplaceAll(preB64, " ", "+"))
 		if err != nil {
@@ -1104,7 +1104,7 @@ func resolveBatchOperation(singleOp, globalOp string) (string, string, error) {
 func resolveBatchDataReference(ref string) ([]byte, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return nil, fmt.Errorf("empty")
+		return nil, fmt.Errorf("vacío")
 	}
 	if decoded, err := decodeAutoFirmaB64(strings.ReplaceAll(ref, " ", "+")); err == nil {
 		return decoded, nil

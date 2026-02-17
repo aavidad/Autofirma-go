@@ -383,7 +383,7 @@ func (s *WebSocketServer) checkLegacySessionIDValue(got string) error {
 		return nil
 	}
 	if got == "" {
-		return fmt.Errorf("missing")
+		return fmt.Errorf("faltante")
 	}
 	if got != expected {
 		return fmt.Errorf("mismatch")

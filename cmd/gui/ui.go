@@ -1861,11 +1861,11 @@ func readRecentSanitizedLogLines(path string, maxLines int) []string {
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return []string{"log_unavailable"}
+		return []string{"log_no_disponible"}
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return []string{"log_open_error=" + err.Error()}
+		return []string{"log_error_apertura=" + err.Error()}
 	}
 	defer f.Close()
 
@@ -1879,10 +1879,10 @@ func readRecentSanitizedLogLines(path string, maxLines int) []string {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return []string{"log_scan_error=" + err.Error()}
+		return []string{"log_error_lectura=" + err.Error()}
 	}
 	if len(rawTail) == 0 {
-		return []string{"log_empty"}
+		return []string{"log_vacio"}
 	}
 
 	relevant := make([]string, 0, len(rawTail))

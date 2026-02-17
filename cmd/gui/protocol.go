@@ -722,10 +722,10 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 // SendWaitSignal sends Java-compatible active wait marker to storage servlet.
 func (p *ProtocolState) SendWaitSignal() error {
 	if p == nil {
-		return fmt.Errorf("protocol state is nil")
+		return fmt.Errorf("estado de protocolo nulo")
 	}
 	if p.STServlet == "" {
-		return fmt.Errorf("storage servlet is empty")
+		return fmt.Errorf("storage servlet vacío")
 	}
 	if p.RequestID == "" {
 		return fmt.Errorf("request id vacío")

@@ -322,7 +322,7 @@ func extractSignatureCertificate(root *etree.Element) (*x509.Certificate, error)
 		}
 	})
 	if certB64 == "" {
-		return nil, fmt.Errorf("x509certificate missing")
+		return nil, fmt.Errorf("falta x509certificate")
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(certB64))
 	if err != nil {
