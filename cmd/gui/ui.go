@@ -2691,11 +2691,13 @@ func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	dnsPublicOK := false
 	if _, err := net.DefaultResolver.LookupHost(ctx, "cloudflare.com"); err != nil {
 		lines = append(lines, "dns_publico=ERROR")
 		raise(diagLevelWarn, "Fallo de resolución DNS. Revisa servidor DNS configurado.")
 	} else {
 		lines = append(lines, "dns_publico=OK")
+		dnsPublicOK = true
 	}
 
 	publicTargets := []string{"1.1.1.1:53", "8.8.8.8:53"}
@@ -2712,6 +2714,9 @@ func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
 	if !publicOK {
 		lines = append(lines, "salida_internet=ERROR")
 		raise(diagLevelWarn, "No hay salida TCP a Internet (puerto 53). Revisa red/proxy/firewall.")
+	}
+	if !dnsPublicOK && !publicOK {
+		raise(diagLevelError, "No hay conectividad externa funcional (DNS y salida TCP fallan). Revisa conexión de red antes de firmar.")
 	}
 
 	if state != nil {
@@ -2744,7 +2749,11 @@ func defaultGatewayIPv4() string {
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(string(data), "\n")
+	return parseDefaultGatewayFromProcRoute(string(data))
+}
+
+func parseDefaultGatewayFromProcRoute(raw string) string {
+	lines := strings.Split(raw, "\n")
 	for i := 1; i < len(lines); i++ {
 		fields := strings.Fields(lines[i])
 		if len(fields) < 3 {
