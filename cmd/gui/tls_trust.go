@@ -6,6 +6,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,11 +23,6 @@ const localRootCANickname = "Autofirma Dipgra Local Root CA"
 
 func installLocalTLSTrust() ([]string, error) {
 	lines := []string{}
-	if runtime.GOOS != "linux" {
-		lines = append(lines, "[Trust] Instalacion de confianza automatica disponible solo en Linux.")
-		return lines, nil
-	}
-
 	rootCAPath, err := localRootCACertPath()
 	if err != nil {
 		return lines, err
@@ -32,6 +31,17 @@ func installLocalTLSTrust() ([]string, error) {
 		return lines, fmt.Errorf("no existe CA local en %s (ejecute --generate-certs)", rootCAPath)
 	}
 	lines = append(lines, fmt.Sprintf("[Trust] CA local: %s", rootCAPath))
+
+	if runtime.GOOS == "windows" {
+		winLines, winErr := installTrustWindows(rootCAPath)
+		lines = append(lines, winLines...)
+		return lines, winErr
+	}
+
+	if runtime.GOOS != "linux" {
+		lines = append(lines, "[Trust] Instalacion de confianza automatica disponible solo en Linux y Windows.")
+		return lines, nil
+	}
 
 	skipNSS := envBool("AUTOFIRMA_TRUST_SKIP_NSS", false)
 	skipSystem := envBool("AUTOFIRMA_TRUST_SKIP_SYSTEM", false)
@@ -71,8 +81,14 @@ func localTLSTrustStatus() ([]string, error) {
 		return lines, nil
 	}
 
+	if runtime.GOOS == "windows" {
+		winLines, winErr := localTLSTrustStatusWindows(rootCAPath)
+		lines = append(lines, winLines...)
+		return lines, winErr
+	}
+
 	if runtime.GOOS != "linux" {
-		lines = append(lines, "[Trust] Comprobacion detallada disponible solo en Linux.")
+		lines = append(lines, "[Trust] Comprobacion detallada disponible solo en Linux y Windows.")
 		return lines, nil
 	}
 
@@ -300,4 +316,135 @@ func envBool(name string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+func installTrustWindows(rootCAPath string) ([]string, error) {
+	lines := []string{}
+	thumb, err := localCAThumbprint(rootCAPath)
+	if err != nil {
+		return lines, err
+	}
+	lines = append(lines, fmt.Sprintf("[Trust] Windows thumbprint CA local: %s", thumb))
+
+	skipSystem := envBool("AUTOFIRMA_TRUST_SKIP_SYSTEM", false)
+
+	userOK, err := windowsStoreHasThumbprint("CurrentUser", thumb)
+	if err != nil {
+		return lines, fmt.Errorf("error comprobando CurrentUser\\Root: %w", err)
+	}
+	if userOK {
+		lines = append(lines, "[Trust] Windows CurrentUser\\Root: ya confiado.")
+	} else {
+		if err := windowsImportRootCA("CurrentUser", rootCAPath); err != nil {
+			return lines, fmt.Errorf("error instalando en CurrentUser\\Root: %w", err)
+		}
+		lines = append(lines, "[Trust] Windows CurrentUser\\Root: instalado.")
+	}
+
+	if skipSystem {
+		lines = append(lines, "[Trust] Windows LocalMachine\\Root omitido por AUTOFIRMA_TRUST_SKIP_SYSTEM=1.")
+		return lines, nil
+	}
+
+	machineOK, err := windowsStoreHasThumbprint("LocalMachine", thumb)
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] Windows LocalMachine\\Root: no verificado (%v).", err))
+		return lines, nil
+	}
+	if machineOK {
+		lines = append(lines, "[Trust] Windows LocalMachine\\Root: ya confiado.")
+		return lines, nil
+	}
+	if err := windowsImportRootCA("LocalMachine", rootCAPath); err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] Windows LocalMachine\\Root: omitido (%v).", err))
+		return lines, nil
+	}
+	lines = append(lines, "[Trust] Windows LocalMachine\\Root: instalado.")
+	return lines, nil
+}
+
+func localTLSTrustStatusWindows(rootCAPath string) ([]string, error) {
+	lines := []string{}
+	thumb, err := localCAThumbprint(rootCAPath)
+	if err != nil {
+		return lines, err
+	}
+	lines = append(lines, fmt.Sprintf("[Trust] Windows thumbprint CA local: %s", thumb))
+
+	userOK, err := windowsStoreHasThumbprint("CurrentUser", thumb)
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] Windows CurrentUser\\Root: ERROR (%v).", err))
+	} else if userOK {
+		lines = append(lines, "[Trust] Windows CurrentUser\\Root: OK.")
+	} else {
+		lines = append(lines, "[Trust] Windows CurrentUser\\Root: FALTA.")
+	}
+
+	machineOK, err := windowsStoreHasThumbprint("LocalMachine", thumb)
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] Windows LocalMachine\\Root: no verificable (%v).", err))
+	} else if machineOK {
+		lines = append(lines, "[Trust] Windows LocalMachine\\Root: OK.")
+	} else {
+		lines = append(lines, "[Trust] Windows LocalMachine\\Root: FALTA.")
+	}
+
+	return lines, nil
+}
+
+func localCAThumbprint(rootCAPath string) (string, error) {
+	data, err := os.ReadFile(rootCAPath)
+	if err != nil {
+		return "", fmt.Errorf("leyendo CA local: %w", err)
+	}
+
+	var cert *x509.Certificate
+	if block, _ := pem.Decode(data); block != nil && block.Type == "CERTIFICATE" {
+		cert, err = x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return "", fmt.Errorf("parsing CA local PEM: %w", err)
+		}
+	} else {
+		cert, err = x509.ParseCertificate(data)
+		if err != nil {
+			return "", fmt.Errorf("parsing CA local DER: %w", err)
+		}
+	}
+	sum := sha1.Sum(cert.Raw)
+	return strings.ToUpper(hex.EncodeToString(sum[:])), nil
+}
+
+func windowsStoreHasThumbprint(scope string, thumbprint string) (bool, error) {
+	if runtime.GOOS != "windows" {
+		return false, nil
+	}
+	thumb := strings.ToUpper(strings.TrimSpace(thumbprint))
+	if thumb == "" {
+		return false, nil
+	}
+	cmd := "$t='" + psQuotePS(thumb) + "'; " +
+		"$hit=Get-ChildItem Cert:\\" + scope + "\\Root | Where-Object { $_.Thumbprint -eq $t }; " +
+		"if ($hit) { Write-Output 'FOUND' }"
+	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", cmd).CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return strings.Contains(string(out), "FOUND"), nil
+}
+
+func windowsImportRootCA(scope string, rootCAPath string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	path := psQuotePS(rootCAPath)
+	cmd := "Import-Certificate -FilePath '" + path + "' -CertStoreLocation Cert:\\" + scope + "\\Root | Out-Null"
+	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", cmd).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func psQuotePS(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }

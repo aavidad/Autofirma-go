@@ -21,8 +21,8 @@ import (
 var (
 	serverModeFlag    = flag.Bool("server", false, "Run as WebSocket server on port 63117")
 	generateCertsFlag = flag.Bool("generate-certs", false, "Generate local TLS certificates and exit")
-	installTrustFlag  = flag.Bool("install-trust", false, "Install local Root CA into trust stores (Linux)")
-	trustStatusFlag   = flag.Bool("trust-status", false, "Print trust status of local Root CA (Linux)")
+	installTrustFlag  = flag.Bool("install-trust", false, "Install local Root CA into trust stores (Linux/Windows)")
+	trustStatusFlag   = flag.Bool("trust-status", false, "Print trust status of local Root CA (Linux/Windows)")
 )
 
 func main() {
