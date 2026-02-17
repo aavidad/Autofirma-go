@@ -18,9 +18,13 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - `batch` contrafirma: aliases Java `contrafirmar_arbol` y `contrafirmar_hojas` ahora propagan automaticamente `target=tree/leafs` cuando no se define target explicito.
 - Mejora de compatibilidad en nucleo de firma:
   - `cosign/countersign` en formatos no-CAdES comunes (`XAdES`/`PAdES`) usan ruta nativa de multisignado en Go.
+  - en `XAdES` se distingue ya la operacion nativa:
+    - `cosign`: anade firma enveloped adicional sobre el documento XML.
+    - `countersign`: contrafirma firmas XML existentes (seleccion `tree/leafs/signers`) insertando firmas enveloped sobre nodos `Signature` objetivo.
   - fallback a `sign` se reserva para formatos realmente no soportados.
   - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
   - contrafirma CAdES: algoritmos no reconocidos ya no rompen el flujo; se aplica fallback seguro a `SHA256withRSA` para mejorar interoperabilidad.
+  - `operations` propaga metadata de operacion (`_operation`) para que el backend nativo aplique semantica especifica por formato.
 - Batch local y remoto (JSON/XML), incluyendo trifasico `PRE -> PK1 -> POST`.
 - Batch `afirma://batch` mas tolerante a variantes de parametros Java/integradores:
   - lectura case-insensitive y alias de `jsonbatch/jsonBatch`, `localBatchProcess/localbatchprocess`,
@@ -46,13 +50,15 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - Suite de tests en verde para codigo principal:
   - `go test -mod=readonly ./cmd/gui/... ./pkg/...`.
   - Cobertura actual: `224` tests (`cmd/gui` + `pkg`).
+  - ampliada suite unitaria de nucleo con pruebas de enrutado nativo `cosign/countersign` y utilidades XAdES de seleccion de firmas.
 
 ### Brechas reales pendientes
 1. Cierre de validacion automatica reproducible:
 - pendiente principal de entorno: ejecutar trust y WSS en entorno sin restricciones de sandbox/TTY para cierre final de bloque.
 
 2. Paridad funcional restante (segun alcance final de release):
-- completar contrafirma avanzada especifica por formato fuera de CAdES (hoy en `XAdES`/`PAdES` se aplica ruta nativa de multisignado compatible);
+- cerrar validacion criptografica interoperable de contrafirma XAdES en sedes reales (estructura final y aceptacion del receptor);
+- completar estrategia funcional de `countersign` en PAdES segun criterio de compatibilidad final (actualmente ruta nativa compatible de multisignado);
 - validacion real en Windows/macOS del flujo PKCS#11 directo (codigo base ya preparado en `cgo`).
 
 3. Cierre E2E real:

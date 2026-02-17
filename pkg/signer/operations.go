@@ -39,7 +39,9 @@ func CoSignData(dataB64 string, certificateID string, pin string, format string,
 	if !strings.EqualFold(format, "cades") {
 		if isNativeMultiSignFormat(format) {
 			log.Printf("[Signer] CoSign native multisign route for format=%s", format)
-			return signDataNativeMultiSignFunc(dataB64, certificateID, pin, format, options)
+			nativeOpts := cloneSignOptions(options)
+			nativeOpts["_operation"] = "cosign"
+			return signDataNativeMultiSignFunc(dataB64, certificateID, pin, format, nativeOpts)
 		}
 		log.Printf("[Signer] CoSign compatibility fallback to SignData for unsupported format=%s", format)
 		return signDataCompatFallbackFunc(dataB64, certificateID, pin, format, options)
@@ -82,7 +84,9 @@ func CounterSignData(dataB64 string, certificateID string, pin string, format st
 	if !strings.EqualFold(format, "cades") {
 		if isNativeMultiSignFormat(format) {
 			log.Printf("[Signer] CounterSign compatible native multisign route for format=%s", format)
-			return signDataNativeMultiSignFunc(dataB64, certificateID, pin, format, options)
+			nativeOpts := cloneSignOptions(options)
+			nativeOpts["_operation"] = "countersign"
+			return signDataNativeMultiSignFunc(dataB64, certificateID, pin, format, nativeOpts)
 		}
 		log.Printf("[Signer] CounterSign compatibility fallback to SignData for unsupported format=%s", format)
 		return signDataCompatFallbackFunc(dataB64, certificateID, pin, format, options)
@@ -111,4 +115,15 @@ func isNativeMultiSignFormat(format string) bool {
 	default:
 		return false
 	}
+}
+
+func cloneSignOptions(options map[string]interface{}) map[string]interface{} {
+	if len(options) == 0 {
+		return map[string]interface{}{}
+	}
+	out := make(map[string]interface{}, len(options))
+	for k, v := range options {
+		out[k] = v
+	}
+	return out
 }
