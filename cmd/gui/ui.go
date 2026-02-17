@@ -2598,7 +2598,9 @@ func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
 		}
 	} else {
 		lines = append(lines, "gateway=desconocido")
-		raise(diagLevelWarn, "No se pudo detectar gateway por defecto.")
+		if runtime.GOOS == "linux" {
+			raise(diagLevelWarn, "No se pudo detectar gateway por defecto.")
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -2699,12 +2701,12 @@ func checkUpdateRepositoryReachability() (string, string, int) {
 
 	addrs, dnsErr := net.DefaultResolver.LookupHost(ctx, updateHost)
 	if dnsErr != nil {
-		return "DNS ERROR para autofirma.dipgra.es: " + summarizeServerBody(dnsErr.Error()), "Revisa DNS/red para poder consultar actualizaciones.", diagLevelWarn
+		return "DNS ERROR para autofirma.dipgra.es (URL " + updateURL + "): " + summarizeServerBody(dnsErr.Error()), "Revisa DNS/red para poder consultar actualizaciones.", diagLevelWarn
 	}
 
 	conn, tcpErr := net.DialTimeout("tcp", net.JoinHostPort(updateHost, "443"), 2500*time.Millisecond)
 	if tcpErr != nil {
-		return "TCP ERROR con autofirma.dipgra.es:443: " + summarizeServerBody(tcpErr.Error()), "Comprueba salida HTTPS (puerto 443) hacia el repositorio de actualizaciones.", diagLevelWarn
+		return "TCP ERROR con autofirma.dipgra.es:443 (URL " + updateURL + "): " + summarizeServerBody(tcpErr.Error()), "Comprueba salida HTTPS (puerto 443) hacia el repositorio de actualizaciones.", diagLevelWarn
 	}
 	_ = conn.Close()
 
@@ -2715,17 +2717,17 @@ func checkUpdateRepositoryReachability() (string, string, int) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "HTTPS ERROR consultando version.json: " + summarizeServerBody(err.Error()), "Revisa proxy/SSL y conectividad con autofirma.dipgra.es.", diagLevelWarn
+		return "HTTPS ERROR consultando " + updateURL + ": " + summarizeServerBody(err.Error()), "Revisa proxy/SSL y conectividad con autofirma.dipgra.es.", diagLevelWarn
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return fmt.Sprintf("OK (DNS=%d IPs, HTTPS=%d)", len(addrs), resp.StatusCode), "", diagLevelOK
+		return fmt.Sprintf("OK (%s, DNS=%d IPs, HTTPS=%d)", updateURL, len(addrs), resp.StatusCode), "", diagLevelOK
 	}
 	if resp.StatusCode >= 500 {
-		return fmt.Sprintf("HTTP %d en version.json", resp.StatusCode), "Incidencia temporal en el servidor de actualizaciones. Reintenta más tarde.", diagLevelWarn
+		return fmt.Sprintf("HTTP %d en %s", resp.StatusCode, updateURL), "Incidencia temporal en el servidor de actualizaciones. Reintenta más tarde.", diagLevelWarn
 	}
-	return fmt.Sprintf("HTTP %d en version.json", resp.StatusCode), "Revisa acceso al repositorio de actualizaciones y posibles bloqueos de red.", diagLevelWarn
+	return fmt.Sprintf("HTTP %d en %s", resp.StatusCode, updateURL), "Revisa acceso al repositorio de actualizaciones y posibles bloqueos de red.", diagLevelWarn
 }
 
 func collectRecentErrorHints(logFile string) []string {
