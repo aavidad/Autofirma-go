@@ -72,6 +72,10 @@ type UI struct {
 	BtnOpCoSign   widget.Clickable
 	BtnOpCounter  widget.Clickable
 	BtnBatchLocal widget.Clickable
+	BtnExportCert widget.Clickable
+	BtnExpertSelectCert widget.Clickable
+	BtnExpertLoad       widget.Clickable
+	BtnExpertSave       widget.Clickable
 
 	BtnAbout        widget.Clickable
 	BtnCheckUpdates widget.Clickable
@@ -780,6 +784,48 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 									btn := material.Button(ui.Theme, &ui.BtnBatchLocal, "Procesar lote local (JSON/XML)")
 									btn.Background = color.NRGBA{R: 70, G: 95, B: 130, A: 255}
 									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									if ui.BtnExportCert.Clicked(gtx) {
+										go ui.exportSelectedCertificateExpert()
+									}
+									btn := material.Button(ui.Theme, &ui.BtnExportCert, "Exportar certificado seleccionado")
+									btn.Background = color.NRGBA{R: 95, G: 80, B: 125, A: 255}
+									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnExpertSelectCert.Clicked(gtx) {
+												go ui.runExpertSelectCertDialog()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnExpertSelectCert, "Selector avanzado de certificado")
+											btn.Background = color.NRGBA{R: 85, G: 80, B: 80, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnExpertLoad.Clicked(gtx) {
+												go ui.runExpertLoadDialog()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnExpertLoad, "Carga manual (LOAD)")
+											btn.Background = color.NRGBA{R: 85, G: 80, B: 80, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnExpertSave.Clicked(gtx) {
+												go ui.runExpertSaveCopy()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnExpertSave, "Guardado manual (SAVE)")
+											btn.Background = color.NRGBA{R: 85, G: 80, B: 80, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+									)
 								}),
 								// Sign/Verify Button
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1656,6 +1702,182 @@ func (ui *UI) runLocalBatchFromInput() {
 		return
 	}
 	ui.StatusMsg = fmt.Sprintf("Lote procesado. Resultado guardado en: %s", outPath)
+}
+
+func (ui *UI) exportSelectedCertificateExpert() {
+	if ui.IsSigning {
+		ui.StatusMsg = "Hay una operación en curso. Espere para exportar certificado."
+		ui.Window.Invalidate()
+		return
+	}
+	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
+		ui.StatusMsg = "Seleccione un certificado para exportarlo."
+		ui.Window.Invalidate()
+		return
+	}
+	cert := ui.Certs[ui.SelectedCert]
+	if len(cert.Content) == 0 {
+		ui.StatusMsg = "El certificado seleccionado no tiene contenido exportable."
+		ui.Window.Invalidate()
+		return
+	}
+
+	safeID := strings.ToLower(strings.TrimSpace(cert.ID))
+	safeID = strings.ReplaceAll(safeID, ":", "")
+	safeID = strings.ReplaceAll(safeID, "/", "_")
+	if safeID == "" || safeID == "-" {
+		safeID = "certificado"
+	}
+	fileName := "certificado_" + safeID[:uiMinInt(len(safeID), 12)] + ".b64"
+	home, _ := os.UserHomeDir()
+	defaultPath := filepath.Join(home, "Descargas", fileName)
+	selectedPath, canceled, err := protocolSaveDialog(defaultPath, "b64,txt")
+	if canceled {
+		ui.StatusMsg = "Exportación de certificado cancelada."
+		ui.Window.Invalidate()
+		return
+	}
+	if err != nil {
+		ui.StatusMsg = "No se pudo abrir el diálogo de guardado: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	if strings.TrimSpace(selectedPath) == "" {
+		ui.StatusMsg = "No se seleccionó ruta de guardado."
+		ui.Window.Invalidate()
+		return
+	}
+
+	// Compatible with selectcert response format when no 'key' is provided.
+	out := base64.URLEncoding.EncodeToString(cert.Content)
+	if writeErr := os.WriteFile(strings.TrimSpace(selectedPath), []byte(out), 0644); writeErr != nil {
+		ui.StatusMsg = "No se pudo guardar el certificado exportado: " + writeErr.Error()
+		ui.Window.Invalidate()
+		return
+	}
+
+	ui.StatusMsg = "Certificado exportado en formato Base64 URL en: " + strings.TrimSpace(selectedPath)
+	ui.Window.Invalidate()
+}
+
+func uiMinInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (ui *UI) runExpertSelectCertDialog() {
+	if ui.IsSigning {
+		ui.StatusMsg = "Hay una operación en curso. Espere para seleccionar certificado."
+		ui.Window.Invalidate()
+		return
+	}
+	if len(ui.Certs) == 0 {
+		ui.StatusMsg = "No hay certificados disponibles."
+		ui.Window.Invalidate()
+		return
+	}
+	filtered := make([]protocol.Certificate, 0, len(ui.Certs))
+	indices := make([]int, 0, len(ui.Certs))
+	for idx, cert := range ui.Certs {
+		if !cert.CanSign {
+			continue
+		}
+		filtered = append(filtered, cert)
+		indices = append(indices, idx)
+	}
+	if len(filtered) == 0 {
+		ui.StatusMsg = "No hay certificados aptos para firma."
+		ui.Window.Invalidate()
+		return
+	}
+	chosen, canceled, err := protocolSelectCertDialog(filtered)
+	if canceled {
+		ui.StatusMsg = "Selección de certificado cancelada."
+		ui.Window.Invalidate()
+		return
+	}
+	if err != nil {
+		ui.StatusMsg = "Error en selector avanzado de certificado: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	if chosen < 0 || chosen >= len(indices) {
+		ui.StatusMsg = "Selección de certificado inválida."
+		ui.Window.Invalidate()
+		return
+	}
+	ui.SelectedCert = indices[chosen]
+	ui.StatusMsg = "Certificado seleccionado mediante selector avanzado."
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) runExpertLoadDialog() {
+	initialPath := strings.TrimSpace(ui.InputFile.Text())
+	paths, canceled, err := protocolLoadDialog(initialPath, "", false)
+	if canceled {
+		ui.StatusMsg = "Carga manual cancelada."
+		ui.Window.Invalidate()
+		return
+	}
+	if err != nil {
+		ui.StatusMsg = "Error en carga manual (LOAD): " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	if len(paths) == 0 || strings.TrimSpace(paths[0]) == "" {
+		ui.StatusMsg = "No se seleccionó fichero en carga manual."
+		ui.Window.Invalidate()
+		return
+	}
+	ui.InputFile.SetText(strings.TrimSpace(paths[0]))
+	ui.StatusMsg = "Fichero cargado mediante flujo manual LOAD."
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) runExpertSaveCopy() {
+	src := strings.TrimSpace(ui.InputFile.Text())
+	if src == "" {
+		ui.StatusMsg = "Seleccione un fichero para guardado manual."
+		ui.Window.Invalidate()
+		return
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		ui.StatusMsg = "No se pudo leer el fichero origen para SAVE: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	defaultPath, err := buildSaveTargetPath(filepath.Base(src), strings.TrimPrefix(filepath.Ext(src), "."))
+	if err != nil {
+		ui.StatusMsg = "No se pudo preparar ruta de guardado: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	selectedPath, canceled, err := protocolSaveDialog(defaultPath, strings.TrimPrefix(filepath.Ext(src), "."))
+	if canceled {
+		ui.StatusMsg = "Guardado manual cancelado."
+		ui.Window.Invalidate()
+		return
+	}
+	if err != nil {
+		ui.StatusMsg = "Error en guardado manual (SAVE): " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	if strings.TrimSpace(selectedPath) == "" {
+		ui.StatusMsg = "No se seleccionó ruta de guardado."
+		ui.Window.Invalidate()
+		return
+	}
+	if writeErr := os.WriteFile(strings.TrimSpace(selectedPath), data, 0644); writeErr != nil {
+		ui.StatusMsg = "No se pudo guardar copia manual: " + writeErr.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	ui.StatusMsg = "Guardado manual completado en: " + strings.TrimSpace(selectedPath)
+	ui.Window.Invalidate()
 }
 
 func (ui *UI) layoutSessionDiagnostics(gtx layout.Context) layout.Dimensions {
