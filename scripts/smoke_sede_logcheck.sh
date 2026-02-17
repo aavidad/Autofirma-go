@@ -42,6 +42,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "$LOG_FILE" ]]; then
+  for candidate in \
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-desktop-$(date +%F).log" \
+    "/tmp/AutofirmaDipgra/logs/autofirma-desktop-$(date +%F).log"; do
+    if [[ -f "${candidate}" ]]; then
+      LOG_FILE="${candidate}"
+      echo "INFO: auto-detected log file: ${LOG_FILE}"
+      break
+    fi
+  done
+fi
+
+if [[ ! -f "$LOG_FILE" ]]; then
   echo "FAIL: log file not found: $LOG_FILE" >&2
   exit 1
 fi

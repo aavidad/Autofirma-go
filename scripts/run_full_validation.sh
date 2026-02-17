@@ -66,6 +66,22 @@ append_report() {
   printf '%s\n' "$1" >> "${REPORT_FILE}"
 }
 
+resolve_sede_log_file() {
+  if [[ -f "${SEDE_LOG_FILE}" ]]; then
+    return 0
+  fi
+  for candidate in \
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-desktop-$(date +%F).log" \
+    "/tmp/AutofirmaDipgra/logs/autofirma-desktop-$(date +%F).log"; do
+    if [[ -f "${candidate}" ]]; then
+      SEDE_LOG_FILE="${candidate}"
+      echo "[full-check] sede log auto-detectado: ${SEDE_LOG_FILE}"
+      append_report "sede_log_file_autodetected: ${SEDE_LOG_FILE}"
+      return 0
+    fi
+  done
+}
+
 on_error() {
   local rc=$?
   append_report "result: FAIL"
@@ -200,6 +216,7 @@ append_report "step_6: PASS"
 if [[ "${SKIP_SEDE_LOGCHECK}" -eq 0 ]]; then
   CURRENT_STEP="7/7 smoke log de sede"
   echo "[full-check] 7/7 smoke de log de sede"
+  resolve_sede_log_file || true
   if [[ -f "${SEDE_LOG_FILE}" ]]; then
     bash scripts/smoke_sede_logcheck.sh --log-file "${SEDE_LOG_FILE}" --since-minutes "${SEDE_SINCE_MINUTES}"
     append_report "step_7: PASS"
