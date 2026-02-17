@@ -106,6 +106,7 @@ type UI struct {
 	BtnCopyHistory     widget.Clickable
 	BtnSelfTest        widget.Clickable
 	BtnOpenReports     widget.Clickable
+	BtnExportFullDiag  widget.Clickable
 	BtnOpenSealWeb     widget.Clickable
 	ShowAbout          bool
 	ChkVisibleSeal     widget.Bool
@@ -1080,6 +1081,14 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													}
 													btn := material.Button(ui.Theme, &ui.BtnOpenReports, "Abrir carpeta de reportes")
 													btn.Background = color.NRGBA{R: 85, G: 85, B: 85, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnExportFullDiag.Clicked(gtx) {
+														ui.exportFullDiagnosticReport()
+													}
+													btn := material.Button(ui.Theme, &ui.BtnExportFullDiag, "Exportar diagnóstico completo")
+													btn.Background = color.NRGBA{R: 60, G: 95, B: 70, A: 255}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2956,6 +2965,88 @@ func (ui *UI) copyTechnicalReport() {
 	}
 	ui.HealthStatus = "Reporte técnico copiado al portapapeles."
 	ui.Window.Invalidate()
+}
+
+func (ui *UI) exportFullDiagnosticReport() {
+	report := ui.buildFullDiagnosticReport()
+	path, err := writeTechnicalReportFile(report)
+	if err != nil {
+		ui.HealthStatus = "No se pudo exportar el diagnóstico completo: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	ui.HealthStatus = "Diagnóstico completo exportado en: " + path
+	log.Printf("[Diagnóstico] Reporte completo exportado en: %s", path)
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) buildFullDiagnosticReport() string {
+	lines := []string{
+		"Autofirma Dipgra - Diagnóstico completo",
+		"timestamp=" + time.Now().Format(time.RFC3339),
+		"version=" + version.CurrentVersion,
+		"server_mode=" + fmt.Sprintf("%t", ui.IsServerMode),
+		"strict_compat=" + fmt.Sprintf("%t", ui.ChkStrictCompat.Value),
+		"expert_mode=" + fmt.Sprintf("%t", ui.ChkExpertMode.Value),
+		"allow_invalid_pdf=" + fmt.Sprintf("%t", ui.ChkAllowInvalidPDF.Value),
+		"status=" + strings.TrimSpace(ui.StatusMsg),
+		"health_status=" + strings.TrimSpace(ui.HealthStatus),
+		"update_status=" + strings.TrimSpace(ui.UpdateStatus),
+	}
+
+	netSummary, netAction, netLevel := technicianNetworkChecklist(ui.Protocol)
+	lines = append(lines, "network_level="+fmt.Sprintf("%d", netLevel))
+	lines = append(lines, "network_summary="+netSummary)
+	lines = append(lines, "network_action="+netAction)
+
+	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
+	lines = append(lines, "update_repo_level="+fmt.Sprintf("%d", updateLevel))
+	lines = append(lines, "update_repo_detail="+updateDetail)
+	lines = append(lines, "update_repo_action="+updateAction)
+
+	if ui.Protocol != nil {
+		lines = append(lines, "protocol_action="+safeDiagValue(ui.Protocol.Action))
+		lines = append(lines, "protocol_stservlet="+safeDiagValue(ui.Protocol.STServlet))
+		lines = append(lines, "protocol_rtservlet="+safeDiagValue(ui.Protocol.RTServlet))
+		lines = append(lines, "protocol_idsession="+safeDiagValue(getProtocolSessionID(ui.Protocol)))
+		lines = append(lines, "protocol_fileid="+safeDiagValue(ui.Protocol.FileID))
+	}
+
+	lines = append(lines, "diag_transport="+safeDiagValue(ui.DiagTransport))
+	lines = append(lines, "diag_action="+safeDiagValue(ui.DiagAction))
+	lines = append(lines, "diag_session="+safeDiagValue(ui.DiagSessionID))
+	lines = append(lines, "diag_format="+safeDiagValue(ui.DiagFormat))
+	lines = append(lines, "diag_result="+safeDiagValue(ui.DiagLastResult))
+	lines = append(lines, "last_error_code="+strings.TrimSpace(ui.LastErrorCode))
+	lines = append(lines, "last_error_phase="+strings.TrimSpace(ui.LastErrorPhase))
+	lines = append(lines, "last_error_operation="+strings.TrimSpace(ui.LastErrorOperation))
+	lines = append(lines, "last_error_hint="+strings.TrimSpace(ui.LastErrorHint))
+	lines = append(lines, "last_error_detail="+strings.TrimSpace(ui.LastErrorTechnical))
+
+	if trustLines, err := localTLSTrustStatus(); err == nil {
+		for _, l := range trustLines {
+			lines = append(lines, "trust="+l)
+		}
+	} else {
+		lines = append(lines, "trust_error="+summarizeServerBody(err.Error()))
+	}
+
+	lines = append(lines, "history_total="+fmt.Sprintf("%d", len(ui.OperationHistory)))
+	for i, item := range ui.OperationHistory {
+		if i >= 20 {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("history_%02d=%s|%s|%s|%s|%s|%s", i+1, item.At, item.Operation, item.Format, item.Result, item.Cert, item.Path))
+	}
+
+	logFile := resolveCurrentLogFile()
+	lines = append(lines, "log_dir="+resolveLogDirectory())
+	lines = append(lines, "log_file="+strings.TrimSpace(logFile))
+	for _, l := range readRecentSanitizedLogLines(logFile, 120) {
+		lines = append(lines, "log="+l)
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (ui *UI) buildTechnicalReport() string {
