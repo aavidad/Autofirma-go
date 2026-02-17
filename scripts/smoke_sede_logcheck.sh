@@ -13,7 +13,7 @@ usage() {
 Usage: $0 [--log-file PATH] [--since-minutes N]
 
 Checks latest AutoFirma protocol run in launcher log:
-- upload response body="OK"
+- legacy upload response body="OK" OR websocket protocol response without errors
 - no COD_103 / messageDigest errors
 - no runtime Node.js fallback traces
 USAGE
@@ -85,8 +85,19 @@ if grep -Eiq 'COD_103|messageDigest|No se dispone del atributo firmado messageDi
   exit 1
 fi
 
-if ! grep -Fq 'java-style upload response status=200 body="OK"' "$TMP_FILTERED"; then
-  echo "FAIL: no successful java-style upload found in recent logs" >&2
+LEGACY_OK=0
+WS_OK=0
+
+if grep -Fq 'java-style upload response status=200 body="OK"' "$TMP_FILTERED"; then
+  LEGACY_OK=1
+fi
+
+if grep -Eiq '\[WebSocket\] Sent result .*protocol_error=false' "$TMP_FILTERED"; then
+  WS_OK=1
+fi
+
+if [[ "$LEGACY_OK" -ne 1 && "$WS_OK" -ne 1 ]]; then
+  echo "FAIL: no successful legacy upload or websocket result found in recent logs" >&2
   exit 1
 fi
 
@@ -99,3 +110,8 @@ fi
 echo "PASS: sede log check OK"
 echo "  log_file=$LOG_FILE"
 echo "  since_minutes=$SINCE_MINUTES"
+if [[ "$WS_OK" -eq 1 ]]; then
+  echo "  mode=websocket"
+elif [[ "$LEGACY_OK" -eq 1 ]]; then
+  echo "  mode=legacy-upload"
+fi

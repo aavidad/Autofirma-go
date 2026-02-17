@@ -105,7 +105,7 @@ func TestCoSignDataXadesUsesNativeMultiSignRoute(t *testing.T) {
 		if format != "xades" {
 			t.Fatalf("formato inesperado en ruta nativa cosign: %q", format)
 		}
-		if op := signOptionString(options, "_operation"); op != "cosign" {
+		if op := optionString(options, "_operation", ""); op != "cosign" {
 			t.Fatalf("operacion esperada cosign en ruta nativa, obtenida: %q", op)
 		}
 		return "native-signature", nil
@@ -149,7 +149,7 @@ func TestCounterSignDataPadesUsesNativeMultiSignRoute(t *testing.T) {
 		if pin != "1234" {
 			t.Fatalf("pin inesperado en ruta nativa countersign: %q", pin)
 		}
-		if op := signOptionString(options, "_operation"); op != "countersign" {
+		if op := optionString(options, "_operation", ""); op != "countersign" {
 			t.Fatalf("operacion esperada countersign en ruta nativa, obtenida: %q", op)
 		}
 		return "native-signature", nil

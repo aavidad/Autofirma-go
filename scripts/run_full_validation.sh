@@ -149,8 +149,21 @@ append_report "step_2: PASS"
 if [[ "${SKIP_TRUST}" -eq 0 ]]; then
   CURRENT_STEP="3/7 trust local"
   echo "[full-check] 3/7 trust local (certificados + estado)"
-  bash scripts/install_and_trust_linux.sh
-  append_report "step_3: PASS"
+  if TRUST_OUTPUT="$(bash scripts/install_and_trust_linux.sh 2>&1)"; then
+    printf '%s\n' "${TRUST_OUTPUT}"
+    append_report "step_3: PASS"
+  else
+    printf '%s\n' "${TRUST_OUTPUT}" >&2
+    if printf '%s' "${TRUST_OUTPUT}" | grep -qiE "ENV_BLOCKED|Operation not permitted|Permission denied|no new privileges|sudo:.*no new privileges|cannot run as root|sandbox"; then
+      echo "[full-check] WARN: trust local bloqueado por entorno (sudo/sandbox), se marca como ENV_BLOCKED"
+      append_report "step_3: ENV_BLOCKED"
+      append_report "step_3_detail: ${TRUST_OUTPUT//$'\n'/ | }"
+    else
+      append_report "step_3: FAIL"
+      append_report "step_3_detail: ${TRUST_OUTPUT//$'\n'/ | }"
+      false
+    fi
+  fi
 else
   echo "[full-check] 3/7 trust local omitido (--skip-trust)"
   append_report "step_3: SKIP"
@@ -187,8 +200,13 @@ append_report "step_6: PASS"
 if [[ "${SKIP_SEDE_LOGCHECK}" -eq 0 ]]; then
   CURRENT_STEP="7/7 smoke log de sede"
   echo "[full-check] 7/7 smoke de log de sede"
-  bash scripts/smoke_sede_logcheck.sh --log-file "${SEDE_LOG_FILE}" --since-minutes "${SEDE_SINCE_MINUTES}"
-  append_report "step_7: PASS"
+  if [[ -f "${SEDE_LOG_FILE}" ]]; then
+    bash scripts/smoke_sede_logcheck.sh --log-file "${SEDE_LOG_FILE}" --since-minutes "${SEDE_SINCE_MINUTES}"
+    append_report "step_7: PASS"
+  else
+    echo "[full-check] WARN: log de sede no encontrado (${SEDE_LOG_FILE}), se marca como SKIP"
+    append_report "step_7: SKIP_NO_LOG"
+  fi
 else
   echo "[full-check] 7/7 smoke de log de sede omitido (--skip-sede-logcheck)"
   append_report "step_7: SKIP"

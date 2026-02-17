@@ -12,7 +12,10 @@ LOG_FILE="${AUTOFIRMA_WS_LOG:-/tmp/autofirma-web-compat.log}"
 
 build() {
   echo "[web-compat] building gui server binary..."
-  GOCACHE=/tmp/go-build go build -o "${BIN}" ./cmd/gui
+  if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
+    GOFLAGS="${GOFLAGS:-} -mod=readonly"
+  fi
+  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN}" ./cmd/gui
 }
 
 start() {
