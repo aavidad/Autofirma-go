@@ -357,6 +357,15 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
 						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return ui.layoutSessionDiagnostics(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if strings.TrimSpace(ui.DiagAction) == "" && strings.TrimSpace(ui.DiagLastResult) == "" {
+								return layout.Dimensions{}
+							}
+							return layout.Spacer{Height: unit.Dp(10)}.Layout(gtx)
+						}),
 						// Status/Spinner/Sign Button
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if ui.IsSigning {
@@ -1454,9 +1463,6 @@ func (ui *UI) signCurrentFile() {
 }
 
 func (ui *UI) layoutSessionDiagnostics(gtx layout.Context) layout.Dimensions {
-	if strings.TrimSpace(ui.DiagAction) == "" && strings.TrimSpace(ui.DiagLastResult) == "" {
-		return layout.Dimensions{}
-	}
 	lines := []string{
 		"Diagnóstico de sesión activa",
 		"Transporte: " + safeDiagValue(ui.DiagTransport),
@@ -1507,6 +1513,14 @@ func (ui *UI) updateSessionDiagnostics(transport, action, sessionID, format, res
 	ui.DiagFormat = strings.TrimSpace(format)
 	ui.DiagLastResult = strings.TrimSpace(result)
 	ui.DiagLastUpdateTime = time.Now().Format("2006-01-02 15:04:05")
+	log.Printf(
+		"[UI-DIAG] transport=%s action=%s session=%s format=%s result=%s",
+		safeDiagValue(ui.DiagTransport),
+		safeDiagValue(ui.DiagAction),
+		safeDiagValue(ui.DiagSessionID),
+		safeDiagValue(ui.DiagFormat),
+		safeDiagValue(ui.DiagLastResult),
+	)
 	if ui.Window != nil {
 		ui.Window.Invalidate()
 	}

@@ -90,6 +90,35 @@ func TestProcessProtocolRequestNeedsUIForSign(t *testing.T) {
 	}
 }
 
+func TestProcessProtocolRequestUpdatesSessionDiagnostics(t *testing.T) {
+	ui := &UI{}
+	s := NewWebSocketServer([]int{63117}, "", ui)
+
+	oldGetCerts := getSystemCertificatesFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{
+			{ID: "cert-1", Content: []byte{1, 2, 3}, CanSign: true},
+		}, nil
+	}
+	t.Cleanup(func() {
+		getSystemCertificatesFunc = oldGetCerts
+	})
+
+	got := strings.TrimSpace(s.processProtocolRequest("afirma://selectcert?idsession=sess123"))
+	if got == "" || strings.HasPrefix(strings.ToUpper(got), "SAF_") || strings.HasPrefix(strings.ToUpper(got), "ERR-") {
+		t.Fatalf("se esperaba respuesta de selectcert sin error, obtenido: %q", got)
+	}
+	if ui.DiagTransport != "websocket" {
+		t.Fatalf("diag transport inesperado: %q", ui.DiagTransport)
+	}
+	if ui.DiagAction != "selectcert" {
+		t.Fatalf("diag action inesperada: %q", ui.DiagAction)
+	}
+	if ui.DiagLastResult == "" {
+		t.Fatalf("diag result no debe estar vacio")
+	}
+}
+
 func TestProcessProtocolRequestMinimumClientVersionNotSatisfiedReturnsSaf41(t *testing.T) {
 	s := NewWebSocketServer([]int{63117}, "", nil)
 	got := strings.TrimSpace(s.processProtocolRequest("afirma://sign?id=abc&stservlet=https%3A%2F%2Fexample.com%2FStorageService&mcv=9.0"))
