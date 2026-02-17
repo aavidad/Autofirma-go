@@ -115,6 +115,7 @@ type UI struct {
 	BtnSelfTest        widget.Clickable
 	BtnOpenReports     widget.Clickable
 	BtnExportFullDiag  widget.Clickable
+	BtnRunFullCheck    widget.Clickable
 	BtnOpenSealWeb     widget.Clickable
 	ShowAbout          bool
 	ChkVisibleSeal     widget.Bool
@@ -147,6 +148,7 @@ type UI struct {
 	HealthCheckRunning  bool
 	ProblemScanRunning  bool
 	SelfTestRunning     bool
+	FullCheckRunning    bool
 	LastErrorCode       string
 	LastErrorPhase      string
 	LastErrorOperation  string
@@ -1166,6 +1168,18 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													}
 													btn := material.Button(ui.Theme, &ui.BtnExportFullDiag, "Exportar diagnóstico completo")
 													btn.Background = color.NRGBA{R: 60, G: 95, B: 70, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnRunFullCheck.Clicked(gtx) && !ui.FullCheckRunning {
+														go ui.runFullSupportCheck()
+													}
+													btnText := "Chequeo completo (diagnóstico + autoprueba)"
+													if ui.FullCheckRunning {
+														btnText = "Chequeo completo en curso..."
+													}
+													btn := material.Button(ui.Theme, &ui.BtnRunFullCheck, btnText)
+													btn.Background = color.NRGBA{R: 55, G: 105, B: 95, A: 255}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2502,6 +2516,36 @@ func (ui *UI) runGuidedSelfTest() {
 	ui.appendOperationHistory("autoprueba", "cades", "ok", "-", "firma y verificación local completadas")
 	ui.HealthStatus = "Autoprueba completada: firma y verificación local OK."
 	ui.saveSelfTestReport("ok", ui.HealthStatus, "")
+}
+
+func (ui *UI) runFullSupportCheck() {
+	ui.FullCheckRunning = true
+	ui.HealthStatus = "Iniciando chequeo completo..."
+	ui.Window.Invalidate()
+	defer func() {
+		ui.FullCheckRunning = false
+		ui.Window.Invalidate()
+	}()
+
+	ui.runLocalHealthCheck()
+	if strings.TrimSpace(ui.HealthStatus) == "" {
+		ui.HealthStatus = "Diagnóstico rápido completado."
+	}
+	ui.Window.Invalidate()
+
+	ui.runGuidedSelfTest()
+	report := ui.buildFullDiagnosticReport()
+	reportPath, err := writeTechnicalReportFile(report)
+	if err != nil {
+		ui.appendOperationHistory("chequeo_completo", "diagnostico", "error", "-", summarizeServerBody(err.Error()))
+		ui.HealthStatus = ui.HealthStatus + "\nNo se pudo guardar reporte completo: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	ui.appendOperationHistory("chequeo_completo", "diagnostico", "ok", strings.TrimSpace(reportPath), "diagnóstico y autoprueba completados")
+	ui.HealthStatus = ui.HealthStatus + "\nChequeo completo finalizado. Reporte: " + reportPath
+	log.Printf("[ChequeoCompleto] Reporte generado: %s", reportPath)
+	ui.Window.Invalidate()
 }
 
 func (ui *UI) buildSelfTestReport(result string, summary string, detail string) string {
