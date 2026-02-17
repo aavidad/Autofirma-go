@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Diputacion de Granada
 // Autor: Alberto Avidad Fernandez (Oficina de Software Libre de la Diputacion de Granada)
 
-//go:build linux && cgo
-// +build linux,cgo
+//go:build cgo
+// +build cgo
 
 package signer
 
@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"autofirma-host/pkg/protocol"
@@ -172,11 +173,27 @@ func signerPKCS11ModuleCandidates(hints []string) []string {
 	if len(hints) > 0 {
 		return hints
 	}
-	return []string{
-		"/usr/lib/opensc-pkcs11.so",
-		"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so",
-		"/usr/lib64/opensc-pkcs11.so",
-		"/usr/lib/pkcs11/opensc-pkcs11.so",
-		"/usr/local/lib/opensc-pkcs11.so",
+	switch runtime.GOOS {
+	case "windows":
+		return []string{
+			`C:\Windows\System32\opensc-pkcs11.dll`,
+			`C:\Program Files\OpenSC Project\OpenSC\pkcs11\opensc-pkcs11.dll`,
+			`C:\Program Files (x86)\OpenSC Project\OpenSC\pkcs11\opensc-pkcs11.dll`,
+		}
+	case "darwin":
+		return []string{
+			"/Library/OpenSC/lib/opensc-pkcs11.so",
+			"/opt/homebrew/lib/opensc-pkcs11.so",
+			"/usr/local/lib/opensc-pkcs11.so",
+			"/usr/local/lib/pkcs11/opensc-pkcs11.so",
+		}
+	default:
+		return []string{
+			"/usr/lib/opensc-pkcs11.so",
+			"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so",
+			"/usr/lib64/opensc-pkcs11.so",
+			"/usr/lib/pkcs11/opensc-pkcs11.so",
+			"/usr/local/lib/opensc-pkcs11.so",
+		}
 	}
 }

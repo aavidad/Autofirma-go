@@ -25,6 +25,9 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - `mandatoryCertSelection`,
   - hints `defaultKeyStore/defaultKeyStoreLib/disableOpeningExternalStores`.
 - PKCS#11 con fallback directo para PKCS#1 en Linux (`linux+cgo`).
+- Ampliada base PKCS#11 directa a entornos `cgo` (no limitada artificialmente a Linux):
+  - build tags ajustados a `cgo` en `certstore` y firma PKCS#1 directa.
+  - rutas candidatas de modulo PKCS#11 ampliadas para Linux/macOS/Windows.
 - Robustez `service` legacy (framing, URL-encoding, errores y limites de memoria).
 - Validacion automatica mas robusta:
   - `scripts/test_active_go.sh` y `scripts/run_full_validation.sh` usan `GOFLAGS=-mod=readonly` por defecto para evitar falsos negativos por vendor.
@@ -39,7 +42,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 
 2. Paridad funcional restante (segun alcance final de release):
 - cofirma/contrafirma nativa especifica fuera de CAdES (hoy hay fallback compatible a `sign`);
-- estrategia PKCS#11 multi-plataforma (Windows/macOS) si se exige en alcance.
+- validacion real en Windows/macOS del flujo PKCS#11 directo (codigo base ya preparado en `cgo`).
 
 3. Cierre E2E real:
 - validacion en sedes reales (Valide + otra),

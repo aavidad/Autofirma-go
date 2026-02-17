@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Diputacion de Granada
 // Autor: Alberto Avidad Fernandez (Oficina de Software Libre de la Diputacion de Granada)
 
-//go:build linux && cgo
-// +build linux,cgo
+//go:build cgo
+// +build cgo
 
 package certstore
 
@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"autofirma-host/pkg/protocol"
@@ -62,13 +63,28 @@ func normalizePKCS11ModulePaths(moduleHints []string) []string {
 		}
 	}
 
-	// Common PKCS#11 module paths
-	return []string{
-		"/usr/lib/opensc-pkcs11.so",                  // OpenSC (DNIe)
-		"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so", // Ubuntu/Debian
-		"/usr/lib64/opensc-pkcs11.so",                // Fedora/RHEL
-		"/usr/lib/pkcs11/opensc-pkcs11.so",           // Generic
-		"/usr/local/lib/opensc-pkcs11.so",            // Custom install
+	switch runtime.GOOS {
+	case "windows":
+		return []string{
+			`C:\Windows\System32\opensc-pkcs11.dll`,
+			`C:\Program Files\OpenSC Project\OpenSC\pkcs11\opensc-pkcs11.dll`,
+			`C:\Program Files (x86)\OpenSC Project\OpenSC\pkcs11\opensc-pkcs11.dll`,
+		}
+	case "darwin":
+		return []string{
+			"/Library/OpenSC/lib/opensc-pkcs11.so",
+			"/opt/homebrew/lib/opensc-pkcs11.so",
+			"/usr/local/lib/opensc-pkcs11.so",
+			"/usr/local/lib/pkcs11/opensc-pkcs11.so",
+		}
+	default:
+		return []string{
+			"/usr/lib/opensc-pkcs11.so",
+			"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so",
+			"/usr/lib64/opensc-pkcs11.so",
+			"/usr/lib/pkcs11/opensc-pkcs11.so",
+			"/usr/local/lib/opensc-pkcs11.so",
+		}
 	}
 }
 
