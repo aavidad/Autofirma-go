@@ -2954,6 +2954,8 @@ func proxyFirewallDiagnostics(state *ProtocolState) (string, string, int) {
 	lines := make([]string, 0, 6)
 	level := diagLevelOK
 	action := ""
+	goos := runtime.GOOS
+	lines = append(lines, "so="+goos)
 	raise := func(newLevel int, newAction string) {
 		if newLevel > level {
 			level = newLevel
@@ -2967,7 +2969,7 @@ func proxyFirewallDiagnostics(state *ProtocolState) (string, string, int) {
 	proxyURL, proxyErr := http.ProxyFromEnvironment(&http.Request{URL: updateURL})
 	if proxyErr != nil {
 		lines = append(lines, "proxy=error_deteccion")
-		raise(diagLevelWarn, "No se pudo evaluar configuración de proxy del sistema.")
+		raise(diagLevelWarn, proxyFirewallSolutionByOS(goos, "proxy_detect_error"))
 	} else if proxyURL == nil {
 		lines = append(lines, "proxy=sin_configurar")
 	} else {
@@ -2986,7 +2988,7 @@ func proxyFirewallDiagnostics(state *ProtocolState) (string, string, int) {
 			conn, err := net.DialTimeout("tcp", target, 2*time.Second)
 			if err != nil {
 				lines = append(lines, "proxy_reachable=NO("+target+")")
-				raise(diagLevelError, "El proxy configurado no es accesible. Revisa configuración de proxy corporativo.")
+				raise(diagLevelError, proxyFirewallSolutionByOS(goos, "proxy_unreachable"))
 			} else {
 				_ = conn.Close()
 				lines = append(lines, "proxy_reachable=SI("+target+")")
@@ -3030,7 +3032,7 @@ func proxyFirewallDiagnostics(state *ProtocolState) (string, string, int) {
 		}
 	}
 	if failCount == len(targets) && len(targets) > 0 {
-		raise(diagLevelWarn, "Posible bloqueo por firewall/proxy: no hay salida TCP a endpoints críticos de firma.")
+		raise(diagLevelWarn, proxyFirewallSolutionByOS(goos, "tcp_blocked"))
 	}
 
 	if strings.TrimSpace(action) == "" {
@@ -3039,9 +3041,37 @@ func proxyFirewallDiagnostics(state *ProtocolState) (string, string, int) {
 	return strings.Join(lines, " | "), action, level
 }
 
+func proxyFirewallSolutionByOS(goos, reason string) string {
+	switch goos {
+	case "windows":
+		switch reason {
+		case "proxy_unreachable":
+			return "El proxy configurado en Windows no responde. Revisa la configuración del proxy corporativo (WinHTTP/Internet) y prueba de nuevo."
+		case "proxy_detect_error":
+			return "No se pudo leer la configuración de proxy de Windows. Revisa variables HTTP(S)_PROXY y la política corporativa del equipo."
+		case "tcp_blocked":
+			return "Posible bloqueo de firewall/proxy en Windows. Revisa firewall corporativo, proxy y reglas de salida HTTPS hacia @firma."
+		default:
+			return "Revisa configuración de red/proxy/firewall en Windows."
+		}
+	default:
+		switch reason {
+		case "proxy_unreachable":
+			return "El proxy configurado en Linux no responde. Revisa variables HTTP(S)_PROXY/NO_PROXY y la configuración de red corporativa."
+		case "proxy_detect_error":
+			return "No se pudo leer la configuración de proxy en Linux. Revisa variables HTTP(S)_PROXY/NO_PROXY y configuración del entorno."
+		case "tcp_blocked":
+			return "Posible bloqueo de firewall/proxy en Linux. Revisa salida HTTPS, reglas de red y proxy corporativo hacia @firma."
+		default:
+			return "Revisa configuración de red/proxy/firewall en Linux."
+		}
+	}
+}
+
 func antivirusInterferenceDiagnostics() (string, string, int) {
 	const host = "autofirma.dipgra.es"
 	const target = "autofirma.dipgra.es:443"
+	goos := runtime.GOOS
 
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, &tls.Config{
@@ -3051,15 +3081,15 @@ func antivirusInterferenceDiagnostics() (string, string, int) {
 	if err != nil {
 		msg := strings.ToLower(strings.TrimSpace(err.Error()))
 		if strings.Contains(msg, "x509") || strings.Contains(msg, "certificate") {
-			return "Error TLS al conectar con " + host + ": " + summarizeServerBody(err.Error()), "Posible inspección/interceptación TLS por antivirus o proxy. Prueba a desactivar inspección HTTPS en antivirus/proxy para este dominio.", diagLevelWarn
+			return "Error TLS al conectar con " + host + ": " + summarizeServerBody(err.Error()), antivirusSolutionByOS(goos, "tls_error"), diagLevelWarn
 		}
-		return "No se pudo completar handshake TLS con " + host + ": " + summarizeServerBody(err.Error()), "Revisa red/proxy/firewall y software de seguridad que inspeccione HTTPS.", diagLevelWarn
+		return "No se pudo completar handshake TLS con " + host + ": " + summarizeServerBody(err.Error()), antivirusSolutionByOS(goos, "handshake_error"), diagLevelWarn
 	}
 	defer conn.Close()
 
 	state := conn.ConnectionState()
 	if len(state.PeerCertificates) == 0 {
-		return "Sin certificados en handshake TLS de " + host, "Revisa proxy/antivirus o bloqueos HTTPS.", diagLevelWarn
+		return "Sin certificados en handshake TLS de " + host, antivirusSolutionByOS(goos, "no_peer_cert"), diagLevelWarn
 	}
 	leaf := state.PeerCertificates[0]
 	issuer := strings.ToLower(strings.TrimSpace(leaf.Issuer.String()))
@@ -3071,14 +3101,41 @@ func antivirusInterferenceDiagnostics() (string, string, int) {
 	}
 	for _, kw := range keywords {
 		if strings.Contains(joined, kw) {
-			return "Posible inspección HTTPS detectada (emisor TLS contiene '" + kw + "').", "Configura excepción en antivirus/proxy para autofirma.dipgra.es o desactiva inspección HTTPS para pruebas.", diagLevelWarn
+			return "Posible inspección HTTPS detectada (emisor TLS contiene '" + kw + "').", antivirusSolutionByOS(goos, "av_intercept"), diagLevelWarn
 		}
 	}
 
 	if err := leaf.VerifyHostname(host); err != nil {
-		return "El certificado TLS recibido no coincide con " + host + ".", "Posible MITM/inspección TLS. Revisa antivirus/proxy con inspección HTTPS.", diagLevelWarn
+		return "El certificado TLS recibido no coincide con " + host + ".", antivirusSolutionByOS(goos, "hostname_mismatch"), diagLevelWarn
 	}
 	return "Sin indicios claros de interceptación TLS por antivirus/proxy.", "", diagLevelOK
+}
+
+func antivirusSolutionByOS(goos, reason string) string {
+	switch goos {
+	case "windows":
+		switch reason {
+		case "tls_error", "handshake_error", "hostname_mismatch":
+			return "Revisa antivirus de Windows, inspección HTTPS y proxy corporativo. Si procede, añade excepción para autofirma.dipgra.es."
+		case "no_peer_cert":
+			return "No se recibió cadena TLS válida. Revisa antivirus/proxy en Windows y bloqueos HTTPS."
+		case "av_intercept":
+			return "Se detecta posible inspección HTTPS en Windows. Añade excepción en antivirus/proxy para autofirma.dipgra.es."
+		default:
+			return "Revisa antivirus/proxy corporativo en Windows."
+		}
+	default:
+		switch reason {
+		case "tls_error", "handshake_error", "hostname_mismatch":
+			return "Revisa software de seguridad, proxy e inspección HTTPS en Linux. Añade excepción para autofirma.dipgra.es si aplica."
+		case "no_peer_cert":
+			return "No se recibió cadena TLS válida. Revisa proxy/firewall y software de seguridad en Linux."
+		case "av_intercept":
+			return "Se detecta posible inspección HTTPS en Linux. Añade excepción en proxy/seguridad para autofirma.dipgra.es."
+		default:
+			return "Revisa software de seguridad/proxy en Linux."
+		}
+	}
 }
 
 func collectRecentErrorHints(logFile string) []string {

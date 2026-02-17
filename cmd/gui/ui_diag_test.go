@@ -119,3 +119,31 @@ func TestOperationHistorySummaryEtiquetas(t *testing.T) {
 		t.Fatalf("se esperaba etiqueta ERROR en resumen: %q", got)
 	}
 }
+
+func TestProxyFirewallSolutionByOSWindows(t *testing.T) {
+	got := proxyFirewallSolutionByOS("windows", "proxy_unreachable")
+	if !strings.Contains(strings.ToLower(got), "windows") {
+		t.Fatalf("se esperaba mensaje específico de Windows, obtenido=%q", got)
+	}
+}
+
+func TestProxyFirewallSolutionByOSLinux(t *testing.T) {
+	got := proxyFirewallSolutionByOS("linux", "tcp_blocked")
+	if !strings.Contains(strings.ToLower(got), "linux") {
+		t.Fatalf("se esperaba mensaje específico de Linux, obtenido=%q", got)
+	}
+}
+
+func TestAntivirusSolutionByOSWindows(t *testing.T) {
+	got := antivirusSolutionByOS("windows", "av_intercept")
+	if !strings.Contains(strings.ToLower(got), "windows") {
+		t.Fatalf("se esperaba mensaje específico de Windows, obtenido=%q", got)
+	}
+}
+
+func TestAntivirusSolutionByOSLinux(t *testing.T) {
+	got := antivirusSolutionByOS("linux", "tls_error")
+	if !strings.Contains(strings.ToLower(got), "linux") {
+		t.Fatalf("se esperaba mensaje específico de Linux, obtenido=%q", got)
+	}
+}

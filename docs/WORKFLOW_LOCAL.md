@@ -3,6 +3,10 @@
 Directorio de trabajo:
 - `/home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/work/native-host-src`
 
+## 0) Guía funcional completa
+Antes de pruebas/manuales, revisar:
+- `docs/GUI_AYUDA_EXHAUSTIVA.md`
+
 ## 1) Validación rápida de compatibilidad
 ```bash
 cd /home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/work/native-host-src

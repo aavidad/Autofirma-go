@@ -254,3 +254,26 @@
 - Cobertura añadida:
   - `TestBuildPadesVisibleSignatureTextIncludesCNAndFNMT`
   - `TestApplyPadesAppearanceOptionsSetsVisibleText`
+
+## 2026-02-18 00:55 +0100
+### Hecho hoy
+- Diagnóstico de red/seguridad refinado con separación explícita por sistema operativo:
+  - mensajes y acciones de `proxy/firewall` diferenciados para Linux y Windows.
+  - mensajes y acciones de posible interferencia TLS por antivirus/proxy diferenciados para Linux y Windows.
+  - detalle técnico ampliado con `so=<linux|windows>` para trazabilidad de incidencias.
+- Cobertura de tests añadida para asegurar mensajes por SO:
+  - `TestProxyFirewallSolutionByOSWindows`
+  - `TestProxyFirewallSolutionByOSLinux`
+  - `TestAntivirusSolutionByOSWindows`
+  - `TestAntivirusSolutionByOSLinux`
+- Documentación funcional exhaustiva creada para cierre de jornada:
+  - `docs/GUI_AYUDA_EXHAUSTIVA.md`
+  - incluye uso completo de la app, arquitectura, flujos de firma, “vueltas” protocolarias, batch, diagnóstico, errores típicos y acciones.
+
+### Pendiente
+- Ejecutar validación E2E final en sedes reales con captura de evidencia saneada tras los últimos cambios UX/diagnóstico.
+- Revisar y completar castellanización residual en mensajes técnicos de backend (bloques que todavía estén en inglés en código propio).
+- Revisar exposición gradual de funciones avanzadas en modo experto con foco en evitar sobrecarga del modo simple.
+
+### Siguiente paso inmediato
+- Ejecutar checklist E2E real (Valide + otra sede), regenerar reporte y cerrar bloque con etiqueta de release candidata.
