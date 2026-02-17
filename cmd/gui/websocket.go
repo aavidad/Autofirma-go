@@ -102,20 +102,20 @@ func (s *WebSocketServer) Start() error {
 		ln, err = net.Listen("tcp", addr)
 		if err == nil {
 			port = p
-			log.Printf("[WebSocket] Successfully bound to %s", addr)
+			log.Printf("[WebSocket] Enlace correcto a %s", addr)
 			break
 		}
-		log.Printf("[WebSocket] Port %d not available: %v", p, err)
+		log.Printf("[WebSocket] Puerto %d no disponible: %v", p, err)
 	}
 
 	if ln == nil {
-		return fmt.Errorf("failed to bind to any of the requested ports: %v", s.ports)
+		return fmt.Errorf("no se pudo enlazar en ninguno de los puertos solicitados: %v", s.ports)
 	}
 
 	certFile, keyFile, err := ensureLocalTLSCerts()
 	if err != nil {
 		_ = ln.Close()
-		return fmt.Errorf("failed to prepare local TLS certificates: %w", err)
+		return fmt.Errorf("no se pudieron preparar certificados TLS locales: %w", err)
 	}
 
 	go func() {
@@ -124,9 +124,9 @@ func (s *WebSocketServer) Start() error {
 			Handler: mux,
 		}
 
-		log.Printf("[WebSocket] Starting HTTPS/WSS server loop on port %d", port)
+		log.Printf("[WebSocket] Iniciando bucle de servidor HTTPS/WSS en puerto %d", port)
 		if err := srv.ServeTLS(ln, certFile, keyFile); err != nil && err != http.ErrServerClosed {
-			log.Printf("[WebSocket] Server error: %v", err)
+			log.Printf("[WebSocket] Error del servidor: %v", err)
 		}
 	}()
 
@@ -142,7 +142,7 @@ func (s *WebSocketServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("AutoFirma local server running"))
+	_, _ = w.Write([]byte("Servidor local AutoFirma activo"))
 }
 
 func setCompatHeaders(w http.ResponseWriter) {
@@ -255,13 +255,13 @@ func (s *WebSocketServer) handleRetrieveService(w http.ResponseWriter, r *http.R
 func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRemoteAddr(r.RemoteAddr) {
 		http.Error(w, "SAF_47: Peticion externa no permitida", http.StatusForbidden)
-		log.Printf("[WebSocket] Rejected external remote addr: %s", r.RemoteAddr)
+		log.Printf("[WebSocket] Dirección remota externa rechazada: %s", r.RemoteAddr)
 		return
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[WebSocket] Upgrade error: %v", err)
+		log.Printf("[WebSocket] Error en upgrade: %v", err)
 		return
 	}
 
@@ -269,14 +269,14 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 	s.conn = conn
 	s.connMux.Unlock()
 
-	log.Printf("[WebSocket] Client connected from %s", r.RemoteAddr)
+	log.Printf("[WebSocket] Cliente conectado desde %s", r.RemoteAddr)
 
 	defer func() {
 		conn.Close()
 		s.connMux.Lock()
 		s.conn = nil
 		s.connMux.Unlock()
-		log.Println("[WebSocket] Client disconnected")
+		log.Println("[WebSocket] Cliente desconectado")
 	}()
 
 	for {
@@ -287,9 +287,9 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 			case websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure):
 				// Normal close path; no extra log noise.
 			case websocket.IsCloseError(err, websocket.CloseAbnormalClosure) || strings.Contains(errLower, "unexpected eof"):
-				log.Printf("[WebSocket] Client disconnected abruptly")
+				log.Printf("[WebSocket] Cliente desconectado de forma abrupta")
 			default:
-				log.Printf("[WebSocket] Read error: %v", err)
+				log.Printf("[WebSocket] Error de lectura: %v", err)
 			}
 			break
 		}
@@ -299,14 +299,14 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		if strings.HasPrefix(msg, EchoRequestPrefix) {
 			// log.Printf("[WebSocket] Received echo: %s", msg)
 		} else {
-			log.Printf("[WebSocket] Received: %s", applog.SanitizeURI(msg))
+			log.Printf("[WebSocket] Recibido: %s", applog.SanitizeURI(msg))
 		}
 
 		if s.session != "" {
 			msgSession := extractMessageSessionID(msg)
 			if msgSession == "" || msgSession != s.session {
 				_ = conn.WriteMessage(messageType, []byte("SAF_46: Id de sesion invalido"))
-				log.Printf("[WebSocket] Invalid session id (expected=%s got=%s)", applog.MaskID(s.session), applog.MaskID(msgSession))
+				log.Printf("[WebSocket] Id de sesión inválido (esperado=%s recibido=%s)", applog.MaskID(s.session), applog.MaskID(msgSession))
 				continue
 			}
 		}
@@ -318,7 +318,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		if strings.HasPrefix(msg, EchoRequestPrefix) {
 			// Respond with OK
 			if err := conn.WriteMessage(messageType, []byte(EchoOKResponse)); err != nil {
-				log.Printf("[WebSocket] Write error: %v", err)
+				log.Printf("[WebSocket] Error de escritura: %v", err)
 				break
 			}
 			continue
@@ -328,13 +328,13 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		// Check for batch operations (AutoFirma sets timeout differently for these)
 		isBatch := strings.HasPrefix(msg, HeaderBatch1) || strings.HasPrefix(msg, HeaderBatch2)
 		if isBatch {
-			log.Println("[WebSocket] Detected Batch Operation")
+			log.Println("[WebSocket] Operación por lotes detectada")
 			// We effectively increase timeout by just continuing to process (we don't enforce strict timeouts here yet)
 		}
 
 		// In Java: broadcast(ProtocolInvocationLauncher.launch(message, protocolVersion, true), ...)
 		// We implement that logic here:
-		log.Printf("[WebSocket] Processing afirma protocol request: %s", applog.SanitizeURI(msg))
+		log.Printf("[WebSocket] Procesando solicitud de protocolo afirma: %s", applog.SanitizeURI(msg))
 		result := s.processProtocolRequest(msg)
 		if s.ui != nil {
 			action := ""
@@ -353,7 +353,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 
 		// Send result back
 		if err := conn.WriteMessage(messageType, []byte(result)); err != nil {
-			log.Printf("[WebSocket] Write error: %v", err)
+			log.Printf("[WebSocket] Error de escritura: %v", err)
 			break
 		}
 		upper := strings.ToUpper(result)

@@ -578,7 +578,7 @@ func batchHTTPPostWithRetry(rawURL string) ([]byte, error) {
 	if until, blocked := batchRemoteIsOpen(key, time.Now()); blocked {
 		return nil, &batchCircuitOpenError{Key: key, OpenUntil: until}
 	}
-	log.Printf("[Batch] remote request target=%s timeout=%s max_attempts=%d", target, timeout, maxAttempts)
+	log.Printf("[Batch] solicitud remota destino=%s timeout=%s max_intentos=%d", target, timeout, maxAttempts)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		body, err := batchHTTPPostFunc(rawURL)
 		if err == nil {
@@ -589,7 +589,7 @@ func batchHTTPPostWithRetry(rawURL string) ([]byte, error) {
 		if !shouldRetryBatchHTTPError(err) || attempt == maxAttempts {
 			break
 		}
-		log.Printf("[Batch] transient remote error target=%s attempt=%d/%d err=%v", target, attempt, maxAttempts, err)
+		log.Printf("[Batch] error remoto transitorio destino=%s intento=%d/%d err=%v", target, attempt, maxAttempts, err)
 		backoff := time.Duration(math.Pow(2, float64(attempt-1))*150) * time.Millisecond
 		time.Sleep(backoff)
 	}
@@ -821,7 +821,7 @@ func signTriphaseData(td *triphaseDataResponse, certID, algorithm string, signOp
 		}
 		pk1B64, err := signPKCS1WithOptionsFunc(preData, certID, algorithm, opts)
 		if err != nil {
-			log.Printf("[Batch] PKCS1 signing failed id=%s err=%v", si.ID, err)
+			log.Printf("[Batch] fallo firmando PKCS1 id=%s err=%v", si.ID, err)
 			return nil, err
 		}
 		params["PK1"] = pk1B64

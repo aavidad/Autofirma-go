@@ -826,7 +826,7 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 										return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return material.Body2(ui.Theme, "Version: "+version.CurrentVersion).Layout(gtx)
+													return material.Body2(ui.Theme, "Versión: "+version.CurrentVersion).Layout(gtx)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													return material.Body2(ui.Theme, "Creado por Alberto Avidad Fernández de la Oficina de Software Libre de la Diputación de Granada").Layout(gtx)
@@ -1098,7 +1098,7 @@ func (ui *UI) verifyCurrentFile() {
 
 		// Java-compatible active waiting: keep transaction alive while user signs.
 		if ui.Protocol != nil && ui.Protocol.ActiveWaiting && ui.Protocol.STServlet != "" && ui.Protocol.RequestID != "" {
-			log.Printf("[UI] Starting active WAIT loop (id=%s)", ui.Protocol.RequestID)
+			log.Printf("[UI] Iniciando bucle activo WAIT (id=%s)", ui.Protocol.RequestID)
 			stopWait = make(chan struct{})
 			ui.PendingWork.Add(1)
 			go func() {
@@ -1106,7 +1106,7 @@ func (ui *UI) verifyCurrentFile() {
 
 				// Initial wait marker
 				if err := ui.Protocol.SendWaitSignal(); err != nil {
-					log.Printf("[UI] WAIT initial send failed: %v", err)
+					log.Printf("[UI] Falló el envío inicial WAIT: %v", err)
 				}
 
 				ticker := time.NewTicker(10 * time.Second)
@@ -1118,7 +1118,7 @@ func (ui *UI) verifyCurrentFile() {
 						return
 					case <-ticker.C:
 						if err := ui.Protocol.SendWaitSignal(); err != nil {
-							log.Printf("[UI] WAIT periodic send failed: %v", err)
+							log.Printf("[UI] Falló el envío periódico WAIT: %v", err)
 						}
 					}
 				}
@@ -1250,7 +1250,7 @@ func (ui *UI) signCurrentFile() {
 		// If in protocol mode and format was specified, use that
 		if ui.Protocol != nil && ui.Protocol.SignFormat != "" {
 			format = normalizeProtocolFormat(ui.Protocol.SignFormat)
-			log.Printf("[UI] Using protocol-specified format: %s", format)
+			log.Printf("[UI] Usando formato indicado por protocolo: %s", format)
 		} else {
 			// Auto-detect from extension
 			if ext == ".xml" {
@@ -1302,14 +1302,14 @@ func (ui *UI) signCurrentFile() {
 
 		// Java-compatible active waiting while user signs and result is uploaded.
 		if ui.Protocol != nil && ui.Protocol.ActiveWaiting && ui.Protocol.STServlet != "" && ui.Protocol.RequestID != "" {
-			log.Printf("[UI] Starting active WAIT loop for sign (id=%s)", ui.Protocol.RequestID)
+			log.Printf("[UI] Iniciando bucle activo WAIT para firma (id=%s)", ui.Protocol.RequestID)
 			stopWait = make(chan struct{})
 			ui.PendingWork.Add(1)
 			go func() {
 				defer ui.PendingWork.Done()
 
 				if err := ui.Protocol.SendWaitSignal(); err != nil {
-					log.Printf("[UI] WAIT initial send failed: %v", err)
+					log.Printf("[UI] Falló el envío inicial WAIT: %v", err)
 				}
 
 				ticker := time.NewTicker(10 * time.Second)
@@ -1321,7 +1321,7 @@ func (ui *UI) signCurrentFile() {
 						return
 					case <-ticker.C:
 						if err := ui.Protocol.SendWaitSignal(); err != nil {
-							log.Printf("[UI] WAIT periodic send failed: %v", err)
+							log.Printf("[UI] Falló el envío periódico WAIT: %v", err)
 						}
 					}
 				}
@@ -1404,7 +1404,7 @@ func (ui *UI) signCurrentFile() {
 			// BUT if we are in WebSocket mode (server running), we don't want to close the whole app.
 			// However, for now, afirma://sign? one-shot is the primary use of ShouldClose.
 
-			log.Println("[UI] Attempting to upload signature to server...")
+			log.Println("[UI] Intentando subir la firma al servidor...")
 
 			// Get certificate DER content
 			certDER := ui.Certs[ui.SelectedCert].Content
@@ -1420,9 +1420,9 @@ func (ui *UI) signCurrentFile() {
 			// The WebSocket server loop waits on this channel.
 			select {
 			case ui.SignatureDone <- res:
-				log.Println("[UI] Signature sent to internal channel (WebSocket listener).")
+				log.Println("[UI] Firma enviada al canal interno (escucha WebSocket).")
 			default:
-				log.Println("[UI] Warning: No listener on SignatureDone channel (not in WS mode or blocked?).")
+				log.Println("[UI] Aviso: no hay escucha en el canal SignatureDone (¿fuera de modo WS o bloqueado?).")
 				// If we are strictly in server mode, we really should have a listener.
 				if ui.IsServerMode {
 					// Force send? Or just log warning.
@@ -1579,11 +1579,11 @@ func (ui *UI) runLocalHealthCheck() {
 	if trustLines, err := localTLSTrustStatus(); err == nil {
 		lines = append(lines, trustLines...)
 	} else {
-		lines = append(lines, "[Health] trust-status error: "+err.Error())
+		lines = append(lines, "[Salud] error trust-status: "+err.Error())
 	}
 	certs, err := certstore.GetSystemCertificates()
 	if err != nil {
-		lines = append(lines, "[Health] certstore error: "+err.Error())
+		lines = append(lines, "[Salud] error en almacén de certificados: "+err.Error())
 	} else {
 		signable := 0
 		for _, c := range certs {
@@ -1591,14 +1591,14 @@ func (ui *UI) runLocalHealthCheck() {
 				signable++
 			}
 		}
-		lines = append(lines, fmt.Sprintf("[Health] certificates=%d signable=%d", len(certs), signable))
+		lines = append(lines, fmt.Sprintf("[Salud] certificados=%d aptos_firma=%d", len(certs), signable))
 	}
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:63117", 800*time.Millisecond)
 	if err != nil {
-		lines = append(lines, "[Health] websocket port 63117: no listener")
+		lines = append(lines, "[Salud] puerto websocket 63117: sin escucha")
 	} else {
 		_ = conn.Close()
-		lines = append(lines, "[Health] websocket port 63117: listener detected")
+		lines = append(lines, "[Salud] puerto websocket 63117: escucha detectada")
 	}
 
 	ui.HealthStatus = strings.Join(lines, " | ")
@@ -1891,7 +1891,7 @@ func isDiagnosticLogLine(line string) bool {
 }
 
 var afirmaURIRegex = regexp.MustCompile(`afirma://\S+`)
-var uploadHTTPStatusRegex = regexp.MustCompile(`upload http error:\s*(\d+)`)
+var uploadHTTPStatusRegex = regexp.MustCompile(`(?:upload http error|error http en subida):\s*(\d+)`)
 
 func sanitizeReportLogLine(line string) string {
 	trimmed := strings.TrimSpace(line)
@@ -1951,7 +1951,7 @@ func buildAfirmaUploadErrorMessage(err error, stServlet string, rtServlet string
 		}
 		return fmt.Sprintf("Error HTTP %s al enviar la firma a %s.", m[1], endpoint)
 	}
-	if strings.Contains(lower, "server upload returned non-ok body") {
+	if strings.Contains(lower, "server upload returned non-ok body") || strings.Contains(lower, "subida al servidor devolvió cuerpo no-ok") {
 		return fmt.Sprintf("%s devolvió respuesta no válida al guardar la firma. Detalle: %s", endpoint, summarizeServerBody(raw))
 	}
 	return fmt.Sprintf("Error enviando la firma a %s. Detalle técnico: %s", endpoint, summarizeServerBody(raw))

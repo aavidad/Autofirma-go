@@ -19,10 +19,10 @@ import (
 )
 
 var (
-	serverModeFlag    = flag.Bool("server", false, "Run as WebSocket server on port 63117")
-	generateCertsFlag = flag.Bool("generate-certs", false, "Generate local TLS certificates and exit")
-	installTrustFlag  = flag.Bool("install-trust", false, "Install local Root CA into trust stores (Linux/Windows)")
-	trustStatusFlag   = flag.Bool("trust-status", false, "Print trust status of local Root CA (Linux/Windows)")
+	serverModeFlag    = flag.Bool("server", false, "Iniciar como servidor WebSocket en el puerto 63117")
+	generateCertsFlag = flag.Bool("generate-certs", false, "Generar certificados TLS locales y salir")
+	installTrustFlag  = flag.Bool("install-trust", false, "Instalar la CA local en los almacenes de confianza (Linux/Windows)")
+	trustStatusFlag   = flag.Bool("trust-status", false, "Mostrar estado de confianza de la CA local (Linux/Windows)")
 )
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 		log.Printf("Logging inicializado en: %s", logPath)
 	}
 
-	log.Printf("Launched with args: %v", os.Args)
+	log.Printf("Lanzado con argumentos: %v", os.Args)
 
 	if *generateCertsFlag {
 		certFile, keyFile, err := ensureLocalTLSCerts()
@@ -79,7 +79,7 @@ func main() {
 
 	// WebSocket Server Mode
 	if *serverModeFlag {
-		log.Println("Starting in WebSocket server mode")
+		log.Println("Iniciando en modo servidor WebSocket")
 		runWebSocketServer()
 		return
 	}
@@ -97,9 +97,9 @@ func main() {
 		}
 
 		// Wait for any background work (like uploads) to finish
-		log.Println("[Main] Window closed. Waiting for background tasks...")
+		log.Println("[Main] Ventana cerrada. Esperando tareas en segundo plano...")
 		ui.PendingWork.Wait()
-		log.Println("[Main] Background tasks done. Exiting.")
+		log.Println("[Main] Tareas en segundo plano finalizadas. Saliendo.")
 
 		os.Exit(0)
 	}()
@@ -120,10 +120,10 @@ func runWebSocketServer() {
 	// Start WebSocket server
 	server := NewWebSocketServer([]int{DefaultWebSocketPort}, "", ui)
 	if err := server.Start(); err != nil {
-		log.Fatalf("Failed to start WebSocket server: %v", err)
+		log.Fatalf("No se pudo iniciar el servidor WebSocket: %v", err)
 	}
 
-	log.Printf("WebSocket server running on port %d", DefaultWebSocketPort)
+	log.Printf("Servidor WebSocket activo en el puerto %d", DefaultWebSocketPort)
 
 	// Run UI loop (needed for certificate dialogs)
 	go func() {
@@ -146,11 +146,11 @@ func loop(w *app.Window, ui *UI) error {
 		arg = strings.Trim(arg, "\"'")
 
 		if strings.Contains(strings.ToLower(arg), "afirma://") {
-			log.Printf("Protocol detected in arg: %s", arg)
+			log.Printf("Protocolo detectado en argumento: %s", arg)
 
 			// Detect websocket launch using robust URI parser.
 			if _, wsErr := parseWebSocketLaunchURI(arg); wsErr == nil {
-				log.Println("Detected 'afirma://websocket' launch request.")
+				log.Println("Detectada solicitud de arranque 'afirma://websocket'.")
 				handleWebSocketLaunch(arg, ui)
 				// Do NOT exit, keep running to serve
 			} else {
@@ -159,7 +159,7 @@ func loop(w *app.Window, ui *UI) error {
 			}
 		} else {
 			if !strings.HasPrefix(arg, "-") {
-				log.Printf("Arg present but no protocol detected: %s", arg)
+				log.Printf("Argumento presente pero sin protocolo detectado: %s", arg)
 			}
 		}
 	}
@@ -173,7 +173,7 @@ func loop(w *app.Window, ui *UI) error {
 			// Check if we should close the window (e.g. after silent sign click)
 			// But do NOT close if we are in server mode
 			if ui.ShouldClose && !ui.IsServerMode && !*serverModeFlag {
-				log.Println("[Loop] ShouldClose flag set and not in ServerMode. Closing window.")
+				log.Println("[Loop] Indicador ShouldClose activo y no está en modo servidor. Cerrando ventana.")
 				return nil
 			}
 
@@ -186,23 +186,23 @@ func loop(w *app.Window, ui *UI) error {
 }
 
 func handleWebSocketLaunch(uriString string, ui *UI) {
-	log.Printf("[Launcher] Handling WebSocket launch request. Raw URI: %s", uriString)
+	log.Printf("[Launcher] Procesando solicitud de arranque WebSocket. URI original: %s", uriString)
 	req, err := parseWebSocketLaunchURI(uriString)
 	if err != nil {
-		log.Printf("[Launcher] Invalid websocket launch URI: %v", err)
+		log.Printf("[Launcher] URI de arranque WebSocket inválida: %v", err)
 		return
 	}
 
-	log.Printf("[Launcher] Starting WebSocket server on one of requested ports: %v (v=%d session=%s)", req.Ports, req.Version, maskSessionForLog(req.SessionID))
+	log.Printf("[Launcher] Iniciando servidor WebSocket en uno de los puertos solicitados: %v (v=%d sesión=%s)", req.Ports, req.Version, maskSessionForLog(req.SessionID))
 	ui.updateSessionDiagnostics("websocket-launch", "websocket", req.SessionID, "", "launch_received")
 
 	// Start server (async)
 	server := NewWebSocketServer(req.Ports, req.SessionID, ui)
 	if err := server.Start(); err != nil {
-		log.Printf("[Launcher] Failed to start WebSocket server via launch: %v", err)
+		log.Printf("[Launcher] No se pudo iniciar el servidor WebSocket desde la solicitud: %v", err)
 		ui.updateSessionDiagnostics("websocket-launch", "websocket", req.SessionID, "", "launch_error")
 	} else {
-		log.Printf("[Launcher] WebSocket server launched successfully via protocol request")
+		log.Printf("[Launcher] Servidor WebSocket iniciado correctamente desde solicitud de protocolo")
 		// Enter minimalist mode
 		ui.IsServerMode = true
 		ui.Protocol = &ProtocolState{IsActive: true, Action: "websocket"}

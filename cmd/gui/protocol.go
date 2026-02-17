@@ -50,8 +50,8 @@ type ProtocolState struct {
 	ProtocolVersion      int
 }
 
-var errMinimumClientVersionNotSatisfied = errors.New("minimum client version not satisfied")
-var errUnsupportedProcedureVersion = errors.New("unsupported procedure version")
+var errMinimumClientVersionNotSatisfied = errors.New("versión mínima de cliente no satisfecha")
+var errUnsupportedProcedureVersion = errors.New("versión de procedimiento no soportada")
 
 // ParseProtocolURI parses "afirma://..." URI
 func ParseProtocolURI(uriString string) (*ProtocolState, error) {
@@ -310,8 +310,8 @@ func normalizeProtocolAction(action string) string {
 
 func (p *ProtocolState) DownloadFile() (string, error) {
 	if p.RTServlet == "" {
-		log.Println("[Protocol] RTServlet is empty, skipping download.")
-		return "", nil // No error, just nothing to download
+		log.Println("[Protocol] RTServlet vacío, se omite la descarga.")
+		return "", nil // Sin error, simplemente no hay nada que descargar.
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 
@@ -338,7 +338,7 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 		if method == "GET" {
 			reqURL.RawQuery = data.Encode() // Replaces any existing query
 			req, err = http.NewRequest("GET", reqURL.String(), nil)
-			log.Printf("[Protocol] GET URL: %s", reqURL.String()) // Log full URL
+			log.Printf("[Protocol] URL GET: %s", reqURL.String()) // Log full URL
 		} else {
 			// POST (Fallback if GET fails/not allowed)
 			// For POST, Java client strips query from URL and puts it in Body.
@@ -346,7 +346,7 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 			encodedData := data.Encode()
 			req, err = http.NewRequest("POST", reqURL.String(), strings.NewReader(encodedData))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			log.Printf("[Protocol] POST Data: %s", encodedData) // Log body
+			log.Printf("[Protocol] Datos POST: %s", encodedData) // Log body
 		}
 
 		if err != nil {
@@ -357,7 +357,7 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 		req.Header.Set("User-Agent", "AutoFirma/1.6.5") // Use a standard version
 		req.Header.Set("Accept", "*/*")
 
-		log.Printf("[Protocol] Attempting %s %s", method, p.RTServlet)
+		log.Printf("[Protocol] Intentando %s %s", method, p.RTServlet)
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -370,10 +370,10 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 			return "", nil, err
 		}
 
-		log.Printf("[Protocol] Status: %d, ContentLength: %d", resp.StatusCode, len(body))
+		log.Printf("[Protocol] Estado: %d, LongitudContenido: %d", resp.StatusCode, len(body))
 
 		if resp.StatusCode != 200 {
-			return "", body, fmt.Errorf("server error %d", resp.StatusCode)
+			return "", body, fmt.Errorf("error del servidor %d", resp.StatusCode)
 		}
 
 		return "", body, nil
@@ -385,7 +385,7 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 	// Check if valid (size > 100 etc or not starting with ERR-)
 	if err == nil && len(body) > 100 { // Reduced threshold slightly
 		if strings.HasPrefix(strings.ToLower(string(body)), "err-") {
-			log.Printf("[Protocol] Server returned error content: %s", string(body))
+			log.Printf("[Protocol] El servidor devolvió contenido de error: %s", string(body))
 		} else {
 			// Success with GET
 			return saveTemp(body, p.FileID, p.Key)
@@ -393,11 +393,11 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 	}
 
 	if len(body) < 500 {
-		log.Printf("[Protocol] GET response too small: %s", string(body))
+		log.Printf("[Protocol] Respuesta GET demasiado pequeña: %s", string(body))
 	}
 
 	// Try POST as fallback
-	log.Println("[Protocol] GET failed or small content. Trying POST...")
+	log.Println("[Protocol] GET falló o devolvió contenido pequeño. Probando POST...")
 	_, bodyPost, errPost := attempt("POST")
 	if errPost == nil && len(bodyPost) > 200 {
 		return saveTemp(bodyPost, p.FileID, p.Key)
@@ -405,7 +405,7 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 
 	// Failed
 	if len(bodyPost) < 500 {
-		log.Printf("[Protocol] POST response: %s", string(bodyPost))
+		log.Printf("[Protocol] Respuesta POST: %s", string(bodyPost))
 		return "", fmt.Errorf("descarga fallida. El servidor devolvió: %s", string(bodyPost))
 	}
 
@@ -444,10 +444,10 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 							if padding > 0 && padding < len(decrypted) {
 								decrypted = decrypted[:len(decrypted)-padding]
 							}
-							log.Printf("[Protocol] Successfully decrypted data (padding=%d, size=%d)", padding, len(decrypted))
+							log.Printf("[Protocol] Datos descifrados correctamente (relleno=%d, tamaño=%d)", padding, len(decrypted))
 							data = decrypted
 						} else {
-							log.Printf("[Protocol] DES decryption failed: %v", err)
+							log.Printf("[Protocol] Falló el descifrado DES: %v", err)
 						}
 					}
 				}
@@ -495,7 +495,7 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 					if len(decodedBytes) < 10 {
 						debugLen = len(decodedBytes)
 					}
-					log.Printf("[Protocol] Successfully decoded Base64. Header: %x", decodedBytes[:debugLen])
+					log.Printf("[Protocol] Base64 decodificado correctamente. Cabecera: %x", decodedBytes[:debugLen])
 					data = decodedBytes
 					decoded = true
 					break
@@ -513,7 +513,7 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 	if len(data) < 50 {
 		debugLen = len(data)
 	}
-	log.Printf("[Protocol] File Header detected: %x (string: %q)", data[:debugLen], string(data[:debugLen]))
+	log.Printf("[Protocol] Cabecera de fichero detectada: %x (texto: %q)", data[:debugLen], string(data[:debugLen]))
 
 	if len(data) > 4 && string(data[:4]) == "%PDF" {
 		ext = ".pdf"
@@ -576,9 +576,9 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	if uploadServlet == "" {
 		// Fallback only for legacy flows where stservlet is not provided.
 		uploadServlet = p.RTServlet
-		log.Printf("[Protocol] STServlet missing, falling back to RTServlet for upload: %s", uploadServlet)
+		log.Printf("[Protocol] Falta STServlet, usando RTServlet como respaldo para subida: %s", uploadServlet)
 	} else {
-		log.Printf("[Protocol] Using STServlet for upload: %s", uploadServlet)
+		log.Printf("[Protocol] Usando STServlet para subida: %s", uploadServlet)
 	}
 	reqURL, err := url.Parse(uploadServlet)
 	if err != nil {
@@ -622,19 +622,19 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		// 2. Encrypt both
 		encCertVal, err := AutoFirmaEncryptAndFormat(certBytes, keyBytes)
 		if err != nil {
-			return fmt.Errorf("encrypt cert failed: %v", err)
+			return fmt.Errorf("falló el cifrado del certificado: %v", err)
 		}
 		encSigVal, err := AutoFirmaEncryptAndFormat(sigBytes, keyBytes)
 		if err != nil {
-			return fmt.Errorf("encrypt sig failed: %v", err)
+			return fmt.Errorf("falló el cifrado de la firma: %v", err)
 		}
 
 		payload = encCertVal + "|" + encSigVal
-		log.Printf("[Protocol] Uploading Encrypted payload (Cert|Sig): %s", payload)
+		log.Printf("[Protocol] Subiendo carga cifrada (Cert|Firma): %s", payload)
 	} else {
 		// Plain: Cert|Sig (AutoFirma usually uses URL Safe Base64 even without encryption)
 		payload = base64.URLEncoding.EncodeToString(certBytes) + "|" + base64.URLEncoding.EncodeToString(sigBytes)
-		log.Printf("[Protocol] Uploading Plain payload (Cert|Sig)")
+		log.Printf("[Protocol] Subiendo carga en claro (Cert|Firma)")
 	}
 
 	sendBody := func(label string, body string, withContentType bool) (bool, string, error) {
@@ -652,7 +652,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return false, "", fmt.Errorf("%s upload failed: %v", label, err)
+			return false, "", fmt.Errorf("%s: fallo de subida: %v", label, err)
 		}
 		defer resp.Body.Close()
 
@@ -661,7 +661,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		log.Printf("[Protocol] %s upload response status=%d body=%q", label, resp.StatusCode, bodyText)
 
 		if resp.StatusCode != 200 {
-			return false, bodyText, fmt.Errorf("%s upload HTTP error: %d %s", label, resp.StatusCode, bodyText)
+			return false, bodyText, fmt.Errorf("%s: error HTTP en subida: %d %s", label, resp.StatusCode, bodyText)
 		}
 		if strings.EqualFold(bodyText, "OK") || strings.Contains(strings.ToUpper(bodyText), "OK") {
 			return true, bodyText, nil
@@ -716,7 +716,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		}
 	}
 
-	return fmt.Errorf("server upload returned non-OK body: %s", bodyText)
+	return fmt.Errorf("la subida al servidor devolvió cuerpo no-OK: %s", bodyText)
 }
 
 // SendWaitSignal sends Java-compatible active wait marker to storage servlet.
@@ -728,7 +728,7 @@ func (p *ProtocolState) SendWaitSignal() error {
 		return fmt.Errorf("storage servlet is empty")
 	}
 	if p.RequestID == "" {
-		return fmt.Errorf("request id is empty")
+		return fmt.Errorf("request id vacío")
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -758,7 +758,7 @@ func (p *ProtocolState) SendWaitSignal() error {
 	log.Printf("[Protocol] WAIT response status=%d body=%q", resp.StatusCode, bodyText)
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("wait failed: %d %s", resp.StatusCode, bodyText)
+		return fmt.Errorf("falló WAIT: %d %s", resp.StatusCode, bodyText)
 	}
 	if !strings.EqualFold(bodyText, "OK") && !strings.Contains(strings.ToUpper(bodyText), "OK") {
 		return fmt.Errorf("wait non-OK body: %s", bodyText)
@@ -795,16 +795,16 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 			// Check if the downloaded file is an AutoFirma XML request
 			content, err := os.ReadFile(path)
 			if err == nil && strings.HasPrefix(string(content), "<sign>") {
-				log.Printf("[Protocol] Detected AutoFirma XML request, parsing...")
+				log.Printf("[Protocol] Solicitud XML de AutoFirma detectada, analizando...")
 				// Parse XML to extract actual data AND update Protocol State (stservlet)
 				actualData, format, err := parseAutoFirmaXML(content, ui.Protocol)
 				if err != nil {
-					log.Printf("[Protocol] XML parsing failed: %v", err)
+					log.Printf("[Protocol] Falló el análisis de XML: %v", err)
 					ui.StatusMsg = "Error parseando XML: " + err.Error()
 					ui.Window.Invalidate()
 					return
 				}
-				log.Printf("[Protocol] XML parsed successfully, format=%s, data size=%d", format, len(actualData))
+				log.Printf("[Protocol] XML analizado correctamente, formato=%s, tamaño de datos=%d", format, len(actualData))
 
 				// Store the format in protocol state
 				ui.Protocol.SignFormat = format
@@ -832,7 +832,7 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "file_ready")
 		} else {
 			// No file downloaded (local file flow)
-			log.Println("[Protocol] No document downloaded. Waiting for manual selection.")
+			log.Println("[Protocol] No se descargó documento. Esperando selección manual.")
 			ui.StatusMsg = "Iniciado modo firma local web. Seleccione archivo y certificado."
 			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "local_waiting_file")
 		}
@@ -849,7 +849,7 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 	if err := xml.Unmarshal(xmlData, &root); err != nil {
 		// Fallback for non-strict XML or if Unmarshal fails?
 		// Try manual parsing if needed, but XML should be standard.
-		return nil, "", fmt.Errorf("XML Unmarshal failed: %v", err)
+		return nil, "", fmt.Errorf("falló XML Unmarshal: %v", err)
 	}
 
 	params := make(map[string]string)
@@ -857,7 +857,7 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 		// Java: URLDecoder.decode(value, DEFAULT_URL_ENCODING)
 		val, err := url.QueryUnescape(e.Value)
 		if err != nil {
-			log.Printf("[Protocol] Warning: Failed to unescape value for key %s: %v", e.Key, err)
+			log.Printf("[Protocol] Aviso: no se pudo desescapar valor para clave %s: %v", e.Key, err)
 			val = e.Value
 		}
 		params[e.Key] = val
@@ -869,13 +869,13 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 	// Critical: Update STServlet if present
 	if st := params["stservlet"]; st != "" {
 		p.STServlet = st
-		log.Printf("[Protocol] Updated STServlet from XML: %s", st)
+		log.Printf("[Protocol] STServlet actualizado desde XML: %s", st)
 	}
 
 	// Storage id for upload comes from XML session id when present.
 	if id := params["id"]; id != "" {
 		p.FileID = id
-		log.Printf("[Protocol] Updated Session ID from XML (upload id): %s", id)
+		log.Printf("[Protocol] Id de sesión actualizado desde XML (id de subida): %s", id)
 	}
 
 	// Critical: Update Key if present
@@ -886,7 +886,7 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 	// Extract Data ('dat')
 	datB64, ok := params["dat"]
 	if !ok {
-		return nil, "", fmt.Errorf("no 'dat' parameter found in XML manifest")
+		return nil, "", fmt.Errorf("no se encontró parámetro 'dat' en el manifiesto XML")
 	}
 
 	// Clean Base64 (Standard Java behavior handling)
@@ -899,7 +899,7 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 		// Try URL encoding
 		data, err = base64.URLEncoding.DecodeString(datB64)
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to decode 'dat' (Base64): %v", err)
+			return nil, "", fmt.Errorf("falló la decodificación de 'dat' (Base64): %v", err)
 		}
 	}
 

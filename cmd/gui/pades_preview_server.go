@@ -84,12 +84,12 @@ func (ui *UI) ensurePadesPreviewServer() error {
 
 func (ui *UI) handlePadesPreviewPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
 		return
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
 	if !ui.previewTokenValid(token) {
-		http.Error(w, "token invalido", http.StatusUnauthorized)
+		http.Error(w, "token inválido", http.StatusUnauthorized)
 		return
 	}
 
@@ -106,12 +106,12 @@ func (ui *UI) handlePadesPreviewPage(w http.ResponseWriter, r *http.Request) {
 
 func (ui *UI) handlePadesPreviewPDF(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
 		return
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
 	if !ui.previewTokenValid(token) {
-		http.Error(w, "token invalido", http.StatusUnauthorized)
+		http.Error(w, "token inválido", http.StatusUnauthorized)
 		return
 	}
 
@@ -129,18 +129,18 @@ func (ui *UI) handlePadesPreviewPDF(w http.ResponseWriter, r *http.Request) {
 
 func (ui *UI) handlePadesPreviewSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
 		return
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
 	if !ui.previewTokenValid(token) {
-		http.Error(w, "token invalido", http.StatusUnauthorized)
+		http.Error(w, "token inválido", http.StatusUnauthorized)
 		return
 	}
 
 	var req padesSaveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "json invalido", http.StatusBadRequest)
+		http.Error(w, "json inválido", http.StatusBadRequest)
 		return
 	}
 	if req.Page == 0 {
