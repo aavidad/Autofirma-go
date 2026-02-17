@@ -530,3 +530,26 @@ Alcanzar paridad funcional progresiva con la app Java de AutoFirma, con trazabil
 - QA y cierre de bloque:
   - ejecutar `scripts/run_full_validation.sh`.
   - anotar resultados y bloqueantes de release en este mismo archivo.
+
+## Pendiente Windows (para cierre de paridad)
+- Validar empaquetado final Windows:
+  - generar instalador con `packaging/windows/make_windows_release.sh`.
+  - comprobar instalación/actualización/desinstalación sin residuos críticos.
+- Verificar registro de protocolo `afirma://`:
+  - apertura desde Chrome/Firefox/Edge hacia `autofirma-desktop.exe`.
+  - validar flujo completo `afirma://websocket -> sign -> save -> respuesta`.
+- Cerrar trust TLS local en Windows (si queda hueco):
+  - confirmar `--generate-certs`, `--install-trust` y `--trust-status` en entorno real Windows.
+  - comprobar WSS local sin advertencias de CA en navegador.
+- Validar firma con almacén de certificados de Windows:
+  - certificados exportables y no exportables.
+  - revisar fallbacks CAdES/PAdES y mensajes de error de UX.
+- Probar dispositivos/tokens en Windows:
+  - al menos 1 escenario PKCS#11/smartcard.
+  - verificar PIN/CAN y comportamiento ante cancelaciones.
+- Ejecutar batería E2E en Windows:
+  - sede Valide + una segunda sede real.
+  - guardar evidencias en logs saneados y documentar regresiones.
+- Cierre de release:
+  - actualizar documentación de uso Windows (`instalación`, `troubleshooting`, `logs`).
+  - dejar lista corta de bloqueantes Go/No-Go.
