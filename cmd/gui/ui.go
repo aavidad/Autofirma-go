@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -1922,25 +1923,33 @@ func (ui *UI) signCurrentFile() {
 
 func (ui *UI) runLocalBatchFromInput() {
 	if ui.IsSigning {
-		ui.StatusMsg = "Hay una operación en curso. Espere para ejecutar el lote."
+		hint := "Espera a que termine la operación actual antes de lanzar el lote."
+		ui.setLastError("ERR_BATCH_BUSY", "precondiciones", "batch", fmt.Errorf("operación en curso"), hint)
+		ui.StatusMsg = withSolution("Hay una operación en curso. Espere para ejecutar el lote.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
-		ui.StatusMsg = "Seleccione un certificado para ejecutar el lote."
+		hint := "Selecciona un certificado apto para firma."
+		ui.setLastError("ERR_BATCH_NO_CERT", "precondiciones", "batch", fmt.Errorf("no hay certificado seleccionado"), hint)
+		ui.StatusMsg = withSolution("Seleccione un certificado para ejecutar el lote.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	path := strings.TrimSpace(ui.InputFile.Text())
 	if path == "" {
-		ui.StatusMsg = "Seleccione un fichero de lote JSON/XML."
+		hint := "Selecciona un fichero de lote válido (.json o .xml)."
+		ui.setLastError("ERR_BATCH_NO_FILE", "precondiciones", "batch", fmt.Errorf("no hay fichero de lote"), hint)
+		ui.StatusMsg = withSolution("Seleccione un fichero de lote JSON/XML.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		ui.StatusMsg = "No se pudo leer el fichero de lote: " + err.Error()
+		hint := "Comprueba ruta y permisos de lectura del fichero de lote."
+		ui.setLastError("ERR_BATCH_READ_FILE", "lectura", "batch", err, hint)
+		ui.StatusMsg = withSolution("No se pudo leer el fichero de lote: "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -1956,11 +1965,15 @@ func (ui *UI) runLocalBatchFromInput() {
 
 	req, err := parseBatchRequest(raw, isJSON)
 	if err != nil {
-		ui.StatusMsg = "Lote inválido: " + err.Error()
+		hint := "Revisa la estructura del lote (JSON/XML) y vuelve a intentarlo."
+		ui.setLastError("ERR_BATCH_PARSE", "parseo", "batch", err, hint)
+		ui.StatusMsg = withSolution("Lote inválido: "+err.Error(), hint)
 		return
 	}
 	if len(req.SingleSigns) == 0 {
-		ui.StatusMsg = "Lote sin operaciones."
+		hint := "Incluye al menos una operación de firma en el lote."
+		ui.setLastError("ERR_BATCH_EMPTY", "validacion", "batch", fmt.Errorf("lote sin operaciones"), hint)
+		ui.StatusMsg = withSolution("Lote sin operaciones.", hint)
 		return
 	}
 
@@ -1993,7 +2006,9 @@ func (ui *UI) runLocalBatchFromInput() {
 
 	respBytes, err := serializeBatchResponse(results, isJSON)
 	if err != nil {
-		ui.StatusMsg = "No se pudo preparar la respuesta del lote: " + err.Error()
+		hint := "Reintenta el lote y revisa la configuración de formato."
+		ui.setLastError("ERR_BATCH_SERIALIZE", "serializacion", "batch", err, hint)
+		ui.StatusMsg = withSolution("No se pudo preparar la respuesta del lote: "+err.Error(), hint)
 		return
 	}
 
@@ -2003,27 +2018,36 @@ func (ui *UI) runLocalBatchFromInput() {
 	}
 	outPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_resultado_lote" + extOut
 	if err := os.WriteFile(outPath, respBytes, 0644); err != nil {
-		ui.StatusMsg = "Lote ejecutado, pero no se pudo guardar resultado: " + err.Error()
+		hint := "Comprueba permisos de escritura en la carpeta destino."
+		ui.setLastError("ERR_BATCH_SAVE_RESULT", "guardado", "batch", err, hint)
+		ui.StatusMsg = withSolution("Lote ejecutado, pero no se pudo guardar resultado: "+err.Error(), hint)
 		return
 	}
+	ui.clearLastError()
 	ui.StatusMsg = fmt.Sprintf("Lote procesado. Resultado guardado en: %s", outPath)
 	ui.appendOperationHistory("batch", map[bool]string{true: "json", false: "xml"}[isJSON], "ok", strings.TrimSpace(outPath), fmt.Sprintf("operaciones=%d", len(results)))
 }
 
 func (ui *UI) exportSelectedCertificateExpert() {
 	if ui.IsSigning {
-		ui.StatusMsg = "Hay una operación en curso. Espere para exportar certificado."
+		hint := "Espera a que termine la operación actual antes de exportar."
+		ui.setLastError("ERR_EXPORT_BUSY", "precondiciones", "export_cert", fmt.Errorf("operación en curso"), hint)
+		ui.StatusMsg = withSolution("Hay una operación en curso. Espere para exportar certificado.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
-		ui.StatusMsg = "Seleccione un certificado para exportarlo."
+		hint := "Selecciona el certificado que quieres exportar."
+		ui.setLastError("ERR_EXPORT_NO_CERT", "precondiciones", "export_cert", fmt.Errorf("no hay certificado seleccionado"), hint)
+		ui.StatusMsg = withSolution("Seleccione un certificado para exportarlo.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	cert := ui.Certs[ui.SelectedCert]
 	if len(cert.Content) == 0 {
-		ui.StatusMsg = "El certificado seleccionado no tiene contenido exportable."
+		hint := "Selecciona otro certificado con contenido exportable."
+		ui.setLastError("ERR_EXPORT_NO_CONTENT", "precondiciones", "export_cert", fmt.Errorf("certificado sin contenido exportable"), hint)
+		ui.StatusMsg = withSolution("El certificado seleccionado no tiene contenido exportable.", hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2044,7 +2068,9 @@ func (ui *UI) exportSelectedCertificateExpert() {
 		return
 	}
 	if err != nil {
-		ui.StatusMsg = "No se pudo abrir el diálogo de guardado: " + err.Error()
+		hint := "Vuelve a abrir el diálogo y comprueba permisos del sistema."
+		ui.setLastError("ERR_EXPORT_SAVE_DIALOG", "dialogo", "export_cert", err, hint)
+		ui.StatusMsg = withSolution("No se pudo abrir el diálogo de guardado: "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2057,12 +2083,15 @@ func (ui *UI) exportSelectedCertificateExpert() {
 	// Compatible with selectcert response format when no 'key' is provided.
 	out := base64.URLEncoding.EncodeToString(cert.Content)
 	if writeErr := os.WriteFile(strings.TrimSpace(selectedPath), []byte(out), 0644); writeErr != nil {
-		ui.StatusMsg = "No se pudo guardar el certificado exportado: " + writeErr.Error()
+		hint := "Comprueba permisos de escritura en la ruta seleccionada."
+		ui.setLastError("ERR_EXPORT_WRITE", "guardado", "export_cert", writeErr, hint)
+		ui.StatusMsg = withSolution("No se pudo guardar el certificado exportado: "+writeErr.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
-
+	ui.clearLastError()
 	ui.StatusMsg = "Certificado exportado en formato Base64 URL en: " + strings.TrimSpace(selectedPath)
+	ui.appendOperationHistory("export_cert", "b64url", "ok", strings.TrimSpace(selectedPath), "certificado exportado")
 	ui.Window.Invalidate()
 }
 
@@ -2075,12 +2104,16 @@ func uiMinInt(a, b int) int {
 
 func (ui *UI) runExpertSelectCertDialog() {
 	if ui.IsSigning {
-		ui.StatusMsg = "Hay una operación en curso. Espere para seleccionar certificado."
+		hint := "Espera a que termine la operación actual antes de seleccionar certificado."
+		ui.setLastError("ERR_SELECTCERT_BUSY", "precondiciones", "selectcert", fmt.Errorf("operación en curso"), hint)
+		ui.StatusMsg = withSolution("Hay una operación en curso. Espere para seleccionar certificado.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	if len(ui.Certs) == 0 {
-		ui.StatusMsg = "No hay certificados disponibles."
+		hint := "Recarga certificados o instala uno en el almacén del sistema."
+		ui.setLastError("ERR_SELECTCERT_EMPTY", "precondiciones", "selectcert", fmt.Errorf("no hay certificados disponibles"), hint)
+		ui.StatusMsg = withSolution("No hay certificados disponibles.", hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2094,7 +2127,9 @@ func (ui *UI) runExpertSelectCertDialog() {
 		indices = append(indices, idx)
 	}
 	if len(filtered) == 0 {
-		ui.StatusMsg = "No hay certificados aptos para firma."
+		hint := "Revisa vigencia/uso del certificado o selecciona otro almacén."
+		ui.setLastError("ERR_SELECTCERT_NO_SIGNABLE", "filtrado", "selectcert", fmt.Errorf("no hay certificados aptos"), hint)
+		ui.StatusMsg = withSolution("No hay certificados aptos para firma.", hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2105,17 +2140,23 @@ func (ui *UI) runExpertSelectCertDialog() {
 		return
 	}
 	if err != nil {
-		ui.StatusMsg = "Error en selector avanzado de certificado: " + err.Error()
+		hint := "Reintenta el selector o revisa integración gráfica del sistema."
+		ui.setLastError("ERR_SELECTCERT_DIALOG", "dialogo", "selectcert", err, hint)
+		ui.StatusMsg = withSolution("Error en selector avanzado de certificado: "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
 	if chosen < 0 || chosen >= len(indices) {
-		ui.StatusMsg = "Selección de certificado inválida."
+		hint := "Repite la selección de certificado."
+		ui.setLastError("ERR_SELECTCERT_INVALID", "validacion", "selectcert", fmt.Errorf("selección inválida"), hint)
+		ui.StatusMsg = withSolution("Selección de certificado inválida.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	ui.SelectedCert = indices[chosen]
+	ui.clearLastError()
 	ui.StatusMsg = "Certificado seleccionado mediante selector avanzado."
+	ui.appendOperationHistory("selectcert", "-", "ok", "-", "selección avanzada completada")
 	ui.Window.Invalidate()
 }
 
@@ -2128,7 +2169,9 @@ func (ui *UI) runExpertLoadDialog() {
 		return
 	}
 	if err != nil {
-		ui.StatusMsg = "Error en carga manual (LOAD): " + err.Error()
+		hint := "Revisa permisos y formato del diálogo de carga."
+		ui.setLastError("ERR_LOAD_DIALOG", "dialogo", "load", err, hint)
+		ui.StatusMsg = withSolution("Error en carga manual (LOAD): "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2138,26 +2181,34 @@ func (ui *UI) runExpertLoadDialog() {
 		return
 	}
 	ui.InputFile.SetText(strings.TrimSpace(paths[0]))
+	ui.clearLastError()
 	ui.StatusMsg = "Fichero cargado mediante flujo manual LOAD."
+	ui.appendOperationHistory("load", "-", "ok", strings.TrimSpace(paths[0]), "carga manual completada")
 	ui.Window.Invalidate()
 }
 
 func (ui *UI) runExpertSaveCopy() {
 	src := strings.TrimSpace(ui.InputFile.Text())
 	if src == "" {
-		ui.StatusMsg = "Seleccione un fichero para guardado manual."
+		hint := "Selecciona primero un fichero origen para copiar."
+		ui.setLastError("ERR_SAVE_NO_SOURCE", "precondiciones", "save", fmt.Errorf("fichero origen vacío"), hint)
+		ui.StatusMsg = withSolution("Seleccione un fichero para guardado manual.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	data, err := os.ReadFile(src)
 	if err != nil {
-		ui.StatusMsg = "No se pudo leer el fichero origen para SAVE: " + err.Error()
+		hint := "Comprueba ruta y permisos de lectura del fichero origen."
+		ui.setLastError("ERR_SAVE_READ_SOURCE", "lectura", "save", err, hint)
+		ui.StatusMsg = withSolution("No se pudo leer el fichero origen para SAVE: "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
 	defaultPath, err := buildSaveTargetPath(filepath.Base(src), strings.TrimPrefix(filepath.Ext(src), "."))
 	if err != nil {
-		ui.StatusMsg = "No se pudo preparar ruta de guardado: " + err.Error()
+		hint := "Reintenta con otra ruta o nombre de fichero."
+		ui.setLastError("ERR_SAVE_BUILD_PATH", "preparacion", "save", err, hint)
+		ui.StatusMsg = withSolution("No se pudo preparar ruta de guardado: "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2168,7 +2219,9 @@ func (ui *UI) runExpertSaveCopy() {
 		return
 	}
 	if err != nil {
-		ui.StatusMsg = "Error en guardado manual (SAVE): " + err.Error()
+		hint := "Revisa permisos y vuelve a abrir el diálogo de guardado."
+		ui.setLastError("ERR_SAVE_DIALOG", "dialogo", "save", err, hint)
+		ui.StatusMsg = withSolution("Error en guardado manual (SAVE): "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -2178,11 +2231,15 @@ func (ui *UI) runExpertSaveCopy() {
 		return
 	}
 	if writeErr := os.WriteFile(strings.TrimSpace(selectedPath), data, 0644); writeErr != nil {
-		ui.StatusMsg = "No se pudo guardar copia manual: " + writeErr.Error()
+		hint := "Comprueba permisos de escritura en destino."
+		ui.setLastError("ERR_SAVE_WRITE", "guardado", "save", writeErr, hint)
+		ui.StatusMsg = withSolution("No se pudo guardar copia manual: "+writeErr.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
+	ui.clearLastError()
 	ui.StatusMsg = "Guardado manual completado en: " + strings.TrimSpace(selectedPath)
+	ui.appendOperationHistory("save", strings.TrimPrefix(filepath.Ext(src), "."), "ok", strings.TrimSpace(selectedPath), "guardado manual completado")
 	ui.Window.Invalidate()
 }
 
@@ -2380,6 +2437,10 @@ func (ui *UI) runLocalHealthCheck() {
 	setResult(netLevel, "Diagnóstico técnico de red", netSummary, netAction)
 	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
 	setResult(updateLevel, "Repositorio de actualizaciones", updateDetail, updateAction)
+	proxyDetail, proxyAction, proxyLevel := proxyFirewallDiagnostics(ui.Protocol)
+	setResult(proxyLevel, "Proxy / Firewall", proxyDetail, proxyAction)
+	avDetail, avAction, avLevel := antivirusInterferenceDiagnostics()
+	setResult(avLevel, "Antivirus / Intercepción TLS", avDetail, avAction)
 
 	if _, err := exec.LookPath("openssl"); err != nil {
 		setResult(diagLevelWarn, "Dependencia OpenSSL", "No se detecta 'openssl' en PATH.", opensslInstallHint())
@@ -2453,6 +2514,16 @@ func (ui *UI) runProblemFinder() {
 	lines = append(lines, "Comprobación repo actualizaciones: "+updateDetail)
 	if updateLevel != diagLevelOK && strings.TrimSpace(updateAction) != "" {
 		lines = append(lines, "Acción repo actualizaciones: "+updateAction)
+	}
+	proxyDetail, proxyAction, proxyLevel := proxyFirewallDiagnostics(ui.Protocol)
+	lines = append(lines, "Comprobación proxy/firewall: "+proxyDetail)
+	if proxyLevel != diagLevelOK && strings.TrimSpace(proxyAction) != "" {
+		lines = append(lines, "Acción proxy/firewall: "+proxyAction)
+	}
+	avDetail, avAction, avLevel := antivirusInterferenceDiagnostics()
+	lines = append(lines, "Comprobación antivirus/TLS: "+avDetail)
+	if avLevel != diagLevelOK && strings.TrimSpace(avAction) != "" {
+		lines = append(lines, "Acción antivirus/TLS: "+avAction)
 	}
 
 	errHints := collectRecentErrorHints(resolveCurrentLogFile())
@@ -2877,6 +2948,137 @@ func checkUpdateRepositoryReachability() (string, string, int) {
 		return fmt.Sprintf("HTTP %d en %s", resp.StatusCode, updateURL), "Incidencia temporal en el servidor de actualizaciones. Reintenta más tarde.", diagLevelWarn
 	}
 	return fmt.Sprintf("HTTP %d en %s", resp.StatusCode, updateURL), "Revisa acceso al repositorio de actualizaciones y posibles bloqueos de red.", diagLevelWarn
+}
+
+func proxyFirewallDiagnostics(state *ProtocolState) (string, string, int) {
+	lines := make([]string, 0, 6)
+	level := diagLevelOK
+	action := ""
+	raise := func(newLevel int, newAction string) {
+		if newLevel > level {
+			level = newLevel
+		}
+		if strings.TrimSpace(action) == "" && strings.TrimSpace(newAction) != "" {
+			action = strings.TrimSpace(newAction)
+		}
+	}
+
+	updateURL, _ := url.Parse("https://autofirma.dipgra.es/version.json")
+	proxyURL, proxyErr := http.ProxyFromEnvironment(&http.Request{URL: updateURL})
+	if proxyErr != nil {
+		lines = append(lines, "proxy=error_deteccion")
+		raise(diagLevelWarn, "No se pudo evaluar configuración de proxy del sistema.")
+	} else if proxyURL == nil {
+		lines = append(lines, "proxy=sin_configurar")
+	} else {
+		lines = append(lines, "proxy=configurado("+sanitizeDiagURI(proxyURL.String())+")")
+		pHost := strings.TrimSpace(proxyURL.Hostname())
+		pPort := strings.TrimSpace(proxyURL.Port())
+		if pPort == "" {
+			if strings.EqualFold(proxyURL.Scheme, "https") {
+				pPort = "443"
+			} else {
+				pPort = "80"
+			}
+		}
+		if pHost != "" {
+			target := net.JoinHostPort(pHost, pPort)
+			conn, err := net.DialTimeout("tcp", target, 2*time.Second)
+			if err != nil {
+				lines = append(lines, "proxy_reachable=NO("+target+")")
+				raise(diagLevelError, "El proxy configurado no es accesible. Revisa configuración de proxy corporativo.")
+			} else {
+				_ = conn.Close()
+				lines = append(lines, "proxy_reachable=SI("+target+")")
+			}
+		}
+	}
+
+	targets := []string{"autofirma.dipgra.es:443"}
+	if state != nil {
+		raw := strings.TrimSpace(state.STServlet)
+		if raw == "" {
+			raw = strings.TrimSpace(state.RTServlet)
+		}
+		if raw != "" {
+			if u, err := url.Parse(raw); err == nil {
+				host := strings.TrimSpace(u.Hostname())
+				port := strings.TrimSpace(u.Port())
+				if host != "" {
+					if port == "" {
+						if strings.EqualFold(u.Scheme, "https") {
+							port = "443"
+						} else {
+							port = "80"
+						}
+					}
+					targets = append(targets, net.JoinHostPort(host, port))
+				}
+			}
+		}
+	}
+
+	failCount := 0
+	for _, target := range targets {
+		conn, err := net.DialTimeout("tcp", target, 1800*time.Millisecond)
+		if err != nil {
+			failCount++
+			lines = append(lines, "tcp_fail="+target)
+		} else {
+			_ = conn.Close()
+			lines = append(lines, "tcp_ok="+target)
+		}
+	}
+	if failCount == len(targets) && len(targets) > 0 {
+		raise(diagLevelWarn, "Posible bloqueo por firewall/proxy: no hay salida TCP a endpoints críticos de firma.")
+	}
+
+	if strings.TrimSpace(action) == "" {
+		action = "Sin indicios claros de bloqueo por proxy/firewall."
+	}
+	return strings.Join(lines, " | "), action, level
+}
+
+func antivirusInterferenceDiagnostics() (string, string, int) {
+	const host = "autofirma.dipgra.es"
+	const target = "autofirma.dipgra.es:443"
+
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", target, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, // Solo diagnóstico (inspección de cadena TLS recibida)
+	})
+	if err != nil {
+		msg := strings.ToLower(strings.TrimSpace(err.Error()))
+		if strings.Contains(msg, "x509") || strings.Contains(msg, "certificate") {
+			return "Error TLS al conectar con " + host + ": " + summarizeServerBody(err.Error()), "Posible inspección/interceptación TLS por antivirus o proxy. Prueba a desactivar inspección HTTPS en antivirus/proxy para este dominio.", diagLevelWarn
+		}
+		return "No se pudo completar handshake TLS con " + host + ": " + summarizeServerBody(err.Error()), "Revisa red/proxy/firewall y software de seguridad que inspeccione HTTPS.", diagLevelWarn
+	}
+	defer conn.Close()
+
+	state := conn.ConnectionState()
+	if len(state.PeerCertificates) == 0 {
+		return "Sin certificados en handshake TLS de " + host, "Revisa proxy/antivirus o bloqueos HTTPS.", diagLevelWarn
+	}
+	leaf := state.PeerCertificates[0]
+	issuer := strings.ToLower(strings.TrimSpace(leaf.Issuer.String()))
+	subject := strings.ToLower(strings.TrimSpace(leaf.Subject.String()))
+	joined := issuer + " | " + subject
+	keywords := []string{
+		"kaspersky", "eset", "bitdefender", "avast", "avg", "norton", "symantec", "mcafee",
+		"trend micro", "fortinet", "sophos", "checkpoint", "zscaler", "palo alto", "webfilter", "ssl inspection",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(joined, kw) {
+			return "Posible inspección HTTPS detectada (emisor TLS contiene '" + kw + "').", "Configura excepción en antivirus/proxy para autofirma.dipgra.es o desactiva inspección HTTPS para pruebas.", diagLevelWarn
+		}
+	}
+
+	if err := leaf.VerifyHostname(host); err != nil {
+		return "El certificado TLS recibido no coincide con " + host + ".", "Posible MITM/inspección TLS. Revisa antivirus/proxy con inspección HTTPS.", diagLevelWarn
+	}
+	return "Sin indicios claros de interceptación TLS por antivirus/proxy.", "", diagLevelOK
 }
 
 func collectRecentErrorHints(logFile string) []string {

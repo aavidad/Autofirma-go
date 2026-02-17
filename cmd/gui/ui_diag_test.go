@@ -62,6 +62,14 @@ func TestCertValidityStatusCaducado(t *testing.T) {
 	}
 }
 
+func TestCertValidityStatusCaducaPronto(t *testing.T) {
+	to := time.Now().UTC().Add(10 * 24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	got := certValidityStatus("", to)
+	if !strings.Contains(got, "caduca en") {
+		t.Fatalf("se esperaba advertencia de caducidad próxima, obtenido=%q", got)
+	}
+}
+
 func TestSanitizeSensitiveTextNoCorrompeConEnvVacio(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 	originalUserProfile := os.Getenv("USERPROFILE")
