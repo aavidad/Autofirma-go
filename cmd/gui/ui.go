@@ -96,6 +96,7 @@ type UI struct {
 	BtnCopyLastError   widget.Clickable
 	BtnCopyHistory     widget.Clickable
 	BtnSelfTest        widget.Clickable
+	BtnOpenReports     widget.Clickable
 	BtnOpenSealWeb     widget.Clickable
 	ShowAbout          bool
 	ChkVisibleSeal     widget.Bool
@@ -1058,6 +1059,18 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													}
 													btn := material.Button(ui.Theme, &ui.BtnCopyHistory, "Copiar historial de operaciones")
 													btn.Background = color.NRGBA{R: 70, G: 95, B: 130, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnOpenReports.Clicked(gtx) {
+														reportDir := filepath.Join(os.TempDir(), "AutofirmaDipgra", "reports")
+														_ = os.MkdirAll(reportDir, 0755)
+														if err := openExternal(reportDir); err != nil {
+															ui.HealthStatus = "No se pudo abrir la carpeta de reportes: " + err.Error()
+														}
+													}
+													btn := material.Button(ui.Theme, &ui.BtnOpenReports, "Abrir carpeta de reportes")
+													btn.Background = color.NRGBA{R: 85, G: 85, B: 85, A: 255}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2284,6 +2297,7 @@ func (ui *UI) runGuidedSelfTest() {
 
 	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
 		ui.HealthStatus = "Autoprueba no ejecutada: selecciona un certificado primero."
+		ui.saveSelfTestReport("no_ejecutada", ui.HealthStatus, "")
 		return
 	}
 	cert := ui.Certs[ui.SelectedCert]
@@ -2294,6 +2308,7 @@ func (ui *UI) runGuidedSelfTest() {
 		}
 		ui.HealthStatus = "Autoprueba detenida: " + issue
 		ui.appendOperationHistory("autoprueba", "cades", "error", "-", issue)
+		ui.saveSelfTestReport("error", ui.HealthStatus, issue)
 		return
 	}
 
@@ -2303,25 +2318,58 @@ func (ui *UI) runGuidedSelfTest() {
 	sigB64, err := signer.SignData(probeB64, cert.ID, "", "cades", nil)
 	if err != nil {
 		ui.setLastError("ERR_SELFTEST_SIGN", "autoprueba_firma", "autoprueba", err, "Comprueba el certificado y dependencias locales.")
-		ui.HealthStatus = "Autoprueba: fallo en firma local."
+		ui.HealthStatus = "Autoprueba: fallo en firma local.\nPosible solución: comprueba certificado/dependencias y reintenta."
+		ui.saveSelfTestReport("error", ui.HealthStatus, summarizeServerBody(err.Error()))
 		return
 	}
 	verifyRes, err := signer.VerifyData(probeB64, sigB64, "cades")
 	if err != nil {
 		ui.setLastError("ERR_SELFTEST_VERIFY", "autoprueba_verificacion", "autoprueba", err, "Se pudo firmar pero no verificar; revisa librerías de verificación.")
-		ui.HealthStatus = "Autoprueba: firma OK, verificación fallida."
+		ui.HealthStatus = "Autoprueba: firma OK, verificación fallida.\nPosible solución: revisa librerías/entorno de verificación."
+		ui.saveSelfTestReport("error", ui.HealthStatus, summarizeServerBody(err.Error()))
 		return
 	}
 	if !verifyRes.Valid {
 		reason := strings.TrimSpace(verifyRes.Reason)
 		ui.setLastError("ERR_SELFTEST_INVALID", "autoprueba_verificacion", "autoprueba", fmt.Errorf("%s", reason), "Revisa configuración criptográfica local.")
-		ui.HealthStatus = "Autoprueba: firma generada pero validación no válida."
+		ui.HealthStatus = "Autoprueba: firma generada pero validación no válida.\nPosible solución: revisa certificado y configuración criptográfica local."
+		ui.saveSelfTestReport("error", ui.HealthStatus, reason)
 		return
 	}
 
 	ui.clearLastError()
 	ui.appendOperationHistory("autoprueba", "cades", "ok", "-", "firma y verificación local completadas")
 	ui.HealthStatus = "Autoprueba completada: firma y verificación local OK."
+	ui.saveSelfTestReport("ok", ui.HealthStatus, "")
+}
+
+func (ui *UI) buildSelfTestReport(result string, summary string, detail string) string {
+	lines := []string{
+		"Autofirma Dipgra - Reporte de autoprueba guiada",
+		"timestamp=" + time.Now().Format(time.RFC3339),
+		"version=" + version.CurrentVersion,
+		"resultado=" + strings.TrimSpace(result),
+		"resumen=" + strings.TrimSpace(summary),
+		"detalle=" + strings.TrimSpace(detail),
+		"certificado=" + ui.selectedCertHistoryLabel(),
+		"strict_compat=" + fmt.Sprintf("%t", ui.ChkStrictCompat.Value),
+		"diag_transport=" + safeDiagValue(ui.DiagTransport),
+		"diag_action=" + safeDiagValue(ui.DiagAction),
+		"diag_format=" + safeDiagValue(ui.DiagFormat),
+		"diag_result=" + safeDiagValue(ui.DiagLastResult),
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (ui *UI) saveSelfTestReport(result string, summary string, detail string) {
+	report := ui.buildSelfTestReport(result, summary, detail)
+	reportPath, err := writeTechnicalReportFile(report)
+	if err != nil {
+		log.Printf("[Autoprueba] No se pudo guardar reporte: %v", err)
+		return
+	}
+	ui.HealthStatus = strings.TrimSpace(summary) + "\nReporte: " + reportPath
+	log.Printf("[Autoprueba] Reporte guardado en: %s", reportPath)
 }
 
 func (ui *UI) runSelectedCertProbe() []string {
