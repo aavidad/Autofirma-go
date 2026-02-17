@@ -16,6 +16,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -68,6 +69,13 @@ type OperationHistoryEntry struct {
 	Cert      string
 	Path      string
 	Detail    string
+}
+
+type UIPreferences struct {
+	StrictCompat    bool   `json:"strict_compat"`
+	AllowInvalidPDF bool   `json:"allow_invalid_pdf"`
+	ExpertMode      bool   `json:"expert_mode"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 type UI struct {
@@ -183,6 +191,8 @@ type UI struct {
 	// WebSocket interaction
 	SignatureDone chan SignatureResult // Sends the results when done
 	IsServerMode  bool                 // True if launched via afirma://websocket or --server
+
+	lastPrefsSnapshot string
 }
 
 func NewUI(w *app.Window) *UI {
@@ -215,6 +225,7 @@ func NewUI(w *app.Window) *UI {
 	}
 
 	// Load certificates in background
+	ui.loadPreferences()
 	go ui.loadCertificates()
 	if shouldRunAutoUpdateCheck() {
 		go ui.checkUpdates(true)
@@ -223,6 +234,70 @@ func NewUI(w *app.Window) *UI {
 	}
 
 	return ui
+}
+
+func preferencesPath() string {
+	baseDir := filepath.Join(os.Getenv("HOME"), ".config", "AutofirmaDipgra")
+	if runtime.GOOS == "windows" {
+		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+			baseDir = filepath.Join(appData, "AutofirmaDipgra")
+		}
+	}
+	return filepath.Join(baseDir, "ui_prefs.json")
+}
+
+func (ui *UI) currentPreferences() UIPreferences {
+	return UIPreferences{
+		StrictCompat:    ui.ChkStrictCompat.Value,
+		AllowInvalidPDF: ui.ChkAllowInvalidPDF.Value,
+		ExpertMode:      ui.ChkExpertMode.Value,
+		UpdatedAt:       time.Now().Format(time.RFC3339),
+	}
+}
+
+func (ui *UI) prefsSnapshot(p UIPreferences) string {
+	return fmt.Sprintf("%t|%t|%t", p.StrictCompat, p.AllowInvalidPDF, p.ExpertMode)
+}
+
+func (ui *UI) loadPreferences() {
+	path := preferencesPath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var prefs UIPreferences
+	if err := json.Unmarshal(raw, &prefs); err != nil {
+		log.Printf("[Prefs] No se pudo parsear preferencias UI: %v", err)
+		return
+	}
+	ui.ChkStrictCompat.Value = prefs.StrictCompat
+	ui.ChkAllowInvalidPDF.Value = prefs.AllowInvalidPDF
+	ui.ChkExpertMode.Value = prefs.ExpertMode
+	ui.lastPrefsSnapshot = ui.prefsSnapshot(prefs)
+	log.Printf("[Prefs] Preferencias UI cargadas (%s)", path)
+}
+
+func (ui *UI) savePreferencesIfChanged() {
+	prefs := ui.currentPreferences()
+	snapshot := ui.prefsSnapshot(prefs)
+	if snapshot == ui.lastPrefsSnapshot {
+		return
+	}
+	path := preferencesPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		log.Printf("[Prefs] No se pudo crear directorio de preferencias: %v", err)
+		return
+	}
+	buf, err := json.MarshalIndent(prefs, "", "  ")
+	if err != nil {
+		log.Printf("[Prefs] No se pudo serializar preferencias UI: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, buf, 0644); err != nil {
+		log.Printf("[Prefs] No se pudo guardar preferencias UI: %v", err)
+		return
+	}
+	ui.lastPrefsSnapshot = snapshot
 }
 
 func shouldRunAutoUpdateCheck() bool {
@@ -300,6 +375,8 @@ func (ui *UI) openFolder() {
 }
 
 func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
+	ui.savePreferencesIfChanged()
+
 	// SPECIAL MINIMALIST LAYOUT FOR PROTOCOL MODE OR SERVER MODE
 	if ui.Protocol != nil || ui.IsServerMode {
 		return layout.Stack{}.Layout(gtx,
@@ -3006,8 +3083,8 @@ func (ui *UI) buildFullDiagnosticReport() string {
 
 	if ui.Protocol != nil {
 		lines = append(lines, "protocol_action="+safeDiagValue(ui.Protocol.Action))
-		lines = append(lines, "protocol_stservlet="+safeDiagValue(ui.Protocol.STServlet))
-		lines = append(lines, "protocol_rtservlet="+safeDiagValue(ui.Protocol.RTServlet))
+		lines = append(lines, "protocol_stservlet="+sanitizeDiagURI(ui.Protocol.STServlet))
+		lines = append(lines, "protocol_rtservlet="+sanitizeDiagURI(ui.Protocol.RTServlet))
 		lines = append(lines, "protocol_idsession="+safeDiagValue(getProtocolSessionID(ui.Protocol)))
 		lines = append(lines, "protocol_fileid="+safeDiagValue(ui.Protocol.FileID))
 	}
@@ -3047,6 +3124,14 @@ func (ui *UI) buildFullDiagnosticReport() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func sanitizeDiagURI(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "-"
+	}
+	return applog.SanitizeURI(raw)
 }
 
 func (ui *UI) buildTechnicalReport() string {
