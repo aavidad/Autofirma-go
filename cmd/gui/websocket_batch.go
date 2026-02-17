@@ -232,10 +232,24 @@ type xmlTriphaseParam struct {
 }
 
 func (s *WebSocketServer) processBatchRequest(state *ProtocolState) string {
-	isJSONBatch := parseBoolParam(state.Params.Get("jsonbatch"), state.Params.Get("jsonBatch"))
-	isLocalBatch := parseBoolParam(state.Params.Get("localBatchProcess"), state.Params.Get("localbatchprocess"))
-	preURL := strings.TrimSpace(state.Params.Get("batchpresignerurl"))
-	postURL := strings.TrimSpace(state.Params.Get("batchpostsignerurl"))
+	isJSONBatch := parseBoolParam(
+		getQueryParam(state.Params, "jsonbatch", "jsonBatch"),
+	)
+	isLocalBatch := parseBoolParam(
+		getQueryParam(state.Params, "localBatchProcess", "localbatchprocess"),
+	)
+	preURL := strings.TrimSpace(getQueryParam(
+		state.Params,
+		"batchpresignerurl",
+		"batchPreSignerUrl",
+		"batchPreSignerURL",
+	))
+	postURL := strings.TrimSpace(getQueryParam(
+		state.Params,
+		"batchpostsignerurl",
+		"batchPostSignerUrl",
+		"batchPostSignerURL",
+	))
 	if !isLocalBatch && !isJSONBatch && (preURL == "" || postURL == "") {
 		return s.formatError("ERROR_UNSUPPORTED_OPERATION", "Lote trifasico XML no soportado")
 	}
@@ -300,7 +314,7 @@ func (s *WebSocketServer) processBatchRequest(state *ProtocolState) string {
 		respBytes = []byte(respText)
 	}
 
-	needCert := parseBoolParam(state.Params.Get("needcert"), state.Params.Get("needCert"))
+	needCert := parseBoolParam(getQueryParam(state.Params, "needcert", "needCert"))
 	if strings.TrimSpace(state.Key) != "" {
 		encBatch, e := AutoFirmaEncryptAndFormat(respBytes, []byte(state.Key))
 		if e != nil {
@@ -327,7 +341,7 @@ func extractBatchPayload(state *ProtocolState) ([]byte, error) {
 	if state == nil {
 		return nil, fmt.Errorf("estado de protocolo nulo")
 	}
-	if dat := strings.TrimSpace(state.Params.Get("dat")); dat != "" {
+	if dat := strings.TrimSpace(getQueryParam(state.Params, "dat", "data")); dat != "" {
 		if decoded, err := decodeAutoFirmaB64(strings.ReplaceAll(dat, " ", "+")); err == nil {
 			return decoded, nil
 		}
@@ -469,8 +483,18 @@ func serializeBatchResponse(results []batchSingleResult, isJSON bool) ([]byte, e
 }
 
 func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBatch []byte, req *batchRequest, cert protocol.Certificate, isJSONBatch bool) (string, error) {
-	preURL := strings.TrimSpace(state.Params.Get("batchpresignerurl"))
-	postURL := strings.TrimSpace(state.Params.Get("batchpostsignerurl"))
+	preURL := strings.TrimSpace(getQueryParam(
+		state.Params,
+		"batchpresignerurl",
+		"batchPreSignerUrl",
+		"batchPreSignerURL",
+	))
+	postURL := strings.TrimSpace(getQueryParam(
+		state.Params,
+		"batchpostsignerurl",
+		"batchPostSignerUrl",
+		"batchPostSignerURL",
+	))
 	if preURL == "" || postURL == "" {
 		return "", fmt.Errorf("SAF_03: Faltan URLs de prefirma/postfirma de lote")
 	}

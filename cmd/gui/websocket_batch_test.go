@@ -131,6 +131,82 @@ func TestProcessProtocolRequestBatchLocalJSONSuccess(t *testing.T) {
 	}
 }
 
+func TestProcessProtocolRequestBatchLocalJSONAcceptsAliasDataAndFlags(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+
+	oldGetCerts := getSystemCertificatesFunc
+	oldSelectCert := selectCertDialogFunc
+	oldSignData := signDataFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{{ID: "c1", CanSign: true, Content: []byte{0x30, 0x82, 0x01}}}, nil
+	}
+	selectCertDialogFunc = func(certs []protocol.Certificate) (int, bool, error) { return 0, false, nil }
+	signDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		return base64.StdEncoding.EncodeToString([]byte("SIG")), nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGetCerts
+		selectCertDialogFunc = oldSelectCert
+		signDataFunc = oldSignData
+	}()
+
+	batchJSON := `{"format":"CAdES","algorithm":"SHA256withRSA","singlesigns":[{"id":"d1","datareference":"` +
+		base64.StdEncoding.EncodeToString([]byte("abc")) + `"}]}`
+	uri := "afirma://batch?id=abc&jsonBatch=true&localbatchprocess=true&data=" +
+		base64.StdEncoding.EncodeToString([]byte(batchJSON))
+	out := s.processProtocolRequest(uri)
+
+	raw, err := base64.StdEncoding.DecodeString(out)
+	if err != nil {
+		t.Fatalf("respuesta batch alias no base64: %v - %s", err, out)
+	}
+	var resp batchResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("respuesta batch alias no JSON valido: %v", err)
+	}
+	if len(resp.Signs) != 1 || resp.Signs[0].Result != batchResultDone {
+		t.Fatalf("resultado batch alias inesperado: %#v", resp.Signs)
+	}
+}
+
+func TestProcessProtocolRequestBatchNeedCertAliasReturnsCertificate(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+
+	certContent := []byte{0x30, 0x82, 0x01}
+	oldGetCerts := getSystemCertificatesFunc
+	oldSelectCert := selectCertDialogFunc
+	oldSignData := signDataFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{{ID: "c1", CanSign: true, Content: certContent}}, nil
+	}
+	selectCertDialogFunc = func(certs []protocol.Certificate) (int, bool, error) { return 0, false, nil }
+	signDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		return base64.StdEncoding.EncodeToString([]byte("SIG")), nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGetCerts
+		selectCertDialogFunc = oldSelectCert
+		signDataFunc = oldSignData
+	}()
+
+	batchJSON := `{"format":"CAdES","algorithm":"SHA256withRSA","singlesigns":[{"id":"d1","datareference":"` +
+		base64.StdEncoding.EncodeToString([]byte("abc")) + `"}]}`
+	uri := "afirma://batch?id=abc&jsonbatch=true&localBatchProcess=true&needCert=true&dat=" +
+		base64.StdEncoding.EncodeToString([]byte(batchJSON))
+	out := s.processProtocolRequest(uri)
+	parts := strings.Split(out, "|")
+	if len(parts) != 2 {
+		t.Fatalf("se esperaban batch+cert con needCert, obtenido: %s", out)
+	}
+	gotCert, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("certificado en respuesta no base64: %v", err)
+	}
+	if string(gotCert) != string(certContent) {
+		t.Fatalf("certificado en respuesta inesperado: %x", gotCert)
+	}
+}
+
 func TestSelectBatchSigningCertificateDefaultKeyStorePKCS11(t *testing.T) {
 	s := NewWebSocketServer([]int{63117}, "", &UI{})
 	state := &ProtocolState{
@@ -612,6 +688,62 @@ func TestProcessProtocolRequestBatchRemoteJSONRequiresURLs(t *testing.T) {
 	}
 }
 
+func TestProcessProtocolRequestBatchRemoteJSONAcceptsURLAliases(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+
+	oldGetCerts := getSystemCertificatesFunc
+	oldSelectCert := selectCertDialogFunc
+	oldHTTP := batchHTTPPostFunc
+	oldPK1 := signPKCS1WithOptionsFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{{ID: "c1", CanSign: true, Content: []byte{0x30, 0x82, 0x01}}}, nil
+	}
+	selectCertDialogFunc = func(certs []protocol.Certificate) (int, bool, error) { return 0, false, nil }
+	signPKCS1WithOptionsFunc = func(preSignData []byte, certificateID string, algorithm string, options map[string]interface{}) (string, error) {
+		return base64.StdEncoding.EncodeToString([]byte("PK1")), nil
+	}
+	call := 0
+	batchHTTPPostFunc = func(rawURL string) ([]byte, error) {
+		call++
+		if call == 1 {
+			pre := map[string]interface{}{
+				"td": map[string]interface{}{
+					"format": "CAdES",
+					"signinfo": []map[string]interface{}{
+						{"id": "d1", "params": map[string]string{"PRE": base64.StdEncoding.EncodeToString([]byte("predata"))}},
+					},
+				},
+			}
+			return json.Marshal(pre)
+		}
+		return []byte(`{"signs":[{"id":"d1","result":"DONE_AND_SAVED"}]}`), nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGetCerts
+		selectCertDialogFunc = oldSelectCert
+		batchHTTPPostFunc = oldHTTP
+		signPKCS1WithOptionsFunc = oldPK1
+	}()
+
+	batchJSON := `{"algorithm":"SHA256withRSA","singlesigns":[{"id":"d1","datareference":"` +
+		base64.StdEncoding.EncodeToString([]byte("abc")) + `"}]}`
+	uri := "afirma://batch?id=abc&jsonBatch=true&localBatchProcess=false&batchPreSignerUrl=https%3A%2F%2Fpre.example&batchPostSignerUrl=https%3A%2F%2Fpost.example&dat=" +
+		base64.StdEncoding.EncodeToString([]byte(batchJSON))
+	out := s.processProtocolRequest(uri)
+
+	raw, err := base64.StdEncoding.DecodeString(out)
+	if err != nil {
+		t.Fatalf("respuesta batch remoto alias no base64: %v - %s", err, out)
+	}
+	var resp batchResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("respuesta batch remoto alias no JSON valido: %v", err)
+	}
+	if len(resp.Signs) != 1 || resp.Signs[0].Result != batchResultDone {
+		t.Fatalf("resultado batch remoto alias inesperado: %#v", resp.Signs)
+	}
+}
+
 func TestProcessProtocolRequestBatchRemoteXMLSuccess(t *testing.T) {
 	s := NewWebSocketServer([]int{63117}, "", &UI{})
 
@@ -1022,10 +1154,10 @@ func TestExecuteBatchSingleCounterSignAliasDoesNotOverrideExplicitTarget(t *test
 	}
 
 	item := batchSingleEntry{
-		ID:         "d1",
-		SubOp:      "contrafirmar_arbol",
+		ID:          "d1",
+		SubOp:       "contrafirmar_arbol",
 		ExtraParams: "target=signers",
-		DataRef:    base64.StdEncoding.EncodeToString([]byte("sig-previa")),
+		DataRef:     base64.StdEncoding.EncodeToString([]byte("sig-previa")),
 	}
 	req := &batchRequest{
 		Format:    "CAdES",

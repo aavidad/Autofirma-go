@@ -21,6 +21,12 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
   - contrafirma CAdES: algoritmos no reconocidos ya no rompen el flujo; se aplica fallback seguro a `SHA256withRSA` para mejorar interoperabilidad.
 - Batch local y remoto (JSON/XML), incluyendo trifasico `PRE -> PK1 -> POST`.
+- Batch `afirma://batch` mas tolerante a variantes de parametros Java/integradores:
+  - lectura case-insensitive y alias de `jsonbatch/jsonBatch`, `localBatchProcess/localbatchprocess`,
+  - alias de URLs remotas `batchpresignerurl|batchPreSignerUrl|batchPreSignerURL` y `batchpostsignerurl|batchPostSignerUrl|batchPostSignerURL`,
+  - alias de carga de lote `dat/data`,
+  - alias de retorno de certificado `needcert/needCert`.
+- Tests de compatibilidad batch ampliados para cubrir estos aliases en local/remoto y retorno de certificado.
 - Paridad fuerte en `selectcert`:
   - filtros avanzados,
   - `sticky/resetsticky`,
