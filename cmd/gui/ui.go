@@ -51,6 +51,16 @@ type SignatureResult struct {
 	CertDER      []byte
 }
 
+type OperationHistoryEntry struct {
+	At        string
+	Operation string
+	Format    string
+	Result    string
+	Cert      string
+	Path      string
+	Detail    string
+}
+
 type UI struct {
 	Theme  *material.Theme
 	Window *app.Window
@@ -66,29 +76,32 @@ type UI struct {
 	BtnValide       widget.Clickable // Open Valide URL
 	BtnSignProtocol widget.Clickable // Sign button for protocol mode
 
-	BtnModeSign   widget.Clickable
-	BtnModeVerify widget.Clickable
-	BtnOpSign     widget.Clickable
-	BtnOpCoSign   widget.Clickable
-	BtnOpCounter  widget.Clickable
-	BtnBatchLocal widget.Clickable
-	BtnExportCert widget.Clickable
+	BtnModeSign         widget.Clickable
+	BtnModeVerify       widget.Clickable
+	BtnOpSign           widget.Clickable
+	BtnOpCoSign         widget.Clickable
+	BtnOpCounter        widget.Clickable
+	BtnBatchLocal       widget.Clickable
+	BtnExportCert       widget.Clickable
 	BtnExpertSelectCert widget.Clickable
 	BtnExpertLoad       widget.Clickable
 	BtnExpertSave       widget.Clickable
 
-	BtnAbout        widget.Clickable
-	BtnCheckUpdates widget.Clickable
-	BtnViewLogs     widget.Clickable
-	BtnHealthCheck  widget.Clickable
-	BtnFindIssue    widget.Clickable
-	BtnCopyReport   widget.Clickable
-	BtnOpenSealWeb  widget.Clickable
-	ShowAbout       bool
-	ChkVisibleSeal  widget.Bool
-	ChkStrictCompat widget.Bool
+	BtnAbout           widget.Clickable
+	BtnCheckUpdates    widget.Clickable
+	BtnViewLogs        widget.Clickable
+	BtnHealthCheck     widget.Clickable
+	BtnFindIssue       widget.Clickable
+	BtnCopyReport      widget.Clickable
+	BtnCopyLastError   widget.Clickable
+	BtnCopyHistory     widget.Clickable
+	BtnSelfTest        widget.Clickable
+	BtnOpenSealWeb     widget.Clickable
+	ShowAbout          bool
+	ChkVisibleSeal     widget.Bool
+	ChkStrictCompat    widget.Bool
 	ChkAllowInvalidPDF widget.Bool
-	ChkExpertMode   widget.Bool
+	ChkExpertMode      widget.Bool
 
 	ListCerts    widget.List
 	Certs        []protocol.Certificate
@@ -100,8 +113,8 @@ type UI struct {
 	StatusMsg  string
 	SignedFile string // Path to the last signed file
 
-	IsSigning bool
-	Mode      int // 0: Sign, 1: Verify
+	IsSigning       bool
+	Mode            int    // 0: Sign, 1: Verify
 	ExpertOperation string // sign | cosign | countersign
 
 	PendingCadesConfirm bool
@@ -114,6 +127,14 @@ type UI struct {
 	HealthStatus        string
 	HealthCheckRunning  bool
 	ProblemScanRunning  bool
+	SelfTestRunning     bool
+	LastErrorCode       string
+	LastErrorPhase      string
+	LastErrorOperation  string
+	LastErrorTechnical  string
+	LastErrorHint       string
+	LastErrorAt         string
+	OperationHistory    []OperationHistoryEntry
 
 	DiagTransport      string
 	DiagAction         string
@@ -362,10 +383,10 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Visible Seal Checkbox (only if PAdES)
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								isPades := false
-								if ui.Protocol != nil {
-									isPades = normalizeProtocolFormat(ui.Protocol.SignFormat) == "pades" || normalizeProtocolFormat(ui.Protocol.Params.Get("format")) == "pades"
-								}
+							isPades := false
+							if ui.Protocol != nil {
+								isPades = normalizeProtocolFormat(ui.Protocol.SignFormat) == "pades" || normalizeProtocolFormat(ui.Protocol.Params.Get("format")) == "pades"
+							}
 							if !isPades {
 								return layout.Dimensions{}
 							}
@@ -717,16 +738,27 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 							)
 						})
 					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if ui.Mode != 0 || ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
+							return layout.Dimensions{}
+						}
+						summary := certificateCapabilitySummary(ui.Certs[ui.SelectedCert])
+						return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							lbl := material.Body2(ui.Theme, summary)
+							lbl.Color = color.NRGBA{R: 40, G: 52, B: 70, A: 255}
+							return lbl.Layout(gtx)
+						})
+					}),
 
-	// Status
-	layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		if ui.StatusMsg != "" {
+					// Status
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if ui.StatusMsg != "" {
 							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return material.Body2(ui.Theme, ui.StatusMsg).Layout(gtx)
 							})
 						}
 						return layout.Dimensions{}
-	}),
+					}),
 
 					// Session diagnostics
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -972,9 +1004,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													if ui.BtnHealthCheck.Clicked(gtx) && !ui.HealthCheckRunning {
 														go ui.runLocalHealthCheck()
 													}
-													btnText := "Chequeo local"
+													btnText := "Diagnóstico rápido"
 													if ui.HealthCheckRunning {
-														btnText = "Chequeo en curso..."
+														btnText = "Diagnóstico en curso..."
 													}
 													btn := material.Button(ui.Theme, &ui.BtnHealthCheck, btnText)
 													btn.Background = color.NRGBA{R: 90, G: 90, B: 140, A: 255}
@@ -993,11 +1025,39 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnSelfTest.Clicked(gtx) && !ui.SelfTestRunning {
+														go ui.runGuidedSelfTest()
+													}
+													btnText := "Autoprueba guiada"
+													if ui.SelfTestRunning {
+														btnText = "Autoprueba en curso..."
+													}
+													btn := material.Button(ui.Theme, &ui.BtnSelfTest, btnText)
+													btn.Background = color.NRGBA{R: 60, G: 110, B: 140, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													if ui.BtnCopyReport.Clicked(gtx) {
 														ui.copyTechnicalReport()
 													}
 													btn := material.Button(ui.Theme, &ui.BtnCopyReport, "Copiar reporte técnico")
 													btn.Background = color.NRGBA{R: 80, G: 110, B: 80, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnCopyLastError.Clicked(gtx) {
+														ui.copyLastErrorDetail()
+													}
+													btn := material.Button(ui.Theme, &ui.BtnCopyLastError, "Copiar detalle del último error")
+													btn.Background = color.NRGBA{R: 120, G: 80, B: 80, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnCopyHistory.Clicked(gtx) {
+														ui.copyOperationHistory()
+													}
+													btn := material.Button(ui.Theme, &ui.BtnCopyHistory, "Copiar historial de operaciones")
+													btn.Background = color.NRGBA{R: 70, G: 95, B: 130, A: 255}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1186,6 +1246,15 @@ func inheritedPageBox(v pdf.Value, key string) pdf.Value {
 	return pdf.Value{}
 }
 
+func withSolution(message string, hint string) string {
+	message = strings.TrimSpace(message)
+	hint = strings.TrimSpace(hint)
+	if hint == "" {
+		return message
+	}
+	return message + "\nPosible solución: " + hint
+}
+
 func (ui *UI) verifyCurrentFile() {
 	filePath := ui.InputFile.Text()
 	if filePath == "" {
@@ -1196,7 +1265,9 @@ func (ui *UI) verifyCurrentFile() {
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		ui.StatusMsg = "Error leyendo el archivo: " + err.Error()
+		hint := "Comprueba que el fichero existe y tienes permisos de lectura."
+		ui.setLastError("ERR_VERIFY_READ_FILE", "lectura", "verificar", err, hint)
+		ui.StatusMsg = withSolution("Error leyendo el archivo: "+err.Error(), hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -1248,14 +1319,20 @@ func (ui *UI) verifyCurrentFile() {
 
 		result, err := signer.VerifyData(dataB64, "", "pades")
 		if err != nil {
-			ui.StatusMsg = "Error en la verificación: " + err.Error()
+			hint := "Revisa que la firma y el contenido sean válidos y reintenta."
+			ui.setLastError("ERR_VERIFY_EXEC", "verificacion", "verificar", err, hint)
+			ui.StatusMsg = withSolution("Error en la verificación: "+err.Error(), hint)
 			return
 		}
 
 		if result.Valid {
+			ui.clearLastError()
 			ui.StatusMsg = "✅ VÁLIDO\nFirmante: " + result.SignerName + "\nEmail: " + result.SignerEmail + "\nFecha: " + result.Timestamp
+			ui.appendOperationHistory("verificar", "pades", "ok", strings.TrimSpace(filePath), "firma válida")
 		} else {
-			ui.StatusMsg = "❌ INVÁLIDO\nRazón: " + result.Reason
+			hint := "Comprueba que el fichero original y la firma correspondan entre sí."
+			ui.setLastError("ERR_VERIFY_INVALID", "verificacion", "verificar", fmt.Errorf("%s", strings.TrimSpace(result.Reason)), hint)
+			ui.StatusMsg = withSolution("❌ INVÁLIDO\nRazón: "+result.Reason, hint)
 		}
 		ui.Window.Invalidate()
 	}()
@@ -1309,7 +1386,9 @@ func (ui *UI) checkCertificates() {
 
 func (ui *UI) signCurrentFile() {
 	if ui.SelectedCert == -1 {
-		ui.StatusMsg = "Por favor, seleccione un certificado."
+		hint := "Selecciona un certificado de firma antes de continuar."
+		ui.setLastError("ERR_SIGN_NO_CERT", "seleccion_certificado", "firmar", fmt.Errorf("no hay certificado seleccionado"), hint)
+		ui.StatusMsg = withSolution("Por favor, seleccione un certificado.", hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -1319,7 +1398,9 @@ func (ui *UI) signCurrentFile() {
 		if issue == "" {
 			issue = "certificado no apto para firma"
 		}
-		ui.StatusMsg = "Error: " + issue
+		hint := "Selecciona un certificado apto para firma o revisa su estado."
+		ui.setLastError("ERR_SIGN_CERT_NOT_ALLOWED", "validacion_certificado", "firmar", fmt.Errorf("%s", issue), hint)
+		ui.StatusMsg = withSolution("Error: "+issue, hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -1329,12 +1410,16 @@ func (ui *UI) signCurrentFile() {
 
 	filePath := ui.InputFile.Text()
 	if filePath == "" {
-		ui.StatusMsg = "Por favor, introduzca la ruta del PDF."
+		hint := "Selecciona el fichero que deseas firmar."
+		ui.setLastError("ERR_SIGN_NO_FILE", "seleccion_fichero", "firmar", fmt.Errorf("no hay fichero seleccionado"), hint)
+		ui.StatusMsg = withSolution("Por favor, introduzca la ruta del PDF.", hint)
 		ui.Window.Invalidate()
 		return
 	}
 	if _, err := os.Stat(filePath); err != nil {
-		ui.StatusMsg = "Error: no se puede acceder al fichero seleccionado."
+		hint := "Comprueba ruta y permisos del fichero."
+		ui.setLastError("ERR_SIGN_FILE_ACCESS", "acceso_fichero", "firmar", err, hint)
+		ui.StatusMsg = withSolution("Error: no se puede acceder al fichero seleccionado.", hint)
 		ui.Window.Invalidate()
 		return
 	}
@@ -1357,7 +1442,9 @@ func (ui *UI) signCurrentFile() {
 		// 1. Read file inside goroutine
 		data, err := os.ReadFile(filePath)
 		if err != nil {
-			ui.StatusMsg = "Error leyendo el archivo: " + err.Error()
+			hint := "Comprueba que el fichero existe y tienes permisos de lectura."
+			ui.setLastError("ERR_SIGN_READ_FILE", "lectura", "firmar", err, hint)
+			ui.StatusMsg = withSolution("Error leyendo el archivo: "+err.Error(), hint)
 			return
 		}
 
@@ -1397,7 +1484,9 @@ func (ui *UI) signCurrentFile() {
 			ui.Window.Invalidate()
 		}
 		if err := ui.validateSignPreconditions(filePath, format); err != nil {
-			ui.StatusMsg = "Error: " + err.Error()
+			hint := "Revisa el formato, el fichero y el modo de compatibilidad."
+			ui.setLastError("ERR_SIGN_PRECONDITION", "precondiciones", opAction, err, hint)
+			ui.StatusMsg = withSolution("Error: "+err.Error(), hint)
 			ui.Window.Invalidate()
 			return
 		}
@@ -1478,26 +1567,33 @@ func (ui *UI) signCurrentFile() {
 			// Desktop prompt for Windows with non-exportable key:
 			// PAdES requires P12 in current implementation.
 			if runtime.GOOS == "windows" && ui.Protocol == nil && strings.EqualFold(effectiveFormat, "pades") && isNonExportablePrivateKeyMsg(err) {
+				hint := "Repite la operación para firmar en CAdES con este certificado."
+				ui.setLastError("ERR_SIGN_PADES_KEY_NON_EXPORTABLE", "firma", opAction, err, hint)
 				ui.PendingCadesConfirm = true
 				ui.PendingCadesFile = filePath
 				ui.PendingCadesCertID = certID
-				ui.StatusMsg = "Este certificado no permite PAdES (clave no exportable). Pulse 'Firmar PDF' de nuevo para firmar en CAdES."
+				ui.StatusMsg = withSolution("Este certificado no permite PAdES (clave no exportable). Pulse 'Firmar PDF' de nuevo para firmar en CAdES.", hint)
 				ui.Window.Invalidate()
 				return
 			}
 			if err != nil {
+				hint := "Revisa certificado, formato y conectividad si hay flujo remoto."
+				ui.setLastError("ERR_SIGN_EXEC", "firma", opAction, err, hint)
 				msg := buildUserSignErrorMessage(err, effectiveFormat)
-				ui.StatusMsg = appendStrictCompatSuggestion(msg, err, ui.Protocol, ui.ChkStrictCompat.Value)
+				ui.StatusMsg = withSolution(appendStrictCompatSuggestion(msg, err, ui.Protocol, ui.ChkStrictCompat.Value), hint)
 				ui.Window.Invalidate()
 				return
 			}
 		}
+		ui.clearLastError()
 		ui.updateSessionDiagnostics("ui-local", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "firma_ok")
 
 		// Save to file
 		signature, err := base64.StdEncoding.DecodeString(signatureB64)
 		if err != nil {
-			ui.StatusMsg = "Error decodificando la firma: " + err.Error()
+			hint := "Reintenta la operación; si persiste, comparte el detalle técnico."
+			ui.setLastError("ERR_SIGN_DECODE_RESULT", "post_firma", opAction, err, hint)
+			ui.StatusMsg = withSolution("Error decodificando la firma: "+err.Error(), hint)
 			ui.Window.Invalidate()
 			return
 		}
@@ -1525,7 +1621,9 @@ func (ui *UI) signCurrentFile() {
 
 		if saveToDisk {
 			if err := os.WriteFile(outPath, signature, 0644); err != nil {
-				ui.StatusMsg = "Error guardando el archivo firmado: " + err.Error()
+				hint := "Comprueba permisos de escritura en la carpeta de destino."
+				ui.setLastError("ERR_SIGN_SAVE_FILE", "guardado", opAction, err, hint)
+				ui.StatusMsg = withSolution("Error guardando el archivo firmado: "+err.Error(), hint)
 				ui.Window.Invalidate()
 				return
 			}
@@ -1575,8 +1673,10 @@ func (ui *UI) signCurrentFile() {
 				if err := ui.Protocol.UploadSignature(signatureB64, certB64); err != nil {
 					log.Printf("[UI] Fallo en subida legacy: %v", err)
 					ui.updateSessionDiagnostics("subida-legacy", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "error_subida_afirma")
+					hint := "Revisa conectividad con @firma o activa modo compatibilidad estricta."
+					ui.setLastError("ERR_SIGN_UPLOAD_LEGACY", "subida", opAction, err, hint)
 					msg := buildAfirmaUploadErrorMessage(err, ui.Protocol.STServlet, ui.Protocol.RTServlet)
-					ui.StatusMsg = appendStrictCompatSuggestion(msg, err, ui.Protocol, ui.ChkStrictCompat.Value)
+					ui.StatusMsg = withSolution(appendStrictCompatSuggestion(msg, err, ui.Protocol, ui.ChkStrictCompat.Value), hint)
 					ui.Window.Invalidate()
 					return
 				} else {
@@ -1594,6 +1694,7 @@ func (ui *UI) signCurrentFile() {
 				// Reset for next WS request
 				ui.Protocol = nil
 				ui.InputFile.SetText("")
+				ui.appendOperationHistory(opAction, effectiveFormat, "ok", strings.TrimSpace(filePath), "firma completada en modo servidor/websocket")
 				ui.StatusMsg = "¡Firma completada! Esperando nueva solicitud..."
 				ui.IsSigning = false // IMPORTANT: Release lock
 				ui.Window.Invalidate()
@@ -1607,6 +1708,7 @@ func (ui *UI) signCurrentFile() {
 		}
 
 		ui.StatusMsg = fmt.Sprintf("¡Firmado con éxito! Formato: %s. Guardado en: %s", strings.ToUpper(effectiveFormat), outPath)
+		ui.appendOperationHistory(opAction, effectiveFormat, "ok", strings.TrimSpace(outPath), "firma guardada correctamente")
 		ui.SignedFile = outPath
 		ui.PendingCadesConfirm = false
 		ui.PendingCadesFile = ""
@@ -1702,6 +1804,7 @@ func (ui *UI) runLocalBatchFromInput() {
 		return
 	}
 	ui.StatusMsg = fmt.Sprintf("Lote procesado. Resultado guardado en: %s", outPath)
+	ui.appendOperationHistory("batch", map[bool]string{true: "json", false: "xml"}[isJSON], "ok", strings.TrimSpace(outPath), fmt.Sprintf("operaciones=%d", len(results)))
 }
 
 func (ui *UI) exportSelectedCertificateExpert() {
@@ -1980,22 +2083,70 @@ func isLikelyInvalidPDFForPades(filePath string, format string) bool {
 
 func (ui *UI) runLocalHealthCheck() {
 	ui.HealthCheckRunning = true
-	ui.HealthStatus = "Ejecutando chequeo local..."
+	ui.HealthStatus = "Ejecutando diagnóstico rápido..."
 	ui.Window.Invalidate()
 	defer func() {
 		ui.HealthCheckRunning = false
 		ui.Window.Invalidate()
 	}()
 
-	lines := []string{}
+	type checkResult struct {
+		level  int
+		title  string
+		detail string
+		action string
+	}
+	const (
+		levelOK = iota
+		levelWarn
+		levelError
+	)
+	levelText := func(level int) string {
+		switch level {
+		case levelError:
+			return "ERROR"
+		case levelWarn:
+			return "AVISO"
+		default:
+			return "OK"
+		}
+	}
+	containsAny := func(v string, terms ...string) bool {
+		lower := strings.ToLower(strings.TrimSpace(v))
+		for _, term := range terms {
+			if strings.Contains(lower, strings.ToLower(strings.TrimSpace(term))) {
+				return true
+			}
+		}
+		return false
+	}
+	results := make([]checkResult, 0, 8)
+	maxLevel := levelOK
+	setResult := func(level int, title, detail, action string) {
+		results = append(results, checkResult{
+			level:  level,
+			title:  strings.TrimSpace(title),
+			detail: strings.TrimSpace(detail),
+			action: strings.TrimSpace(action),
+		})
+		if level > maxLevel {
+			maxLevel = level
+		}
+	}
+
 	if trustLines, err := localTLSTrustStatus(); err == nil {
-		lines = append(lines, trustLines...)
+		joined := strings.ToLower(strings.Join(trustLines, " | "))
+		if containsAny(joined, "error", "fail", "sin", "no ") {
+			setResult(levelWarn, "Confianza TLS local", "Estado parcial o incompleto en almacenes de confianza.", "Reejecuta: autofirma-dipgra --install-trust")
+		} else {
+			setResult(levelOK, "Confianza TLS local", "Certificados locales presentes en almacenes detectados.", "")
+		}
 	} else {
-		lines = append(lines, "[Salud] error trust-status: "+err.Error())
+		setResult(levelError, "Confianza TLS local", "No se pudo comprobar el estado de confianza local.", "Revisa permisos y ejecuta: autofirma-dipgra --trust-status")
 	}
 	certs, err := certstore.GetSystemCertificates()
 	if err != nil {
-		lines = append(lines, "[Salud] error en almacén de certificados: "+err.Error())
+		setResult(levelError, "Almacén de certificados", "No se pudo leer el almacén de certificados.", "Comprueba NSS/almacén del sistema y reinicia la aplicación")
 	} else {
 		signable := 0
 		for _, c := range certs {
@@ -2003,17 +2154,48 @@ func (ui *UI) runLocalHealthCheck() {
 				signable++
 			}
 		}
-		lines = append(lines, fmt.Sprintf("[Salud] certificados=%d aptos_firma=%d", len(certs), signable))
+		if len(certs) == 0 {
+			setResult(levelError, "Certificados de usuario", "No hay certificados cargados en el sistema.", "Instala/importa un certificado de firma y recarga la aplicación")
+		} else if signable == 0 {
+			setResult(levelWarn, "Certificados de usuario", fmt.Sprintf("Detectados %d certificados, pero ninguno apto para firma.", len(certs)), "Selecciona otro certificado o revisa validez/uso de clave")
+		} else {
+			setResult(levelOK, "Certificados de usuario", fmt.Sprintf("Detectados %d certificados, aptos para firma: %d.", len(certs), signable), "")
+		}
 	}
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:63117", 800*time.Millisecond)
 	if err != nil {
-		lines = append(lines, "[Salud] puerto websocket 63117: sin escucha")
+		setResult(levelWarn, "Servidor local WebSocket", "No hay escucha activa en 127.0.0.1:63117.", "Abre una sede de firma o inicia: ./scripts/run_web_compat_server.sh start")
 	} else {
 		_ = conn.Close()
-		lines = append(lines, "[Salud] puerto websocket 63117: escucha detectada")
+		setResult(levelOK, "Servidor local WebSocket", "Hay escucha activa en 127.0.0.1:63117.", "")
 	}
 
-	ui.HealthStatus = strings.Join(lines, " | ")
+	if ui.Protocol != nil {
+		if endpoint := describeAfirmaEndpoint(ui.Protocol.STServlet, ui.Protocol.RTServlet); endpoint != "" {
+			if err := checkEndpointReachability(ui.Protocol.STServlet, ui.Protocol.RTServlet); err != nil {
+				setResult(levelWarn, "Conectividad con @firma", "No se alcanza el endpoint remoto de firma en este momento.", "Comprueba red/proxy/DNS o reintenta más tarde")
+			} else {
+				setResult(levelOK, "Conectividad con @firma", "El endpoint remoto responde por red.", "")
+			}
+		}
+	}
+	if _, err := exec.LookPath("openssl"); err != nil {
+		setResult(levelWarn, "Dependencia OpenSSL", "No se detecta 'openssl' en PATH.", "Instala OpenSSL para flujos de firma/verificación compatibles")
+	}
+	if _, err := exec.LookPath("pk12util"); err != nil {
+		setResult(levelWarn, "Dependencia NSS tools", "No se detecta 'pk12util' en PATH.", "Instala 'libnss3-tools' para operaciones con almacenes NSS")
+	}
+
+	lines := []string{fmt.Sprintf("Diagnóstico rápido: %s", levelText(maxLevel))}
+	for _, item := range results {
+		line := fmt.Sprintf("- [%s] %s: %s", levelText(item.level), item.title, item.detail)
+		if item.action != "" {
+			line += " Acción: " + item.action
+		}
+		lines = append(lines, line)
+	}
+
+	ui.HealthStatus = strings.Join(lines, "\n")
 }
 
 func (ui *UI) runProblemFinder() {
@@ -2076,6 +2258,57 @@ func (ui *UI) runProblemFinder() {
 		lines = append(lines, "Si el error persiste, puede ser incidencia temporal del servidor @firma o de la sede.")
 	}
 	ui.HealthStatus = strings.Join(lines, " | ")
+}
+
+func (ui *UI) runGuidedSelfTest() {
+	ui.SelfTestRunning = true
+	ui.HealthStatus = "Ejecutando autoprueba guiada..."
+	ui.Window.Invalidate()
+	defer func() {
+		ui.SelfTestRunning = false
+		ui.Window.Invalidate()
+	}()
+
+	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
+		ui.HealthStatus = "Autoprueba no ejecutada: selecciona un certificado primero."
+		return
+	}
+	cert := ui.Certs[ui.SelectedCert]
+	if !cert.CanSign {
+		issue := strings.TrimSpace(cert.SignIssue)
+		if issue == "" {
+			issue = "certificado no apto para firma"
+		}
+		ui.HealthStatus = "Autoprueba detenida: " + issue
+		ui.appendOperationHistory("autoprueba", "cades", "error", "-", issue)
+		return
+	}
+
+	probeRaw := []byte("autofirma-self-test-" + time.Now().Format("20060102150405"))
+	probeB64 := base64.StdEncoding.EncodeToString(probeRaw)
+
+	sigB64, err := signer.SignData(probeB64, cert.ID, "", "cades", nil)
+	if err != nil {
+		ui.setLastError("ERR_SELFTEST_SIGN", "autoprueba_firma", "autoprueba", err, "Comprueba el certificado y dependencias locales.")
+		ui.HealthStatus = "Autoprueba: fallo en firma local."
+		return
+	}
+	verifyRes, err := signer.VerifyData(probeB64, sigB64, "cades")
+	if err != nil {
+		ui.setLastError("ERR_SELFTEST_VERIFY", "autoprueba_verificacion", "autoprueba", err, "Se pudo firmar pero no verificar; revisa librerías de verificación.")
+		ui.HealthStatus = "Autoprueba: firma OK, verificación fallida."
+		return
+	}
+	if !verifyRes.Valid {
+		reason := strings.TrimSpace(verifyRes.Reason)
+		ui.setLastError("ERR_SELFTEST_INVALID", "autoprueba_verificacion", "autoprueba", fmt.Errorf("%s", reason), "Revisa configuración criptográfica local.")
+		ui.HealthStatus = "Autoprueba: firma generada pero validación no válida."
+		return
+	}
+
+	ui.clearLastError()
+	ui.appendOperationHistory("autoprueba", "cades", "ok", "-", "firma y verificación local completadas")
+	ui.HealthStatus = "Autoprueba completada: firma y verificación local OK."
 }
 
 func (ui *UI) runSelectedCertProbe() []string {
@@ -2150,6 +2383,173 @@ func collectRecentErrorHints(logFile string) []string {
 	return hints
 }
 
+func (ui *UI) selectedCertHistoryLabel() string {
+	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
+		return "-"
+	}
+	cert := ui.Certs[ui.SelectedCert]
+	if cn := strings.TrimSpace(cert.Subject["CN"]); cn != "" {
+		return cn
+	}
+	if nick := strings.TrimSpace(cert.Nickname); nick != "" {
+		return nick
+	}
+	return applog.MaskID(cert.ID)
+}
+
+func (ui *UI) appendOperationHistory(operation, format, result, path, detail string) {
+	entry := OperationHistoryEntry{
+		At:        time.Now().Format("2006-01-02 15:04:05"),
+		Operation: strings.TrimSpace(operation),
+		Format:    strings.TrimSpace(format),
+		Result:    strings.TrimSpace(result),
+		Cert:      strings.TrimSpace(ui.selectedCertHistoryLabel()),
+		Path:      strings.TrimSpace(path),
+		Detail:    strings.TrimSpace(detail),
+	}
+	if entry.Operation == "" {
+		entry.Operation = "-"
+	}
+	if entry.Format == "" {
+		entry.Format = "-"
+	}
+	if entry.Result == "" {
+		entry.Result = "-"
+	}
+	if entry.Cert == "" {
+		entry.Cert = "-"
+	}
+	if entry.Path == "" {
+		entry.Path = "-"
+	}
+	if entry.Detail == "" {
+		entry.Detail = "-"
+	}
+	ui.OperationHistory = append([]OperationHistoryEntry{entry}, ui.OperationHistory...)
+	if len(ui.OperationHistory) > 20 {
+		ui.OperationHistory = ui.OperationHistory[:20]
+	}
+}
+
+func (ui *UI) buildOperationHistoryReport() string {
+	lines := []string{
+		"Autofirma Dipgra - Historial local de operaciones",
+		"timestamp=" + time.Now().Format(time.RFC3339),
+		"total=" + fmt.Sprintf("%d", len(ui.OperationHistory)),
+	}
+	for i, item := range ui.OperationHistory {
+		prefix := fmt.Sprintf("op_%02d_", i+1)
+		lines = append(lines, prefix+"at="+item.At)
+		lines = append(lines, prefix+"operation="+item.Operation)
+		lines = append(lines, prefix+"format="+item.Format)
+		lines = append(lines, prefix+"result="+item.Result)
+		lines = append(lines, prefix+"cert="+item.Cert)
+		lines = append(lines, prefix+"path="+item.Path)
+		lines = append(lines, prefix+"detail="+item.Detail)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (ui *UI) copyOperationHistory() {
+	if len(ui.OperationHistory) == 0 {
+		ui.HealthStatus = "No hay operaciones en el historial todavía."
+		ui.Window.Invalidate()
+		return
+	}
+	report := ui.buildOperationHistoryReport()
+	if err := copyToClipboard(report); err != nil {
+		reportPath, saveErr := writeTechnicalReportFile(report)
+		if saveErr != nil {
+			ui.HealthStatus = "No se pudo copiar ni guardar el historial: " + err.Error()
+			ui.Window.Invalidate()
+			return
+		}
+		ui.HealthStatus = "No se pudo copiar al portapapeles. Historial guardado en: " + reportPath
+		ui.Window.Invalidate()
+		return
+	}
+	ui.HealthStatus = "Historial de operaciones copiado al portapapeles."
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) setLastError(code, phase, operation string, err error, hint string) {
+	ui.LastErrorCode = strings.TrimSpace(code)
+	ui.LastErrorPhase = strings.TrimSpace(phase)
+	ui.LastErrorOperation = strings.TrimSpace(operation)
+	ui.LastErrorHint = strings.TrimSpace(hint)
+	ui.LastErrorAt = time.Now().Format(time.RFC3339)
+	if err != nil {
+		ui.LastErrorTechnical = summarizeServerBody(strings.TrimSpace(err.Error()))
+	} else {
+		ui.LastErrorTechnical = ""
+	}
+	log.Printf(
+		"[UI-ERROR] code=%s phase=%s operation=%s hint=%s detail=%s",
+		safeDiagValue(ui.LastErrorCode),
+		safeDiagValue(ui.LastErrorPhase),
+		safeDiagValue(ui.LastErrorOperation),
+		safeDiagValue(ui.LastErrorHint),
+		safeDiagValue(ui.LastErrorTechnical),
+	)
+	ui.appendOperationHistory(operation, ui.DiagFormat, "error", strings.TrimSpace(ui.InputFile.Text()), strings.TrimSpace(ui.LastErrorCode)+": "+strings.TrimSpace(ui.LastErrorTechnical))
+}
+
+func (ui *UI) clearLastError() {
+	ui.LastErrorCode = ""
+	ui.LastErrorPhase = ""
+	ui.LastErrorOperation = ""
+	ui.LastErrorTechnical = ""
+	ui.LastErrorHint = ""
+	ui.LastErrorAt = ""
+}
+
+func (ui *UI) buildLastErrorDetail() string {
+	lines := []string{
+		"Autofirma Dipgra - Detalle técnico del último error",
+		"timestamp=" + time.Now().Format(time.RFC3339),
+		"error_at=" + strings.TrimSpace(ui.LastErrorAt),
+		"codigo=" + strings.TrimSpace(ui.LastErrorCode),
+		"fase=" + strings.TrimSpace(ui.LastErrorPhase),
+		"operacion=" + strings.TrimSpace(ui.LastErrorOperation),
+		"detalle_tecnico=" + strings.TrimSpace(ui.LastErrorTechnical),
+		"recomendacion=" + strings.TrimSpace(ui.LastErrorHint),
+		"status=" + strings.TrimSpace(ui.StatusMsg),
+		"diag_transport=" + safeDiagValue(ui.DiagTransport),
+		"diag_action=" + safeDiagValue(ui.DiagAction),
+		"diag_session=" + safeDiagValue(ui.DiagSessionID),
+		"diag_format=" + safeDiagValue(ui.DiagFormat),
+		"diag_result=" + safeDiagValue(ui.DiagLastResult),
+		"version=" + version.CurrentVersion,
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (ui *UI) copyLastErrorDetail() {
+	if strings.TrimSpace(ui.LastErrorCode) == "" {
+		ui.HealthStatus = "No hay errores recientes para copiar."
+		ui.Window.Invalidate()
+		return
+	}
+	report := ui.buildLastErrorDetail()
+	if err := copyToClipboard(report); err != nil {
+		reportPath, saveErr := writeTechnicalReportFile(report)
+		if saveErr != nil {
+			ui.HealthStatus = "No se pudo copiar ni guardar el detalle de error: " + err.Error()
+			log.Printf("[UI-ERROR] Error al copiar detalle: %v", err)
+			log.Printf("[UI-ERROR] Error al guardar detalle: %v", saveErr)
+			ui.Window.Invalidate()
+			return
+		}
+		ui.HealthStatus = "No se pudo copiar al portapapeles. Detalle guardado en: " + reportPath
+		log.Printf("[UI-ERROR] Error al copiar detalle: %v", err)
+		log.Printf("[UI-ERROR] Detalle guardado en: %s", reportPath)
+		ui.Window.Invalidate()
+		return
+	}
+	ui.HealthStatus = "Detalle técnico del último error copiado al portapapeles."
+	ui.Window.Invalidate()
+}
+
 func (ui *UI) copyTechnicalReport() {
 	report := ui.buildTechnicalReport()
 	if err := copyToClipboard(report); err != nil {
@@ -2184,6 +2584,12 @@ func (ui *UI) buildTechnicalReport() string {
 		"diag_session=" + safeDiagValue(ui.DiagSessionID),
 		"diag_format=" + safeDiagValue(ui.DiagFormat),
 		"diag_result=" + safeDiagValue(ui.DiagLastResult),
+		"last_error_code=" + strings.TrimSpace(ui.LastErrorCode),
+		"last_error_phase=" + strings.TrimSpace(ui.LastErrorPhase),
+		"last_error_operation=" + strings.TrimSpace(ui.LastErrorOperation),
+		"last_error_hint=" + strings.TrimSpace(ui.LastErrorHint),
+		"last_error_detail=" + strings.TrimSpace(ui.LastErrorTechnical),
+		"history_total=" + fmt.Sprintf("%d", len(ui.OperationHistory)),
 		"status=" + strings.TrimSpace(ui.StatusMsg),
 		"update_status=" + strings.TrimSpace(ui.UpdateStatus),
 		"health_status=" + strings.TrimSpace(ui.HealthStatus),
@@ -2197,6 +2603,12 @@ func (ui *UI) buildTechnicalReport() string {
 	}
 	for _, l := range readRecentSanitizedLogLines(logFile, 40) {
 		lines = append(lines, "log="+l)
+	}
+	for i, item := range ui.OperationHistory {
+		if i >= 8 {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("history_%02d=%s|%s|%s|%s|%s", i+1, item.At, item.Operation, item.Format, item.Result, item.Path))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2680,8 +3092,56 @@ func certificateDisplayLabel(cert protocol.Certificate) string {
 	return label + " [no apto: " + issue + "]"
 }
 
+func certificateCapabilitySummary(cert protocol.Certificate) string {
+	name := strings.TrimSpace(cert.Subject["CN"])
+	if name == "" {
+		name = strings.TrimSpace(cert.Nickname)
+	}
+	if name == "" {
+		name = applog.MaskID(cert.ID)
+	}
+	issue := strings.TrimSpace(cert.SignIssue)
+	signState := "apto"
+	if !cert.CanSign {
+		signState = "no apto"
+		if issue == "" {
+			issue = "sin detalle"
+		}
+	}
+
+	padesState := "posible"
+	if containsAnyInsensitive(issue, "no exportable", "non-exportable", "no permite exportar") {
+		padesState = "limitado (clave no exportable)"
+	}
+	if !cert.CanSign {
+		padesState = "no recomendado"
+	}
+
+	msg := fmt.Sprintf("Certificado seleccionado: %s | Firma: %s | PAdES: %s", name, signState, padesState)
+	if issue != "" {
+		msg += " | Detalle: " + issue
+	}
+	return msg
+}
+
+func containsAnyInsensitive(value string, terms ...string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	for _, term := range terms {
+		if strings.Contains(lower, strings.ToLower(strings.TrimSpace(term))) {
+			return true
+		}
+	}
+	return false
+}
+
 func pickPDFPath(title string) (string, error) {
 	if runtime.GOOS == "windows" {
+		if selectedPaths, canceled, err := nativeOpenFileDialogWindows(title, "", "pdf", false); err == nil {
+			if canceled || len(selectedPaths) == 0 {
+				return "", nil
+			}
+			return strings.TrimSpace(selectedPaths[0]), nil
+		}
 		ps := "$ErrorActionPreference='Stop'; " +
 			"Add-Type -AssemblyName System.Windows.Forms; " +
 			"$dlg = New-Object System.Windows.Forms.OpenFileDialog; " +

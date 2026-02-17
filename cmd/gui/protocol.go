@@ -637,12 +637,12 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		log.Printf("[Protocol] Subiendo carga en claro (Cert|Firma)")
 	}
 
-	sendBody := func(label string, body string, withContentType bool) (bool, string, error) {
+	sendBody := func(label string, body string, withContentType bool) (bool, string, int, error) {
 		u := *reqURL
 		u.RawQuery = ""
 		req, err := http.NewRequest("POST", u.String(), strings.NewReader(body))
 		if err != nil {
-			return false, "", err
+			return false, "", 0, err
 		}
 		if withContentType {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -652,7 +652,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return false, "", fmt.Errorf("%s: fallo de subida: %v", label, err)
+			return false, "", 0, fmt.Errorf("%s: fallo de subida: %v", label, err)
 		}
 		defer resp.Body.Close()
 
@@ -661,17 +661,58 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		log.Printf("[Protocol] %s upload response status=%d body=%q", label, resp.StatusCode, bodyText)
 
 		if resp.StatusCode != 200 {
-			return false, bodyText, fmt.Errorf("%s: error HTTP en subida: %d %s", label, resp.StatusCode, bodyText)
+			return false, bodyText, resp.StatusCode, nil
 		}
 		if strings.EqualFold(bodyText, "OK") || strings.Contains(strings.ToUpper(bodyText), "OK") {
-			return true, bodyText, nil
+			return true, bodyText, resp.StatusCode, nil
 		}
-		return false, bodyText, nil
+		return false, bodyText, resp.StatusCode, nil
+	}
+
+	shouldRetryUpload := func(statusCode int, sendErr error) bool {
+		if sendErr != nil {
+			return true
+		}
+		return statusCode == 408 || statusCode == 429 || statusCode >= 500
+	}
+
+	sendWithRetry := func(label string, body string, withContentType bool) (bool, string, error) {
+		const maxAttempts = 3
+		var lastBody string
+		var lastStatus int
+		var lastErr error
+
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			ok, bodyText, statusCode, sendErr := sendBody(label, body, withContentType)
+			if ok {
+				return true, bodyText, nil
+			}
+
+			lastBody = bodyText
+			lastStatus = statusCode
+			lastErr = sendErr
+
+			if !shouldRetryUpload(statusCode, sendErr) || attempt == maxAttempts {
+				break
+			}
+
+			backoff := time.Duration(250*attempt) * time.Millisecond
+			log.Printf("[Protocol] %s reintento %d/%d tras fallo transitorio (status=%d err=%v), espera=%s", label, attempt+1, maxAttempts, statusCode, sendErr, backoff)
+			time.Sleep(backoff)
+		}
+
+		if lastErr != nil {
+			return false, lastBody, lastErr
+		}
+		if lastStatus != 0 && lastStatus != 200 {
+			return false, lastBody, fmt.Errorf("%s: error HTTP en subida: %d %s", label, lastStatus, lastBody)
+		}
+		return false, lastBody, nil
 	}
 
 	// Attempt 1: Java-style body (raw query-string body, without URL-encoding dat).
 	bodyA := "op=" + op + "&v=" + version + "&id=" + p.FileID + "&dat=" + payload
-	ok, bodyText, err := sendBody("java-style", bodyA, false)
+	ok, bodyText, err := sendWithRetry("java-style", bodyA, false)
 	if err != nil {
 		return err
 	}
@@ -696,7 +737,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	if certB64 != "" {
 		legacy.Set("cert", certB64)
 	}
-	ok, bodyText, err = sendBody("legacy-style", legacy.Encode(), true)
+	ok, bodyText, err = sendWithRetry("legacy-style", legacy.Encode(), true)
 	if err != nil {
 		return err
 	}
@@ -707,7 +748,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	// Last fallback: same legacy style but with original request id.
 	if p.RequestID != "" && p.RequestID != p.FileID {
 		legacy.Set("id", p.RequestID)
-		ok, bodyText, err = sendBody("legacy-style-requestid", legacy.Encode(), true)
+		ok, bodyText, err = sendWithRetry("legacy-style-requestid", legacy.Encode(), true)
 		if err != nil {
 			return err
 		}

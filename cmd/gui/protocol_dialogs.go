@@ -31,6 +31,9 @@ func protocolSaveDialog(defaultPath string, exts string) (string, bool, error) {
 	defaultPath = strings.TrimSpace(defaultPath)
 	switch runtime.GOOS {
 	case "windows":
+		if selectedPath, canceled, err := nativeSaveFileDialogWindows("Guardar fichero", defaultPath, exts); err == nil {
+			return selectedPath, canceled, nil
+		}
 		filter := buildWindowsFileDialogFilter(exts)
 		ps := "$ErrorActionPreference='Stop'; " +
 			"Add-Type -AssemblyName System.Windows.Forms; " +
@@ -102,6 +105,9 @@ func protocolLoadDialog(initialPath string, exts string, multi bool) ([]string, 
 	initialPath = strings.TrimSpace(initialPath)
 	switch runtime.GOOS {
 	case "windows":
+		if selectedPaths, canceled, err := nativeOpenFileDialogWindows("Seleccionar fichero", initialPath, exts, multi); err == nil {
+			return selectedPaths, canceled, nil
+		}
 		filter := buildWindowsFileDialogFilter(exts)
 		multiFlag := "$false"
 		if multi {
