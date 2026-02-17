@@ -1366,7 +1366,8 @@ func (ui *UI) signCurrentFile() {
 				return
 			}
 			if err != nil {
-				ui.StatusMsg = buildUserSignErrorMessage(err, effectiveFormat)
+				msg := buildUserSignErrorMessage(err, effectiveFormat)
+				ui.StatusMsg = appendStrictCompatSuggestion(msg, err, ui.Protocol, ui.ChkStrictCompat.Value)
 				ui.Window.Invalidate()
 				return
 			}
@@ -1454,7 +1455,8 @@ func (ui *UI) signCurrentFile() {
 				if err := ui.Protocol.UploadSignature(signatureB64, certB64); err != nil {
 					log.Printf("[UI] Fallo en subida legacy: %v", err)
 					ui.updateSessionDiagnostics("subida-legacy", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "error_subida_afirma")
-					ui.StatusMsg = buildAfirmaUploadErrorMessage(err, ui.Protocol.STServlet, ui.Protocol.RTServlet)
+					msg := buildAfirmaUploadErrorMessage(err, ui.Protocol.STServlet, ui.Protocol.RTServlet)
+					ui.StatusMsg = appendStrictCompatSuggestion(msg, err, ui.Protocol, ui.ChkStrictCompat.Value)
 					ui.Window.Invalidate()
 					return
 				} else {
@@ -2137,6 +2139,29 @@ func buildUserSignErrorMessage(err error, format string) string {
 		return "La operación de firma agotó el tiempo de espera."
 	}
 	return fmt.Sprintf("Error al firmar en formato %s. Detalle técnico: %s", fmtLabel, summarizeServerBody(raw))
+}
+
+func appendStrictCompatSuggestion(msg string, err error, state *ProtocolState, strictEnabled bool) string {
+	if strictEnabled || state == nil || err == nil {
+		return msg
+	}
+	lower := strings.ToLower(strings.TrimSpace(err.Error()))
+	if lower == "" {
+		return msg
+	}
+	if strings.Contains(lower, "servlet") ||
+		strings.Contains(lower, "idsession") ||
+		strings.Contains(lower, "parametr") ||
+		strings.Contains(lower, "protocol") ||
+		strings.Contains(lower, "upload") ||
+		strings.Contains(lower, "http error en subida") ||
+		strings.Contains(lower, "error http en subida") ||
+		strings.Contains(lower, "non-ok body") ||
+		strings.Contains(lower, "cuerpo no-ok") ||
+		strings.Contains(lower, "wait") {
+		return msg + " Sugerencia: activa 'Modo compatibilidad estricta' e inténtalo de nuevo."
+	}
+	return msg
 }
 
 func (ui *UI) checkUpdates(silent bool) {
