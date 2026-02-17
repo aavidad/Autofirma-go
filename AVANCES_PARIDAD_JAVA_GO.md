@@ -15,6 +15,9 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - Protocolo `afirma://` robusto en `websocket/service` con mapeo de errores `SAF_*`.
 - Operaciones funcionales en flujo protocolario/web:
   - `sign`, `cosign`, `countersign`, `selectcert`, `save`, `load`, `signandsave`.
+- Mejora de compatibilidad en nucleo de firma:
+  - `cosign/countersign` en formatos no-CAdES ya no fallan, ahora hacen fallback compatible a `sign`.
+  - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
 - Batch local y remoto (JSON/XML), incluyendo trifasico `PRE -> PK1 -> POST`.
 - Paridad fuerte en `selectcert`:
   - filtros avanzados,
@@ -23,17 +26,19 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - hints `defaultKeyStore/defaultKeyStoreLib/disableOpeningExternalStores`.
 - PKCS#11 con fallback directo para PKCS#1 en Linux (`linux+cgo`).
 - Robustez `service` legacy (framing, URL-encoding, errores y limites de memoria).
+- Validacion automatica mas robusta:
+  - `scripts/test_active_go.sh` y `scripts/run_full_validation.sh` usan `GOFLAGS=-mod=readonly` por defecto para evitar falsos negativos por vendor.
+  - `run_full_validation.sh` clasifica bloqueo de socket/sandbox de WSS como `ENV_BLOCKED` (no fallo funcional de producto).
 - Suite de tests en verde para codigo principal:
-  - `go test -mod=mod ./cmd/gui/... ./pkg/...`.
+  - `go test -mod=readonly ./cmd/gui/... ./pkg/...`.
   - Cobertura actual: `224` tests (`cmd/gui` + `pkg`).
 
 ### Brechas reales pendientes
 1. Cierre de validacion automatica reproducible:
-- ajustar `scripts/run_full_validation.sh` para no depender de `GOFLAGS=-mod=mod` en entornos con vendor inconsistente;
-- distinguir en reporte bloqueos de entorno (ej. permisos socket sandbox) de fallos de producto.
+- pendiente principal de entorno: ejecutar trust y WSS en entorno sin restricciones de sandbox/TTY para cierre final de bloque.
 
 2. Paridad funcional restante (segun alcance final de release):
-- soporte `cosign/countersign` fuera de CAdES (si aplica frente a Java objetivo);
+- cofirma/contrafirma nativa especifica fuera de CAdES (hoy hay fallback compatible a `sign`);
 - estrategia PKCS#11 multi-plataforma (Windows/macOS) si se exige en alcance.
 
 3. Cierre E2E real:
