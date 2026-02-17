@@ -1094,6 +1094,16 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													lbl := material.Body2(ui.Theme, msg)
 													return lbl.Layout(gtx)
 												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if len(ui.OperationHistory) == 0 {
+														return layout.Dimensions{}
+													}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														lbl := material.Caption(ui.Theme, ui.operationHistorySummary(4))
+														lbl.Color = color.NRGBA{R: 65, G: 70, B: 85, A: 255}
+														return lbl.Layout(gtx)
+													})
+												}),
 											)
 										})
 									}
@@ -1250,6 +1260,9 @@ func withSolution(message string, hint string) string {
 	message = strings.TrimSpace(message)
 	hint = strings.TrimSpace(hint)
 	if hint == "" {
+		return message
+	}
+	if strings.Contains(strings.ToLower(message), "posible solución:") {
 		return message
 	}
 	return message + "\nPosible solución: " + hint
@@ -2472,6 +2485,23 @@ func (ui *UI) copyOperationHistory() {
 	ui.Window.Invalidate()
 }
 
+func (ui *UI) operationHistorySummary(maxItems int) string {
+	if maxItems < 1 {
+		maxItems = 1
+	}
+	if len(ui.OperationHistory) == 0 {
+		return "Historial reciente: sin operaciones registradas todavía."
+	}
+	lines := []string{"Historial reciente:"}
+	for i, item := range ui.OperationHistory {
+		if i >= maxItems {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("- %s | %s | %s | %s", item.At, item.Operation, item.Format, item.Result))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (ui *UI) setLastError(code, phase, operation string, err error, hint string) {
 	ui.LastErrorCode = strings.TrimSpace(code)
 	ui.LastErrorPhase = strings.TrimSpace(phase)
@@ -2731,11 +2761,11 @@ func sanitizeReportLogLine(line string) string {
 
 func buildAfirmaUploadErrorMessage(err error, stServlet string, rtServlet string) string {
 	if err == nil {
-		return "Error enviando la firma a @firma."
+		return withSolution("Error enviando la firma a @firma.", "Reintenta la firma y, si persiste, verifica conectividad con @firma.")
 	}
 	raw := strings.TrimSpace(err.Error())
 	if raw == "" {
-		return "Error enviando la firma a @firma."
+		return withSolution("Error enviando la firma a @firma.", "Reintenta la firma y, si persiste, verifica conectividad con @firma.")
 	}
 	lower := strings.ToLower(raw)
 	endpoint := describeAfirmaEndpoint(stServlet, rtServlet)
@@ -2744,41 +2774,41 @@ func buildAfirmaUploadErrorMessage(err error, stServlet string, rtServlet string
 	}
 
 	if strings.Contains(lower, "no such host") || strings.Contains(lower, "name or service not known") {
-		return fmt.Sprintf("No se pudo resolver el DNS de %s. Revise red/VPN y la URL de @firma.", endpoint)
+		return withSolution(fmt.Sprintf("No se pudo resolver el DNS de %s.", endpoint), "Revisa red/VPN/DNS y que la URL de @firma sea correcta.")
 	}
 	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
-		return fmt.Sprintf("El %s no respondió a tiempo. Puede ser una caída temporal del servicio @firma.", endpoint)
+		return withSolution(fmt.Sprintf("El %s no respondió a tiempo.", endpoint), "Espera unos segundos y reintenta. Si persiste, revisa conectividad o estado del servicio @firma.")
 	}
 	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "no route to host") {
-		return fmt.Sprintf("No se pudo conectar con %s (conexión rechazada o sin ruta).", endpoint)
+		return withSolution(fmt.Sprintf("No se pudo conectar con %s (conexión rechazada o sin ruta).", endpoint), "Comprueba red/proxy/firewall y disponibilidad del servidor remoto.")
 	}
 	if strings.Contains(lower, "tls:") || strings.Contains(lower, "x509:") || strings.Contains(lower, "certificate") {
-		return fmt.Sprintf("Falló la conexión TLS con %s. Revise certificados de confianza/proxy.", endpoint)
+		return withSolution(fmt.Sprintf("Falló la conexión TLS con %s.", endpoint), "Revisa certificados de confianza locales, proxy HTTPS y fecha/hora del sistema.")
 	}
 	if m := uploadHTTPStatusRegex.FindStringSubmatch(lower); len(m) == 2 {
 		switch m[1] {
 		case "400":
-			return fmt.Sprintf("%s devolvió HTTP 400 (petición inválida). Parámetros incompatibles o sesión expirada.", endpoint)
+			return withSolution(fmt.Sprintf("%s devolvió HTTP 400 (petición inválida).", endpoint), "Reinicia el flujo desde la sede para regenerar sesión/parámetros.")
 		case "401", "403":
-			return fmt.Sprintf("%s rechazó la petición (HTTP %s). Falta autenticación o permisos en @firma.", endpoint, m[1])
+			return withSolution(fmt.Sprintf("%s rechazó la petición (HTTP %s).", endpoint, m[1]), "Comprueba permisos/autenticación en la sede o servicio de firma.")
 		case "404":
-			return fmt.Sprintf("El endpoint de %s no existe (HTTP 404). Revise STServlet/RTServlet.", endpoint)
+			return withSolution(fmt.Sprintf("El endpoint de %s no existe (HTTP 404).", endpoint), "Revisa STServlet/RTServlet y configuración de integración.")
 		case "409":
-			return fmt.Sprintf("%s devolvió conflicto de sesión (HTTP 409). Reintente la operación.", endpoint)
+			return withSolution(fmt.Sprintf("%s devolvió conflicto de sesión (HTTP 409).", endpoint), "Inicia de nuevo la firma para obtener una sesión limpia.")
 		case "413":
-			return fmt.Sprintf("%s rechazó el tamaño de la firma (HTTP 413).", endpoint)
+			return withSolution(fmt.Sprintf("%s rechazó el tamaño de la firma (HTTP 413).", endpoint), "Prueba un documento más pequeño o revisa límites del servidor.")
 		case "429":
-			return fmt.Sprintf("%s está limitando peticiones (HTTP 429). Espere y reintente.", endpoint)
+			return withSolution(fmt.Sprintf("%s está limitando peticiones (HTTP 429).", endpoint), "Espera y reintenta; evita repetir solicitudes en ráfaga.")
 		}
 		if strings.HasPrefix(m[1], "5") {
-			return fmt.Sprintf("%s devolvió HTTP %s. Incidencia temporal en @firma.", endpoint, m[1])
+			return withSolution(fmt.Sprintf("%s devolvió HTTP %s.", endpoint, m[1]), "Probable incidencia temporal del servicio. Reintenta más tarde.")
 		}
-		return fmt.Sprintf("Error HTTP %s al enviar la firma a %s.", m[1], endpoint)
+		return withSolution(fmt.Sprintf("Error HTTP %s al enviar la firma a %s.", m[1], endpoint), "Reintenta y revisa logs del servidor remoto si persiste.")
 	}
 	if strings.Contains(lower, "server upload returned non-ok body") || strings.Contains(lower, "subida al servidor devolvió cuerpo no-ok") {
-		return fmt.Sprintf("%s devolvió respuesta no válida al guardar la firma. Detalle: %s", endpoint, summarizeServerBody(raw))
+		return withSolution(fmt.Sprintf("%s devolvió respuesta no válida al guardar la firma. Detalle: %s", endpoint, summarizeServerBody(raw)), "Activa modo compatibilidad estricta y repite la operación.")
 	}
-	return fmt.Sprintf("Error enviando la firma a %s. Detalle técnico: %s", endpoint, summarizeServerBody(raw))
+	return withSolution(fmt.Sprintf("Error enviando la firma a %s. Detalle técnico: %s", endpoint, summarizeServerBody(raw)), "Revisa conectividad con @firma y, si persiste, comparte el detalle técnico.")
 }
 
 func describeAfirmaEndpoint(stServlet string, rtServlet string) string {
@@ -2813,6 +2843,9 @@ func summarizeServerBody(raw string) string {
 func copyToClipboard(text string) error {
 	switch runtime.GOOS {
 	case "windows":
+		if err := nativeCopyToClipboardWindows(text); err == nil {
+			return nil
+		}
 		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -Value @'\n"+text+"\n'@")
 		configureGUICommand(cmd)
 		return cmd.Run()
@@ -2890,11 +2923,11 @@ func normalizeCheckIssue(err error) string {
 
 func buildUserSignErrorMessage(err error, format string) string {
 	if err == nil {
-		return "Error al firmar."
+		return withSolution("Error al firmar.", "Reintenta la operación y revisa certificado/formato seleccionado.")
 	}
 	raw := strings.TrimSpace(err.Error())
 	if raw == "" {
-		return "Error al firmar."
+		return withSolution("Error al firmar.", "Reintenta la operación y revisa certificado/formato seleccionado.")
 	}
 	lower := strings.ToLower(raw)
 	fmtLabel := strings.ToUpper(strings.TrimSpace(format))
@@ -2903,39 +2936,39 @@ func buildUserSignErrorMessage(err error, format string) string {
 	}
 
 	if strings.Contains(lower, "certificado no encontrado") {
-		return "No se pudo usar el certificado seleccionado. Puede haberse retirado del almacén o token."
+		return withSolution("No se pudo usar el certificado seleccionado. Puede haberse retirado del almacén o token.", "Recarga certificados y vuelve a seleccionar uno válido.")
 	}
 	if strings.Contains(lower, "certificado caducado") {
-		return "El certificado está caducado y no puede usarse para firmar."
+		return withSolution("El certificado está caducado y no puede usarse para firmar.", "Usa un certificado vigente.")
 	}
 	if strings.Contains(lower, "aun no valido") || strings.Contains(lower, "aún no válido") {
-		return "El certificado todavía no es válido (fecha/hora del sistema o vigencia del certificado)."
+		return withSolution("El certificado todavía no es válido (fecha/hora del sistema o vigencia del certificado).", "Corrige fecha/hora del sistema o usa un certificado ya vigente.")
 	}
 	if strings.Contains(lower, "no permite exportar su clave privada") || strings.Contains(lower, "clave no exportable") {
 		if strings.EqualFold(format, "pades") {
-			return "El certificado no permite PAdES con este método (clave no exportable). Pruebe CAdES o certificado software."
+			return withSolution("El certificado no permite PAdES con este método (clave no exportable).", "Prueba CAdES o usa un certificado software exportable.")
 		}
-		return "El certificado no permite usar su clave privada para esta operación."
+		return withSolution("El certificado no permite usar su clave privada para esta operación.", "Selecciona otro certificado con clave utilizable.")
 	}
 	if strings.Contains(lower, "pin") || strings.Contains(lower, "pkcs11") || strings.Contains(lower, "smartcard") || strings.Contains(lower, "token") {
-		return "No se pudo autenticar el certificado en el dispositivo criptográfico (PIN/token/tarjeta)."
+		return withSolution("No se pudo autenticar el certificado en el dispositivo criptográfico (PIN/token/tarjeta).", "Verifica PIN, estado del token/tarjeta y vuelve a intentarlo.")
 	}
 	if strings.Contains(lower, "acceso denegado") || strings.Contains(lower, "permission denied") {
-		return "El sistema denegó el acceso a la clave privada o al almacén de certificados."
+		return withSolution("El sistema denegó el acceso a la clave privada o al almacén de certificados.", "Ejecuta con permisos adecuados o revisa políticas del almacén.")
 	}
 	if strings.Contains(lower, "fallo al firmar en el almacen de windows") || strings.Contains(lower, "almacen de windows") {
-		return "Falló la firma en el almacén de Windows. Puede ser una restricción del proveedor criptográfico."
+		return withSolution("Falló la firma en el almacén de Windows. Puede ser una restricción del proveedor criptográfico.", "Prueba otro certificado/proveedor o utiliza modo alternativo de firma.")
 	}
 	if strings.Contains(lower, "datos base64 inválidos") || strings.Contains(lower, "xml invalido") {
-		return "Los datos de entrada para firmar son inválidos o están corruptos."
+		return withSolution("Los datos de entrada para firmar son inválidos o están corruptos.", "Regenera la solicitud desde origen y vuelve a intentar.")
 	}
 	if strings.Contains(lower, "openssl") || strings.Contains(lower, "pk12util") {
-		return "Falló una dependencia criptográfica local (OpenSSL/pk12util). Revise la instalación del entorno."
+		return withSolution("Falló una dependencia criptográfica local (OpenSSL/pk12util).", "Instala/verifica OpenSSL y libnss3-tools en el sistema.")
 	}
 	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
-		return "La operación de firma agotó el tiempo de espera."
+		return withSolution("La operación de firma agotó el tiempo de espera.", "Reintenta y comprueba conectividad/carga del sistema.")
 	}
-	return fmt.Sprintf("Error al firmar en formato %s. Detalle técnico: %s", fmtLabel, summarizeServerBody(raw))
+	return withSolution(fmt.Sprintf("Error al firmar en formato %s. Detalle técnico: %s", fmtLabel, summarizeServerBody(raw)), "Revisa certificado, formato y el detalle técnico para diagnosticar la causa.")
 }
 
 func appendStrictCompatSuggestion(msg string, err error, state *ProtocolState, strictEnabled bool) string {
