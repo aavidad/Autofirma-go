@@ -4,11 +4,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="${ROOT_DIR}/AVANCES_PARIDAD_JAVA_GO.md"
+PLAN_SRC="${ROOT_DIR}/PLAN_MIGRACION_AUTOFIRMA_GO.md"
 OUT="${ROOT_DIR}/docs/CHANGELOG_PARIDAD.md"
 
-if [[ ! -f "${SRC}" ]]; then
-  echo "ERROR: no existe ${SRC}" >&2
+if [[ ! -f "${PLAN_SRC}" ]]; then
+  echo "ERROR: no existe ${PLAN_SRC}" >&2
   exit 1
 fi
 
@@ -18,36 +18,22 @@ trap 'rm -f "${tmp_file}"' EXIT
 {
   echo "# Changelog de Paridad Java -> Go"
   echo
-  echo "_Generado automáticamente el $(date -Iseconds)_"
+  echo "Actualizado automaticamente el $(date -Iseconds)"
   echo
-  echo "## Estado global"
+  echo "## Cambio de modelo documental"
+  echo "Se usa fuente unica de estado y pendientes en:"
+  echo "- \`PLAN_MIGRACION_AUTOFIRMA_GO.md\`"
+  echo
+  echo "## Resumen de pendiente real"
   awk '
-    /^## Estado global/ {blk=1; next}
+    /^## Pendiente real \(priorizado\)/ {blk=1; next}
     /^## / && blk==1 {blk=0}
-    blk==1 && /^- \[[ x]\]/ {print}
-  ' "${SRC}"
+    blk==1 {print}
+  ' "${PLAN_SRC}"
   echo
-  echo "## Checklist pendiente"
-  awk '
-    /^## Checklist detallado/ {blk=1; next}
-    /^## Bitácora de avances/ && blk==1 {blk=0}
-    blk==1 && /^### / {section=$0; next}
-    blk==1 && /^- \[ \]/ {
-      if (section != "") {
-        print section
-        section=""
-      }
-      print $0
-    }
-  ' "${SRC}"
-  echo
-  echo "## Últimos avances (extracto)"
-  awk '
-    /^### 2026-02-17/ {blk=1}
-    /^## Pendiente para hoy/ && blk==1 {print; blk=2; next}
-    /^## / && blk==2 {blk=0}
-    blk==1 || blk==2 {print}
-  ' "${SRC}"
+  echo "## Referencia"
+  echo "Para detalle completo consultar:"
+  echo "- \`PLAN_MIGRACION_AUTOFIRMA_GO.md\`"
 } > "${tmp_file}"
 
 mv "${tmp_file}" "${OUT}"
