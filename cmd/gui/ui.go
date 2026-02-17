@@ -79,6 +79,7 @@ type UI struct {
 	ShowAbout       bool
 	ChkVisibleSeal  widget.Bool
 	ChkStrictCompat widget.Bool
+	ChkAllowInvalidPDF widget.Bool
 
 	ListCerts    widget.List
 	Certs        []protocol.Certificate
@@ -895,6 +896,11 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													})
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return material.CheckBox(ui.Theme, &ui.ChkAllowInvalidPDF, "Permitir firmar aunque el PDF no sea válido").Layout(gtx)
+													})
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													msg := strings.TrimSpace(ui.UpdateStatus)
 													if msg == "" {
 														return layout.Dimensions{}
@@ -1264,6 +1270,12 @@ func (ui *UI) signCurrentFile() {
 		if ui.Protocol != nil {
 			opAction = ui.Protocol.Action
 		}
+		if isLikelyInvalidPDFForPades(filePath, format) && ui.ChkAllowInvalidPDF.Value {
+			ui.StatusMsg = "Aviso: el fichero no parece un PDF válido para PAdES. Se continuará porque lo has permitido."
+			ui.updateSessionDiagnostics("ui-local", opAction, getProtocolSessionID(ui.Protocol), format, "aviso_pdf_no_valido_permitido")
+			log.Printf("[UI] Aviso: PDF no válido para PAdES, pero permitido por configuración de usuario")
+			ui.Window.Invalidate()
+		}
 		if err := ui.validateSignPreconditions(filePath, format); err != nil {
 			ui.StatusMsg = "Error: " + err.Error()
 			ui.Window.Invalidate()
@@ -1556,6 +1568,9 @@ func (ui *UI) validateSignPreconditions(filePath string, format string) error {
 	if info.Size() == 0 {
 		return fmt.Errorf("el fichero está vacío")
 	}
+	if isLikelyInvalidPDFForPades(filePath, format) && !ui.ChkAllowInvalidPDF.Value {
+		return fmt.Errorf("el fichero no es un PDF válido para firma PAdES (si deseas continuar, marca 'Permitir firmar aunque el PDF no sea válido')")
+	}
 	if ui.ChkStrictCompat.Value && ui.Protocol != nil {
 		hasIDSession := strings.TrimSpace(getProtocolSessionID(ui.Protocol)) != ""
 		hasServlet := strings.TrimSpace(ui.Protocol.STServlet) != "" || strings.TrimSpace(ui.Protocol.RTServlet) != ""
@@ -1564,6 +1579,16 @@ func (ui *UI) validateSignPreconditions(filePath string, format string) error {
 		}
 	}
 	return nil
+}
+
+func isLikelyInvalidPDFForPades(filePath string, format string) bool {
+	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(filePath)))
+	normFormat := strings.ToLower(strings.TrimSpace(format))
+	if ext != ".pdf" && normFormat != "pades" && normFormat != "auto" {
+		return false
+	}
+	_, _, err := getFirstPDFPageSize(filePath)
+	return err != nil
 }
 
 func (ui *UI) runLocalHealthCheck() {
