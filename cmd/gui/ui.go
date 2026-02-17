@@ -861,9 +861,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													if ui.BtnHealthCheck.Clicked(gtx) && !ui.HealthCheckRunning {
 														go ui.runLocalHealthCheck()
 													}
-													btnText := "Health-check local"
+													btnText := "Chequeo local"
 													if ui.HealthCheckRunning {
-														btnText = "Health-check en curso..."
+														btnText = "Chequeo en curso..."
 													}
 													btn := material.Button(ui.Theme, &ui.BtnHealthCheck, btnText)
 													btn.Background = color.NRGBA{R: 90, G: 90, B: 140, A: 255}
@@ -1342,7 +1342,7 @@ func (ui *UI) signCurrentFile() {
 		}
 		signatureB64, err := protocolSignOperation(opAction, dataB64, certID, "", effectiveFormat, signOptions)
 		if err != nil {
-			ui.updateSessionDiagnostics("local-ui", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "sign_error")
+			ui.updateSessionDiagnostics("ui-local", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "error_firma")
 			// Desktop prompt for Windows with non-exportable key:
 			// PAdES requires P12 in current implementation.
 			if runtime.GOOS == "windows" && ui.Protocol == nil && strings.EqualFold(effectiveFormat, "pades") && isNonExportablePrivateKeyMsg(err) {
@@ -1359,7 +1359,7 @@ func (ui *UI) signCurrentFile() {
 				return
 			}
 		}
-		ui.updateSessionDiagnostics("local-ui", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "sign_ok")
+		ui.updateSessionDiagnostics("ui-local", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "firma_ok")
 
 		// Save to file
 		signature, err := base64.StdEncoding.DecodeString(signatureB64)
@@ -1438,19 +1438,19 @@ func (ui *UI) signCurrentFile() {
 			isLegacyUpload := ui.Protocol.STServlet != "" || ui.Protocol.RTServlet != ""
 
 			if isLegacyUpload {
-				log.Println("[UI] Performing legacy HTTP upload...")
+				log.Println("[UI] Iniciando subida HTTP legacy...")
 				if err := ui.Protocol.UploadSignature(signatureB64, certB64); err != nil {
-					log.Printf("[UI] Upload failed: %v", err)
-					ui.updateSessionDiagnostics("legacy-upload", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "upload_error_afirma")
+					log.Printf("[UI] Fallo en subida legacy: %v", err)
+					ui.updateSessionDiagnostics("subida-legacy", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "error_subida_afirma")
 					ui.StatusMsg = buildAfirmaUploadErrorMessage(err, ui.Protocol.STServlet, ui.Protocol.RTServlet)
 					ui.Window.Invalidate()
 					return
 				} else {
-					ui.updateSessionDiagnostics("legacy-upload", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "upload_ok")
-					log.Println("[UI] Upload successful.")
+					ui.updateSessionDiagnostics("subida-legacy", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "subida_ok")
+					log.Println("[UI] Subida legacy completada.")
 				}
 			} else {
-				log.Println("[UI] No STServlet/RTServlet, skipping legacy upload (assuming WebSocket return).")
+				log.Println("[UI] Sin STServlet/RTServlet, se omite subida legacy (retorno por WebSocket).")
 			}
 
 			// 3. Manage Window State
@@ -1568,7 +1568,7 @@ func (ui *UI) validateSignPreconditions(filePath string, format string) error {
 
 func (ui *UI) runLocalHealthCheck() {
 	ui.HealthCheckRunning = true
-	ui.HealthStatus = "Ejecutando health-check local..."
+	ui.HealthStatus = "Ejecutando chequeo local..."
 	ui.Window.Invalidate()
 	defer func() {
 		ui.HealthCheckRunning = false
@@ -1653,11 +1653,35 @@ func (ui *UI) runProblemFinder() {
 	errHints := collectRecentErrorHints(resolveCurrentLogFile())
 	lines = append(lines, errHints...)
 
+	if ui.IsSigning {
+		lines = append(lines, "Prueba activa de firma omitida: hay una operación de firma/verificación en curso.")
+	} else {
+		lines = append(lines, ui.runSelectedCertProbe()...)
+	}
+
 	if len(lines) == 0 {
 		lines = append(lines, "No se detectó un fallo local claro.")
 		lines = append(lines, "Si el error persiste, puede ser incidencia temporal del servidor @firma o de la sede.")
 	}
 	ui.HealthStatus = strings.Join(lines, " | ")
+}
+
+func (ui *UI) runSelectedCertProbe() []string {
+	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
+		return []string{"Prueba de firma local: no ejecutada (selecciona un certificado)."}
+	}
+	cert := ui.Certs[ui.SelectedCert]
+	probeB64 := base64.StdEncoding.EncodeToString([]byte("autofirma-problem-finder-probe"))
+	_, err := signer.SignData(probeB64, cert.ID, "", "cades", nil)
+	if err != nil {
+		ui.updateSessionDiagnostics("diagnostico-local", "firma", "", "cades", "prueba_error")
+		return []string{
+			"Prueba de firma local: error con certificado seleccionado.",
+			buildUserSignErrorMessage(err, "cades"),
+		}
+	}
+	ui.updateSessionDiagnostics("diagnostico-local", "firma", "", "cades", "prueba_ok")
+	return []string{"Prueba de firma local: OK (el certificado y el entorno local responden)."}
 }
 
 func checkEndpointReachability(stServlet string, rtServlet string) error {
@@ -1696,7 +1720,7 @@ func collectRecentErrorHints(logFile string) []string {
 	var hints []string
 	joined := strings.ToLower(strings.Join(lines, " | "))
 	switch {
-	case strings.Contains(joined, "upload failed"):
+	case strings.Contains(joined, "upload failed"), strings.Contains(joined, "fallo en subida"):
 		hints = append(hints, "Se detectó fallo reciente al subir resultado a @firma (legacy upload).")
 	case strings.Contains(joined, "upload http error"):
 		hints = append(hints, "Se detectó rechazo HTTP reciente del servidor @firma.")
@@ -1720,14 +1744,14 @@ func (ui *UI) copyTechnicalReport() {
 		reportPath, saveErr := writeTechnicalReportFile(report)
 		if saveErr != nil {
 			ui.HealthStatus = "No se pudo copiar ni guardar el reporte: " + err.Error()
-			log.Printf("[Report] copy error: %v", err)
-			log.Printf("[Report] save fallback error: %v", saveErr)
+			log.Printf("[Reporte] Error al copiar: %v", err)
+			log.Printf("[Reporte] Error al guardar respaldo: %v", saveErr)
 			ui.Window.Invalidate()
 			return
 		}
 		ui.HealthStatus = "No se pudo copiar al portapapeles. Reporte guardado en: " + reportPath
-		log.Printf("[Report] copy error: %v", err)
-		log.Printf("[Report] report saved: %s", reportPath)
+		log.Printf("[Reporte] Error al copiar: %v", err)
+		log.Printf("[Reporte] Reporte guardado en: %s", reportPath)
 		ui.Window.Invalidate()
 		return
 	}
