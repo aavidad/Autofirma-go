@@ -68,6 +68,10 @@ type UI struct {
 
 	BtnModeSign   widget.Clickable
 	BtnModeVerify widget.Clickable
+	BtnOpSign     widget.Clickable
+	BtnOpCoSign   widget.Clickable
+	BtnOpCounter  widget.Clickable
+	BtnBatchLocal widget.Clickable
 
 	BtnAbout        widget.Clickable
 	BtnCheckUpdates widget.Clickable
@@ -80,6 +84,7 @@ type UI struct {
 	ChkVisibleSeal  widget.Bool
 	ChkStrictCompat widget.Bool
 	ChkAllowInvalidPDF widget.Bool
+	ChkExpertMode   widget.Bool
 
 	ListCerts    widget.List
 	Certs        []protocol.Certificate
@@ -93,6 +98,7 @@ type UI struct {
 
 	IsSigning bool
 	Mode      int // 0: Sign, 1: Verify
+	ExpertOperation string // sign | cosign | countersign
 
 	PendingCadesConfirm bool
 	PendingCadesFile    string
@@ -149,6 +155,7 @@ func NewUI(w *app.Window) *UI {
 		Window:          w,
 		SelectedCert:    -1,
 		Mode:            0,
+		ExpertOperation: "sign",
 		PadesSealX:      0.62,
 		PadesSealY:      0.04,
 		PadesSealW:      0.34,
@@ -726,6 +733,54 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnOpSign.Clicked(gtx) {
+												ui.ExpertOperation = "sign"
+											}
+											btn := material.Button(ui.Theme, &ui.BtnOpSign, "Firmar")
+											if ui.ExpertOperation == "sign" {
+												btn.Background = color.NRGBA{R: 35, G: 120, B: 55, A: 255}
+											}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnOpCoSign.Clicked(gtx) {
+												ui.ExpertOperation = "cosign"
+											}
+											btn := material.Button(ui.Theme, &ui.BtnOpCoSign, "Cofirmar")
+											if ui.ExpertOperation == "cosign" {
+												btn.Background = color.NRGBA{R: 35, G: 120, B: 55, A: 255}
+											}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnOpCounter.Clicked(gtx) {
+												ui.ExpertOperation = "countersign"
+											}
+											btn := material.Button(ui.Theme, &ui.BtnOpCounter, "Contrafirmar")
+											if ui.ExpertOperation == "countersign" {
+												btn.Background = color.NRGBA{R: 35, G: 120, B: 55, A: 255}
+											}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									if ui.BtnBatchLocal.Clicked(gtx) {
+										go ui.runLocalBatchFromInput()
+									}
+									btn := material.Button(ui.Theme, &ui.BtnBatchLocal, "Procesar lote local (JSON/XML)")
+									btn.Background = color.NRGBA{R: 70, G: 95, B: 130, A: 255}
+									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+								}),
 								// Sign/Verify Button
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									if ui.IsSigning {
@@ -740,7 +795,16 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											ui.signCurrentFile()
 										}
 
-										btn := material.Button(ui.Theme, &ui.BtnSign, "Firmar PDF")
+										label := "Firmar PDF"
+										if ui.ChkExpertMode.Value {
+											switch ui.ExpertOperation {
+											case "cosign":
+												label = "Cofirmar fichero"
+											case "countersign":
+												label = "Contrafirmar fichero"
+											}
+										}
+										btn := material.Button(ui.Theme, &ui.BtnSign, label)
 										if ui.SelectedCert == -1 || ui.InputFile.Text() == "" {
 											btn.Background = color.NRGBA{R: 200, G: 200, B: 200, A: 255} // Disabled look
 										}
@@ -898,6 +962,11 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 														return material.CheckBox(ui.Theme, &ui.ChkAllowInvalidPDF, "Permitir firmar aunque el PDF no sea válido").Layout(gtx)
+													})
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return material.CheckBox(ui.Theme, &ui.ChkExpertMode, "Modo experto (mostrar funciones avanzadas)").Layout(gtx)
 													})
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1269,6 +1338,11 @@ func (ui *UI) signCurrentFile() {
 		opAction := "sign"
 		if ui.Protocol != nil {
 			opAction = ui.Protocol.Action
+		} else if ui.ChkExpertMode.Value {
+			switch strings.ToLower(strings.TrimSpace(ui.ExpertOperation)) {
+			case "cosign", "countersign":
+				opAction = strings.ToLower(strings.TrimSpace(ui.ExpertOperation))
+			}
 		}
 		if isLikelyInvalidPDFForPades(filePath, format) && ui.ChkAllowInvalidPDF.Value {
 			ui.StatusMsg = "Aviso: el fichero no parece un PDF válido para PAdES. Se continuará porque lo has permitido."
@@ -1493,6 +1567,95 @@ func (ui *UI) signCurrentFile() {
 		ui.PendingCadesCertID = ""
 		ui.Window.Invalidate()
 	}()
+}
+
+func (ui *UI) runLocalBatchFromInput() {
+	if ui.IsSigning {
+		ui.StatusMsg = "Hay una operación en curso. Espere para ejecutar el lote."
+		ui.Window.Invalidate()
+		return
+	}
+	if ui.SelectedCert < 0 || ui.SelectedCert >= len(ui.Certs) {
+		ui.StatusMsg = "Seleccione un certificado para ejecutar el lote."
+		ui.Window.Invalidate()
+		return
+	}
+	path := strings.TrimSpace(ui.InputFile.Text())
+	if path == "" {
+		ui.StatusMsg = "Seleccione un fichero de lote JSON/XML."
+		ui.Window.Invalidate()
+		return
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		ui.StatusMsg = "No se pudo leer el fichero de lote: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	isJSON := strings.EqualFold(filepath.Ext(path), ".json")
+
+	ui.IsSigning = true
+	ui.StatusMsg = "Procesando lote local..."
+	ui.Window.Invalidate()
+	defer func() {
+		ui.IsSigning = false
+		ui.Window.Invalidate()
+	}()
+
+	req, err := parseBatchRequest(raw, isJSON)
+	if err != nil {
+		ui.StatusMsg = "Lote inválido: " + err.Error()
+		return
+	}
+	if len(req.SingleSigns) == 0 {
+		ui.StatusMsg = "Lote sin operaciones."
+		return
+	}
+
+	srv := &WebSocketServer{ui: ui}
+	certID := ui.Certs[ui.SelectedCert].ID
+	globalExtra := decodeBatchExtraParams(req.ExtraParams)
+	results := make([]batchSingleResult, 0, len(req.SingleSigns))
+	errorOcurred := false
+	for _, item := range req.SingleSigns {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			id = "unknown"
+		}
+		if errorOcurred && req.StopOnError {
+			results = append(results, batchSingleResult{ID: id, Result: batchResultSkipped})
+			continue
+		}
+		res := srv.executeBatchSingle(nil, item, req, certID, globalExtra)
+		if res.Result == batchResultError {
+			errorOcurred = true
+			if req.StopOnError {
+				for i := range results {
+					results[i].Result = batchResultSkipped
+					results[i].Signature = ""
+				}
+			}
+		}
+		results = append(results, res)
+	}
+
+	respBytes, err := serializeBatchResponse(results, isJSON)
+	if err != nil {
+		ui.StatusMsg = "No se pudo preparar la respuesta del lote: " + err.Error()
+		return
+	}
+
+	extOut := ".json"
+	if !isJSON {
+		extOut = ".xml"
+	}
+	outPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_resultado_lote" + extOut
+	if err := os.WriteFile(outPath, respBytes, 0644); err != nil {
+		ui.StatusMsg = "Lote ejecutado, pero no se pudo guardar resultado: " + err.Error()
+		return
+	}
+	ui.StatusMsg = fmt.Sprintf("Lote procesado. Resultado guardado en: %s", outPath)
 }
 
 func (ui *UI) layoutSessionDiagnostics(gtx layout.Context) layout.Dimensions {
