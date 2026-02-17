@@ -5,8 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 export GOCACHE="${GOCACHE:-/tmp/go-build}"
 # Avoid false negatives in repos that intentionally use local replaces without synced vendor metadata.
+# Use readonly mode to keep go.mod/go.sum untouched during validation.
 if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
-  export GOFLAGS="${GOFLAGS:-} -mod=mod"
+  export GOFLAGS="${GOFLAGS:-} -mod=readonly"
 fi
 
 echo "[test-active] collecting active Go packages (cmd/, pkg/)..."
