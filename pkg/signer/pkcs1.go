@@ -46,6 +46,9 @@ func SignPKCS1WithOptions(preSignData []byte, certificateID string, algorithm st
 			if pkcs11Err == nil && len(sig) > 0 {
 				return base64.StdEncoding.EncodeToString(sig), nil
 			}
+			if pkcs11Err != nil {
+				return "", fmt.Errorf("fallo al exportar certificado: %v (fallback PKCS11 directo fallido: %v)", err, pkcs11Err)
+			}
 		}
 		return "", fmt.Errorf("fallo al exportar certificado: %v", err)
 	}
@@ -102,6 +105,14 @@ func shouldTryPKCS11DirectSign(cert *protocol.Certificate, options map[string]in
 	if src == "smartcard" || src == "dnie" {
 		return true
 	}
-	store := strings.ToUpper(strings.TrimSpace(optionString(options, "_defaultKeyStore", "")))
+	store := ""
+	for _, key := range []string{"_defaultKeyStore", "defaultKeyStore", "defaultkeystore", "keyStore", "keystore"} {
+		candidate := strings.TrimSpace(optionString(options, key, ""))
+		if candidate != "" {
+			store = candidate
+			break
+		}
+	}
+	store = strings.ToUpper(store)
 	return store == "PKCS11"
 }

@@ -8,6 +8,7 @@ import (
 	"autofirma-host/pkg/protocol"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,51 @@ func TestShouldTryPKCS11DirectSign(t *testing.T) {
 	}
 	if shouldTryPKCS11DirectSign(&protocol.Certificate{Source: "system"}, nil) {
 		t.Fatalf("source=system sin store PKCS11 no debe activar fallback PKCS11 directo")
+	}
+	if !shouldTryPKCS11DirectSign(&protocol.Certificate{Source: "system"}, map[string]interface{}{
+		"defaultKeyStore": "PKCS11",
+	}) {
+		t.Fatalf("alias defaultKeyStore=PKCS11 debe activar fallback PKCS11 directo")
+	}
+	if !shouldTryPKCS11DirectSign(&protocol.Certificate{Source: "system"}, map[string]interface{}{
+		"defaultkeystore": "pkcs11",
+	}) {
+		t.Fatalf("alias defaultkeystore=pkcs11 debe activar fallback PKCS11 directo")
+	}
+}
+
+func TestSignPKCS1WithOptionsFallbackErrorIncludesPKCS11Failure(t *testing.T) {
+	origLookup := lookupCertificateByIDFunc
+	origExport := exportCertificateToP12Func
+	origPKCS11 := signPKCS1PKCS11Func
+	defer func() {
+		lookupCertificateByIDFunc = origLookup
+		exportCertificateToP12Func = origExport
+		signPKCS1PKCS11Func = origPKCS11
+	}()
+
+	lookupCertificateByIDFunc = func(certificateID string, options map[string]interface{}) (*protocol.Certificate, string, error) {
+		return &protocol.Certificate{
+			ID:      "c1",
+			Source:  "system",
+			Content: []byte{0x30, 0x82, 0x01},
+		}, "", nil
+	}
+	exportCertificateToP12Func = func(nickname, password string) (string, error) {
+		return "", errors.New("pk12util failed")
+	}
+	signPKCS1PKCS11Func = func(preSignData []byte, cert *protocol.Certificate, algorithm string, options map[string]interface{}) ([]byte, error) {
+		return nil, errors.New("pkcs11 failed")
+	}
+
+	_, err := SignPKCS1WithOptions([]byte("pre"), "c1", "SHA256withRSA", map[string]interface{}{
+		"defaultkeystore": "pkcs11",
+	})
+	if err == nil {
+		t.Fatalf("se esperaba error cuando fallan export y fallback PKCS11")
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "pk12util failed") || !strings.Contains(msg, "pkcs11 failed") {
+		t.Fatalf("mensaje de error debe incluir ambos fallos, obtenido: %q", err.Error())
 	}
 }

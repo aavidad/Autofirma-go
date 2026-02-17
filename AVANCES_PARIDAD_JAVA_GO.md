@@ -30,6 +30,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - Ampliada base PKCS#11 directa a entornos `cgo` (no limitada artificialmente a Linux):
   - build tags ajustados a `cgo` en `certstore` y firma PKCS#1 directa.
   - rutas candidatas de modulo PKCS#11 ampliadas para Linux/macOS/Windows.
+  - fallback PKCS#11 en PKCS#1 acepta aliases de store (`defaultKeyStore/defaultkeystore/...`) y mejora trazabilidad de error cuando fallan exportacion y fallback.
 - Robustez `service` legacy (framing, URL-encoding, errores y limites de memoria).
 - Validacion automatica mas robusta:
   - `scripts/test_active_go.sh` y `scripts/run_full_validation.sh` usan `GOFLAGS=-mod=readonly` por defecto para evitar falsos negativos por vendor.
