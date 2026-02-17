@@ -15,6 +15,7 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"math/big"
 	"sort"
 	"strconv"
@@ -416,7 +417,8 @@ func resolveSignatureAlgorithmOID(algorithm string) (asn1.ObjectIdentifier, erro
 	case l == "" || strings.Contains(l, "sha256"):
 		return asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}, nil
 	default:
-		return nil, fmt.Errorf("algoritmo de contrafirma no soportado: %s", algorithm)
+		log.Printf("[Signer] CounterSign unknown algorithm %q, fallback to SHA256withRSA OID", algorithm)
+		return asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}, nil
 	}
 }
 

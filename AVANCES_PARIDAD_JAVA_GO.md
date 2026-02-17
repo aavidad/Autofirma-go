@@ -18,6 +18,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - Mejora de compatibilidad en nucleo de firma:
   - `cosign/countersign` en formatos no-CAdES ya no fallan, ahora hacen fallback compatible a `sign`.
   - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
+  - contrafirma CAdES: algoritmos no reconocidos ya no rompen el flujo; se aplica fallback seguro a `SHA256withRSA` para mejorar interoperabilidad.
 - Batch local y remoto (JSON/XML), incluyendo trifasico `PRE -> PK1 -> POST`.
 - Paridad fuerte en `selectcert`:
   - filtros avanzados,

@@ -235,6 +235,17 @@ func TestCounterSignCadesDERTargetSignersByCN(t *testing.T) {
 	}
 }
 
+func TestResolveSignatureAlgorithmOIDUnknownFallsBackToSHA256RSA(t *testing.T) {
+	oid, err := resolveSignatureAlgorithmOID("SHA3withRSA")
+	if err != nil {
+		t.Fatalf("no se esperaba error para algoritmo desconocido: %v", err)
+	}
+	want := asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+	if !oid.Equal(want) {
+		t.Fatalf("OID inesperado para fallback: got=%v want=%v", oid, want)
+	}
+}
+
 func testGenerateSelfSignedRSACert(t *testing.T) (*rsa.PrivateKey, *x509.Certificate) {
 	return testGenerateSelfSignedRSACertWithCN(t, "Test CounterSigner")
 }
