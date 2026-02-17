@@ -1,6 +1,6 @@
 # Changelog de Paridad Java -> Go
 
-Actualizado automaticamente el 2026-02-17T19:37:03+01:00
+Actualizado automaticamente el 2026-02-17T20:16:23+01:00
 
 ## Cambio de modelo documental
 Se usa fuente unica de estado y pendientes en:
