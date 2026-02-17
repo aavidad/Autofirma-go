@@ -71,6 +71,13 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - cierre release Windows/Linux (Go/No-Go).
 - ejecutar `run_sede_e2e.sh check --require-xades-countersign` y adjuntar reporte en evidencias de cierre.
 
+4. Hardening de seguridad para futuras versiones (consideracion persistente):
+- reforzar canal Native Messaging (`autofirma-host`) con allowlist estricta de extensiones autorizadas por navegador.
+- mantener y auditar trust TLS local de `autofirma-desktop` (certificados locales, alcance minimo y rotacion).
+- endurecer validaciones de entrada/tamano en `afirma://`, `service` legacy y flujos `batch`.
+- revisar que logs y reportes no expongan datos sensibles (IDs de sesion, `dat`, `tridata`, certificados).
+- incluir pruebas de abuso local en validacion (origen no autorizado, payload malicioso, replay).
+
 ## Estado por bloques
 - P0 Estabilidad WebSocket y TLS local: **muy avanzado**, pendiente validacion final en entorno objetivo.
 - P1 Compatibilidad completa protocolo `afirma://`: **muy avanzado**, pendiente validacion final contra variantes reales de sedes.
