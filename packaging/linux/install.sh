@@ -202,7 +202,18 @@ if [[ -n "${USER_NAME}" ]]; then
   if [[ -n "${USER_HOME}" ]]; then
     USER_APPS_DIR="${USER_HOME}/.local/share/applications"
     USER_MIMEAPPS="${USER_APPS_DIR}/mimeapps.list"
+    USER_DESKTOP_DIR="${USER_HOME}/Desktop"
+    USER_DESKTOP_ENTRY="${USER_APPS_DIR}/autofirma-dipgra.desktop"
+    USER_DESKTOP_SHORTCUT="${USER_DESKTOP_DIR}/autofirma-dipgra.desktop"
     mkdir -p "${USER_APPS_DIR}"
+    mkdir -p "${USER_DESKTOP_DIR}"
+
+    cp -f /usr/local/share/applications/autofirma-dipgra.desktop "${USER_DESKTOP_ENTRY}" || true
+    chmod 0644 "${USER_DESKTOP_ENTRY}" || true
+
+    cp -f "${USER_DESKTOP_ENTRY}" "${USER_DESKTOP_SHORTCUT}" || true
+    chmod +x "${USER_DESKTOP_SHORTCUT}" || true
+
     if [[ ! -f "${USER_MIMEAPPS}" ]]; then
       cat > "${USER_MIMEAPPS}" <<MIMEAPPS
 [Default Applications]
@@ -224,6 +235,8 @@ MIMEAPPS
       sed -i 's#^x-scheme-handler/afirma=.*#x-scheme-handler/afirma=autofirma-dipgra.desktop#' "${USER_MIMEAPPS}"
     fi
     chown "${USER_NAME}:${USER_NAME}" "${USER_MIMEAPPS}" || true
+    chown "${USER_NAME}:${USER_NAME}" "${USER_DESKTOP_ENTRY}" || true
+    chown "${USER_NAME}:${USER_NAME}" "${USER_DESKTOP_SHORTCUT}" || true
   fi
 fi
 
