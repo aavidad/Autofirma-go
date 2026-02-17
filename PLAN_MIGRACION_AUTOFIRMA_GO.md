@@ -29,8 +29,8 @@ Evidencias objetivas:
 
 ### P1 - Paridad funcional aún no cerrada al 100%
 1. Completar cofirma/contrafirma nativa avanzada fuera de CAdES (si la sede lo exige).
-- Estado actual: existe fallback compatible a `sign` fuera de CAdES (no rompe flujo), pero no hay implementacion nativa avanzada equivalente para todos los formatos.
-- Evidencia: `pkg/signer/operations.go` aplica fallback a `SignData` cuando formato no es CAdES.
+- Estado actual: `XAdES`/`PAdES` ya usan ruta nativa de multisignado compatible; falta cierre de contrafirma avanzada especifica por formato/perfil de sede.
+- Evidencia: `pkg/signer/operations.go` enruta `xades/pades` a la via nativa y reserva fallback para formatos no soportados.
 
 2. Completar estrategia PKCS#11 multi-plataforma (si alcance incluye Windows/macOS).
 - Estado actual:

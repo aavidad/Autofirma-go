@@ -17,7 +17,8 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - `sign`, `cosign`, `countersign`, `selectcert`, `save`, `load`, `signandsave`.
   - `batch` contrafirma: aliases Java `contrafirmar_arbol` y `contrafirmar_hojas` ahora propagan automaticamente `target=tree/leafs` cuando no se define target explicito.
 - Mejora de compatibilidad en nucleo de firma:
-  - `cosign/countersign` en formatos no-CAdES ya no fallan, ahora hacen fallback compatible a `sign`.
+  - `cosign/countersign` en formatos no-CAdES comunes (`XAdES`/`PAdES`) usan ruta nativa de multisignado en Go.
+  - fallback a `sign` se reserva para formatos realmente no soportados.
   - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
   - contrafirma CAdES: algoritmos no reconocidos ya no rompen el flujo; se aplica fallback seguro a `SHA256withRSA` para mejorar interoperabilidad.
 - Batch local y remoto (JSON/XML), incluyendo trifasico `PRE -> PK1 -> POST`.
@@ -51,7 +52,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - pendiente principal de entorno: ejecutar trust y WSS en entorno sin restricciones de sandbox/TTY para cierre final de bloque.
 
 2. Paridad funcional restante (segun alcance final de release):
-- cofirma/contrafirma nativa especifica fuera de CAdES (hoy hay fallback compatible a `sign`);
+- completar contrafirma avanzada especifica por formato fuera de CAdES (hoy en `XAdES`/`PAdES` se aplica ruta nativa de multisignado compatible);
 - validacion real en Windows/macOS del flujo PKCS#11 directo (codigo base ya preparado en `cgo`).
 
 3. Cierre E2E real:

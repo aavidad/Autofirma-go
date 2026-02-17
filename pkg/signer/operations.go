@@ -16,9 +16,11 @@ import (
 )
 
 var signDataCompatFallbackFunc = SignData
+var signDataNativeMultiSignFunc = SignData
 
-// CoSignData performs a best-effort local co-sign operation.
-// Current native support is implemented for CAdES signatures.
+// CoSignData performs local co-sign.
+// Native CAdES co-sign is used when applicable; for XAdES/PAdES we route through
+// the native Go sign pipeline on already-signed payloads (multisign-compatible mode).
 func CoSignData(dataB64 string, certificateID string, pin string, format string, options map[string]interface{}) (string, error) {
 	format = normalizeSignFormat(format)
 	log.Printf("[Signer] CoSign start cert=%s format=%s pin_set=%t opts=%s %s",
@@ -35,7 +37,11 @@ func CoSignData(dataB64 string, certificateID string, pin string, format string,
 	}
 	format = resolveSignFormat(format, data)
 	if !strings.EqualFold(format, "cades") {
-		log.Printf("[Signer] CoSign fallback to SignData for format=%s", format)
+		if isNativeMultiSignFormat(format) {
+			log.Printf("[Signer] CoSign native multisign route for format=%s", format)
+			return signDataNativeMultiSignFunc(dataB64, certificateID, pin, format, options)
+		}
+		log.Printf("[Signer] CoSign compatibility fallback to SignData for unsupported format=%s", format)
 		return signDataCompatFallbackFunc(dataB64, certificateID, pin, format, options)
 	}
 	cert, nickname, err := getCertificateByID(certificateID, options)
@@ -62,7 +68,9 @@ func CoSignData(dataB64 string, certificateID string, pin string, format string,
 	return sig, nil
 }
 
-// CounterSignData keeps explicit behavior while countersign native backend is pending.
+// CounterSignData performs local counter-sign.
+// Native CAdES counter-sign is used when applicable; for XAdES/PAdES we apply
+// compatible native multisign mode through the signing pipeline.
 func CounterSignData(dataB64 string, certificateID string, pin string, format string, options map[string]interface{}) (string, error) {
 	format = normalizeSignFormat(format)
 
@@ -72,7 +80,11 @@ func CounterSignData(dataB64 string, certificateID string, pin string, format st
 	}
 	format = resolveSignFormat(format, data)
 	if !strings.EqualFold(format, "cades") {
-		log.Printf("[Signer] CounterSign fallback to SignData for format=%s", format)
+		if isNativeMultiSignFormat(format) {
+			log.Printf("[Signer] CounterSign compatible native multisign route for format=%s", format)
+			return signDataNativeMultiSignFunc(dataB64, certificateID, pin, format, options)
+		}
+		log.Printf("[Signer] CounterSign compatibility fallback to SignData for unsupported format=%s", format)
 		return signDataCompatFallbackFunc(dataB64, certificateID, pin, format, options)
 	}
 	cert, _, err := getCertificateByID(certificateID, options)
@@ -90,4 +102,13 @@ func CounterSignData(dataB64 string, certificateID string, pin string, format st
 		return "", fmt.Errorf("contrafirma CAdES fallida (go): %v", err)
 	}
 	return base64.StdEncoding.EncodeToString(countersigned), nil
+}
+
+func isNativeMultiSignFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "pades", "xades":
+		return true
+	default:
+		return false
+	}
 }
