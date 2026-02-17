@@ -194,17 +194,20 @@ func handleWebSocketLaunch(uriString string, ui *UI) {
 	}
 
 	log.Printf("[Launcher] Starting WebSocket server on one of requested ports: %v (v=%d session=%s)", req.Ports, req.Version, maskSessionForLog(req.SessionID))
+	ui.updateSessionDiagnostics("websocket-launch", "websocket", req.SessionID, "", "launch_received")
 
 	// Start server (async)
 	server := NewWebSocketServer(req.Ports, req.SessionID, ui)
 	if err := server.Start(); err != nil {
 		log.Printf("[Launcher] Failed to start WebSocket server via launch: %v", err)
+		ui.updateSessionDiagnostics("websocket-launch", "websocket", req.SessionID, "", "launch_error")
 	} else {
 		log.Printf("[Launcher] WebSocket server launched successfully via protocol request")
 		// Enter minimalist mode
 		ui.IsServerMode = true
 		ui.Protocol = &ProtocolState{IsActive: true, Action: "websocket"}
 		ui.StatusMsg = "Servidor AutoFirma activo. Esperando solicitudes del navegador..."
+		ui.updateSessionDiagnostics("websocket-launch", "websocket", req.SessionID, "", "launch_ok")
 		ui.Window.Invalidate()
 	}
 }

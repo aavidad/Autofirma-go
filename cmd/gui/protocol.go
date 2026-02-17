@@ -779,6 +779,7 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 	}
 
 	ui.Protocol = state
+	ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(state.SignFormat), "protocol_init")
 	ui.StatusMsg = "Descargando documento del servidor..."
 	ui.Window.Invalidate()
 
@@ -828,10 +829,12 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 			}
 			ui.InputFile.SetText(path)
 			ui.StatusMsg = "Documento descargado. Seleccione certificado y firme."
+			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "file_ready")
 		} else {
 			// No file downloaded (local file flow)
 			log.Println("[Protocol] No document downloaded. Waiting for manual selection.")
 			ui.StatusMsg = "Iniciado modo firma local web. Seleccione archivo y certificado."
+			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "local_waiting_file")
 		}
 
 		ui.Mode = 0 // Ensure Sign mode

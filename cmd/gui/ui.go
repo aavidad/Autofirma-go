@@ -20,6 +20,7 @@ import (
 	"image/draw"
 	"image/png"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,9 +69,12 @@ type UI struct {
 	BtnAbout        widget.Clickable
 	BtnCheckUpdates widget.Clickable
 	BtnViewLogs     widget.Clickable
+	BtnHealthCheck  widget.Clickable
+	BtnCopyReport   widget.Clickable
 	BtnOpenSealWeb  widget.Clickable
 	ShowAbout       bool
 	ChkVisibleSeal  widget.Bool
+	ChkStrictCompat widget.Bool
 
 	ListCerts    widget.List
 	Certs        []protocol.Certificate
@@ -92,6 +96,15 @@ type UI struct {
 	UpdateLatestVersion string
 	UpdateDownloadURL   string
 	UpdateCheckRunning  bool
+	HealthStatus        string
+	HealthCheckRunning  bool
+
+	DiagTransport      string
+	DiagAction         string
+	DiagSessionID      string
+	DiagFormat         string
+	DiagLastResult     string
+	DiagLastUpdateTime string
 
 	Protocol *ProtocolState // Web protocol state
 
@@ -679,14 +692,19 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						})
 					}),
 
-					// Status
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if ui.StatusMsg != "" {
+	// Status
+	layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		if ui.StatusMsg != "" {
 							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return material.Body2(ui.Theme, ui.StatusMsg).Layout(gtx)
 							})
 						}
 						return layout.Dimensions{}
+	}),
+
+					// Session diagnostics
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return ui.layoutSessionDiagnostics(gtx)
 					}),
 
 					// Action Buttons
@@ -826,6 +844,31 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnHealthCheck.Clicked(gtx) && !ui.HealthCheckRunning {
+														go ui.runLocalHealthCheck()
+													}
+													btnText := "Health-check local"
+													if ui.HealthCheckRunning {
+														btnText = "Health-check en curso..."
+													}
+													btn := material.Button(ui.Theme, &ui.BtnHealthCheck, btnText)
+													btn.Background = color.NRGBA{R: 90, G: 90, B: 140, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnCopyReport.Clicked(gtx) {
+														ui.copyTechnicalReport()
+													}
+													btn := material.Button(ui.Theme, &ui.BtnCopyReport, "Copiar reporte técnico")
+													btn.Background = color.NRGBA{R: 80, G: 110, B: 80, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return material.CheckBox(ui.Theme, &ui.ChkStrictCompat, "Modo compatibilidad estricta").Layout(gtx)
+													})
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													msg := strings.TrimSpace(ui.UpdateStatus)
 													if msg == "" {
 														return layout.Dimensions{}
@@ -834,6 +877,14 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													if strings.Contains(strings.ToLower(msg), "nueva version") {
 														lbl.Color = color.NRGBA{R: 0, G: 110, B: 0, A: 255}
 													}
+													return lbl.Layout(gtx)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													msg := strings.TrimSpace(ui.HealthStatus)
+													if msg == "" {
+														return layout.Dimensions{}
+													}
+													lbl := material.Body2(ui.Theme, msg)
 													return lbl.Layout(gtx)
 												}),
 											)
@@ -1135,6 +1186,11 @@ func (ui *UI) signCurrentFile() {
 		ui.Window.Invalidate()
 		return
 	}
+	if _, err := os.Stat(filePath); err != nil {
+		ui.StatusMsg = "Error: no se puede acceder al fichero seleccionado."
+		ui.Window.Invalidate()
+		return
+	}
 
 	// Sign
 	ui.StatusMsg = "Iniciando proceso de firma..."
@@ -1178,6 +1234,16 @@ func (ui *UI) signCurrentFile() {
 			}
 		}
 		format = normalizeProtocolFormat(format)
+		opAction := "sign"
+		if ui.Protocol != nil {
+			opAction = ui.Protocol.Action
+		}
+		if err := ui.validateSignPreconditions(filePath, format); err != nil {
+			ui.StatusMsg = "Error: " + err.Error()
+			ui.Window.Invalidate()
+			return
+		}
+		ui.updateSessionDiagnostics("local-ui", opAction, getProtocolSessionID(ui.Protocol), format, "precondiciones_ok")
 
 		// Handling of Windows re-prompt for CAdES if PAdES is non-exportable
 		confirmingCades := runtime.GOOS == "windows" &&
@@ -1242,15 +1308,17 @@ func (ui *UI) signCurrentFile() {
 		if ui.Protocol != nil {
 			signOptions = buildProtocolSignOptions(ui.Protocol, effectiveFormat)
 		}
+		if ui.ChkStrictCompat.Value {
+			signOptions = mergeSignOptions(signOptions, map[string]interface{}{
+				"_compatStrict": true,
+			})
+		}
 		if strings.EqualFold(effectiveFormat, "pades") && ui.Protocol == nil {
 			signOptions = mergeSignOptions(signOptions, ui.buildPadesSignatureOptions())
 		}
-		opAction := "sign"
-		if ui.Protocol != nil {
-			opAction = ui.Protocol.Action
-		}
 		signatureB64, err := protocolSignOperation(opAction, dataB64, certID, "", effectiveFormat, signOptions)
 		if err != nil {
+			ui.updateSessionDiagnostics("local-ui", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "sign_error")
 			// Desktop prompt for Windows with non-exportable key:
 			// PAdES requires P12 in current implementation.
 			if runtime.GOOS == "windows" && ui.Protocol == nil && strings.EqualFold(effectiveFormat, "pades") && isNonExportablePrivateKeyMsg(err) {
@@ -1267,6 +1335,7 @@ func (ui *UI) signCurrentFile() {
 				return
 			}
 		}
+		ui.updateSessionDiagnostics("local-ui", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "sign_ok")
 
 		// Save to file
 		signature, err := base64.StdEncoding.DecodeString(signatureB64)
@@ -1382,6 +1451,187 @@ func (ui *UI) signCurrentFile() {
 		ui.PendingCadesCertID = ""
 		ui.Window.Invalidate()
 	}()
+}
+
+func (ui *UI) layoutSessionDiagnostics(gtx layout.Context) layout.Dimensions {
+	if strings.TrimSpace(ui.DiagAction) == "" && strings.TrimSpace(ui.DiagLastResult) == "" {
+		return layout.Dimensions{}
+	}
+	lines := []string{
+		"Diagnóstico de sesión activa",
+		"Transporte: " + safeDiagValue(ui.DiagTransport),
+		"Acción: " + safeDiagValue(ui.DiagAction),
+		"Sesión: " + safeDiagValue(ui.DiagSessionID),
+		"Formato: " + safeDiagValue(ui.DiagFormat),
+		"Resultado: " + safeDiagValue(ui.DiagLastResult),
+		"Actualizado: " + safeDiagValue(ui.DiagLastUpdateTime),
+	}
+	return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Body1(ui.Theme, lines[0])
+				lbl.Color = color.NRGBA{R: 40, G: 40, B: 40, A: 255}
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Spacer{Height: unit.Dp(4)}.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Caption(ui.Theme, strings.Join(lines[1:], " | "))
+				lbl.Color = color.NRGBA{R: 80, G: 80, B: 80, A: 255}
+				return lbl.Layout(gtx)
+			}),
+		)
+	})
+}
+
+func safeDiagValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "-"
+	}
+	return v
+}
+
+func getProtocolSessionID(p *ProtocolState) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(getQueryParam(p.Params, "idsession", "idSession"))
+}
+
+func (ui *UI) updateSessionDiagnostics(transport, action, sessionID, format, result string) {
+	ui.DiagTransport = strings.TrimSpace(transport)
+	ui.DiagAction = strings.TrimSpace(action)
+	ui.DiagSessionID = applog.MaskID(strings.TrimSpace(sessionID))
+	ui.DiagFormat = strings.TrimSpace(format)
+	ui.DiagLastResult = strings.TrimSpace(result)
+	ui.DiagLastUpdateTime = time.Now().Format("2006-01-02 15:04:05")
+	if ui.Window != nil {
+		ui.Window.Invalidate()
+	}
+}
+
+func (ui *UI) validateSignPreconditions(filePath string, format string) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("no se puede leer el fichero")
+	}
+	if info.IsDir() {
+		return fmt.Errorf("la ruta seleccionada es una carpeta, no un fichero")
+	}
+	if info.Size() == 0 {
+		return fmt.Errorf("el fichero está vacío")
+	}
+	if ui.ChkStrictCompat.Value && ui.Protocol != nil {
+		hasIDSession := strings.TrimSpace(getProtocolSessionID(ui.Protocol)) != ""
+		hasServlet := strings.TrimSpace(ui.Protocol.STServlet) != "" || strings.TrimSpace(ui.Protocol.RTServlet) != ""
+		if !hasIDSession && !hasServlet {
+			return fmt.Errorf("modo estricto: falta idsession o servlet para el flujo protocolario")
+		}
+	}
+	return nil
+}
+
+func (ui *UI) runLocalHealthCheck() {
+	ui.HealthCheckRunning = true
+	ui.HealthStatus = "Ejecutando health-check local..."
+	ui.Window.Invalidate()
+	defer func() {
+		ui.HealthCheckRunning = false
+		ui.Window.Invalidate()
+	}()
+
+	lines := []string{}
+	if trustLines, err := localTLSTrustStatus(); err == nil {
+		lines = append(lines, trustLines...)
+	} else {
+		lines = append(lines, "[Health] trust-status error: "+err.Error())
+	}
+	certs, err := certstore.GetSystemCertificates()
+	if err != nil {
+		lines = append(lines, "[Health] certstore error: "+err.Error())
+	} else {
+		signable := 0
+		for _, c := range certs {
+			if c.CanSign {
+				signable++
+			}
+		}
+		lines = append(lines, fmt.Sprintf("[Health] certificates=%d signable=%d", len(certs), signable))
+	}
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:63117", 800*time.Millisecond)
+	if err != nil {
+		lines = append(lines, "[Health] websocket port 63117: no listener")
+	} else {
+		_ = conn.Close()
+		lines = append(lines, "[Health] websocket port 63117: listener detected")
+	}
+
+	ui.HealthStatus = strings.Join(lines, " | ")
+}
+
+func (ui *UI) copyTechnicalReport() {
+	report := ui.buildTechnicalReport()
+	if err := copyToClipboard(report); err != nil {
+		ui.HealthStatus = "No se pudo copiar al portapapeles, reporte en logs: " + err.Error()
+		log.Printf("[Report] copy error: %v", err)
+		log.Printf("[Report] content: %s", report)
+		ui.Window.Invalidate()
+		return
+	}
+	ui.HealthStatus = "Reporte técnico copiado al portapapeles."
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) buildTechnicalReport() string {
+	lines := []string{
+		"Autofirma Dipgra - Reporte técnico",
+		"timestamp=" + time.Now().Format(time.RFC3339),
+		"version=" + version.CurrentVersion,
+		"server_mode=" + fmt.Sprintf("%t", ui.IsServerMode),
+		"strict_compat=" + fmt.Sprintf("%t", ui.ChkStrictCompat.Value),
+		"diag_transport=" + safeDiagValue(ui.DiagTransport),
+		"diag_action=" + safeDiagValue(ui.DiagAction),
+		"diag_session=" + safeDiagValue(ui.DiagSessionID),
+		"diag_format=" + safeDiagValue(ui.DiagFormat),
+		"diag_result=" + safeDiagValue(ui.DiagLastResult),
+		"status=" + strings.TrimSpace(ui.StatusMsg),
+		"update_status=" + strings.TrimSpace(ui.UpdateStatus),
+		"health_status=" + strings.TrimSpace(ui.HealthStatus),
+		"log_dir=" + resolveLogDirectory(),
+	}
+	if trustLines, err := localTLSTrustStatus(); err == nil {
+		for _, l := range trustLines {
+			lines = append(lines, "trust="+l)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func copyToClipboard(text string) error {
+	switch runtime.GOOS {
+	case "windows":
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -Value @'\n"+text+"\n'@")
+		configureGUICommand(cmd)
+		return cmd.Run()
+	case "darwin":
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		configureGUICommand(cmd)
+		return cmd.Run()
+	default:
+		if _, err := exec.LookPath("wl-copy"); err == nil {
+			cmd := exec.Command("wl-copy")
+			cmd.Stdin = strings.NewReader(text)
+			configureGUICommand(cmd)
+			return cmd.Run()
+		}
+		cmd := exec.Command("xclip", "-selection", "clipboard")
+		cmd.Stdin = strings.NewReader(text)
+		configureGUICommand(cmd)
+		return cmd.Run()
+	}
 }
 
 func (ui *UI) buildPadesSignatureOptions() map[string]interface{} {

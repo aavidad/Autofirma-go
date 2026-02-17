@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sort"
 	"strings"
 	"sync"
@@ -59,7 +60,8 @@ func Init(appName string) (string, error) {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.LUTC | log.Lshortfile)
 	currentPath = path
 
-	cleanupOldLogs(logDir, 14)
+	cleanupOldLogs(logDir, logRetentionDays())
+	cleanupLogsByTotalSize(logDir, logMaxTotalBytes())
 	return path, nil
 }
 
@@ -148,4 +150,76 @@ func cleanupOldLogs(dir string, keepDays int) {
 		}
 		_ = os.Remove(filepath.Join(dir, f.name))
 	}
+}
+
+func cleanupLogsByTotalSize(dir string, maxBytes int64) {
+	if maxBytes <= 0 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type fi struct {
+		name string
+		mod  time.Time
+		size int64
+	}
+	var files []fi
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".log") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fi{name: e.Name(), mod: info.ModTime(), size: info.Size()})
+		total += info.Size()
+	}
+	if total <= maxBytes {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
+	for _, f := range files {
+		if total <= maxBytes {
+			break
+		}
+		_ = os.Remove(filepath.Join(dir, f.name))
+		total -= f.size
+	}
+}
+
+func logRetentionDays() int {
+	const def = 14
+	raw := strings.TrimSpace(os.Getenv("AUTOFIRMA_LOG_RETENTION_DAYS"))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return def
+	}
+	if n > 365 {
+		return 365
+	}
+	return n
+}
+
+func logMaxTotalBytes() int64 {
+	// Default total log cap across all .log files in current log directory.
+	const defMB int64 = 50
+	raw := strings.TrimSpace(os.Getenv("AUTOFIRMA_LOG_MAX_TOTAL_MB"))
+	if raw == "" {
+		return defMB * 1024 * 1024
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 1 {
+		return defMB * 1024 * 1024
+	}
+	if n > 2048 {
+		n = 2048
+	}
+	return n * 1024 * 1024
 }

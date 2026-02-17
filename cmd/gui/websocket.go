@@ -336,6 +336,20 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		// We implement that logic here:
 		log.Printf("[WebSocket] Processing afirma protocol request: %s", applog.SanitizeURI(msg))
 		result := s.processProtocolRequest(msg)
+		if s.ui != nil {
+			action := ""
+			format := ""
+			sessionID := ""
+			if state, err := ParseProtocolURI(msg); err == nil {
+				action = state.Action
+				format = normalizeProtocolFormat(state.SignFormat)
+				sessionID = getProtocolSessionID(state)
+			}
+			if strings.TrimSpace(action) == "" {
+				action = "unknown"
+			}
+			s.ui.updateSessionDiagnostics("websocket", action, sessionID, format, "response_sent")
+		}
 
 		// Send result back
 		if err := conn.WriteMessage(messageType, []byte(result)); err != nil {
@@ -348,6 +362,9 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 			len(result),
 			strings.HasPrefix(upper, "SAF_") || strings.HasPrefix(upper, "ERR-"),
 		)
+		if s.ui != nil && (strings.HasPrefix(upper, "SAF_") || strings.HasPrefix(upper, "ERR-")) {
+			s.ui.updateSessionDiagnostics("websocket", "protocol", "", "", "protocol_error")
+		}
 	}
 }
 
@@ -389,6 +406,9 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 		return s.formatError("ERROR_PARSING_URI", err.Error())
 	}
 	action := normalizeProtocolAction(state.Action)
+	if s.ui != nil {
+		s.ui.updateSessionDiagnostics("websocket", action, getProtocolSessionID(state), normalizeProtocolFormat(state.SignFormat), "request_received")
+	}
 	switch action {
 	case "sign", "cosign", "countersign":
 		// Supported path in current Go implementation (single interactive signing flow).
