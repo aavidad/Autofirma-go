@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 LAUNCHER_LOG="/tmp/autofirma-launcher.log"
 WEB_LOG="/tmp/autofirma-web-compat.log"
+HOST_LOG="/tmp/AutofirmaDipgra/logs/autofirma-host-$(date +%F).log"
 SINCE_MINUTES=180
 CLEAN_LOGS=0
 REQUIRE_XADES_COUNTERSIGN=0
@@ -16,7 +17,7 @@ usage() {
   cat <<USAGE
 Uso:
   $0 start [--clean-logs]
-  $0 check [--launcher-log PATH] [--web-log PATH] [--since-minutes N] [--require-xades-countersign]
+  $0 check [--launcher-log PATH] [--web-log PATH] [--host-log PATH] [--since-minutes N] [--require-xades-countersign]
   $0 stop
 
 Comandos:
@@ -53,10 +54,30 @@ resolve_launcher_log() {
   done
 }
 
+resolve_host_log() {
+  if [[ -f "${HOST_LOG}" ]]; then
+    return 0
+  fi
+
+  local candidates=(
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-host-$(date +%F).log"
+    "/tmp/AutofirmaDipgra/logs/autofirma-host-$(date +%F).log"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -f "${c}" ]]; then
+      HOST_LOG="${c}"
+      echo "[sede-e2e] host log auto-detectado: ${HOST_LOG}"
+      return 0
+    fi
+  done
+}
+
 cmd_start() {
   require_cmd python3
   cd "${ROOT_DIR}"
   resolve_launcher_log || true
+  resolve_host_log || true
 
   if [[ "${CLEAN_LOGS}" -eq 1 ]]; then
     : > "${WEB_LOG}"
@@ -160,6 +181,7 @@ sanitize_report_lines() {
 cmd_check() {
   cd "${ROOT_DIR}"
   resolve_launcher_log || true
+  resolve_host_log || true
 
   if [[ ! -f "${WEB_LOG}" ]]; then
     echo "FAIL: no existe log web: ${WEB_LOG}" >&2
@@ -189,12 +211,15 @@ cmd_check() {
   if [[ "${REQUIRE_XADES_COUNTERSIGN}" -eq 1 ]]; then
     if emit_recent_matches "${LAUNCHER_LOG}" 'CounterSign compatible native multisign route for format=xades|CoSign native multisign route for format=xades|Sign success cert=.* format=xades' "launcher" "${SINCE_MINUTES}" >/tmp/sede-e2e-xades.tmp && grep -q . /tmp/sede-e2e-xades.tmp; then
       xades_countersign_seen=1
+    elif emit_recent_matches "${HOST_LOG}" 'CounterSign compatible native multisign route for format=xades|CoSign native multisign route for format=xades|Sign success cert=.* format=xades' "host" "${SINCE_MINUTES}" >/tmp/sede-e2e-xades.tmp && grep -q . /tmp/sede-e2e-xades.tmp; then
+      xades_countersign_seen=1
     else
-      echo "FAIL: no se detectan evidencias de flujo XAdES/contrafirma en launcher log" >&2
+      echo "FAIL: no se detectan evidencias de flujo XAdES/contrafirma en launcher/host log" >&2
       err_found=1
     fi
 
-    if emit_recent_matches "${LAUNCHER_LOG}" 'firma XAdES fallida|CounterSign.*unsupported|ERROR_UNSUPPORTED_OPERATION|Operacion de lote no soportada' "launcher" "${SINCE_MINUTES}" | grep -q .; then
+    if emit_recent_matches "${LAUNCHER_LOG}" 'firma XAdES fallida|CounterSign.*unsupported|ERROR_UNSUPPORTED_OPERATION|Operacion de lote no soportada' "launcher" "${SINCE_MINUTES}" | grep -q . ||
+       emit_recent_matches "${HOST_LOG}" 'firma XAdES fallida|CounterSign.*unsupported|ERROR_UNSUPPORTED_OPERATION|Operacion de lote no soportada' "host" "${SINCE_MINUTES}" | grep -q .; then
       echo "FAIL: detectados errores en ruta XAdES/contrafirma" >&2
       err_found=1
     fi
@@ -226,6 +251,7 @@ cmd_check() {
     echo "date: $(date -Iseconds)"
     echo "launcher_log: ${LAUNCHER_LOG}"
     echo "web_log: ${WEB_LOG}"
+    echo "host_log: ${HOST_LOG}"
     echo "since_minutes: ${SINCE_MINUTES}"
     echo "websocket_protocol_traffic_seen: ${ws_seen}"
     echo "legacy_upload_traffic_seen: ${legacy_seen}"
@@ -242,6 +268,9 @@ cmd_check() {
     echo
     echo "recent_launcher_log_excerpt:"
     append_recent_log_excerpt "${LAUNCHER_LOG}" "launcher" "${SINCE_MINUTES}" 80 || true
+    echo
+    echo "recent_host_log_excerpt:"
+    append_recent_log_excerpt "${HOST_LOG}" "host" "${SINCE_MINUTES}" 80 || true
   } > "${report_file}"
   echo "[sede-e2e] report: ${report_file}"
 
@@ -294,6 +323,10 @@ main() {
             ;;
           --web-log)
             WEB_LOG="${2:-}"
+            shift 2
+            ;;
+          --host-log)
+            HOST_LOG="${2:-}"
             shift 2
             ;;
           --since-minutes)
