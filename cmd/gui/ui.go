@@ -2993,7 +2993,14 @@ func (ui *UI) operationHistorySummary(maxItems int) string {
 		if i >= maxItems {
 			break
 		}
-		lines = append(lines, fmt.Sprintf("- %s | %s | %s | %s", item.At, item.Operation, item.Format, item.Result))
+		result := strings.TrimSpace(strings.ToLower(item.Result))
+		prefix := "OK"
+		if result == "error" {
+			prefix = "ERROR"
+		} else if result != "ok" {
+			prefix = strings.ToUpper(strings.TrimSpace(item.Result))
+		}
+		lines = append(lines, fmt.Sprintf("- [%s] %s | %s | %s", prefix, item.At, item.Operation, item.Format))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -3131,7 +3138,7 @@ func (ui *UI) buildFullDiagnosticReport() string {
 
 	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
 	lines = append(lines, "update_repo_level="+fmt.Sprintf("%d", updateLevel))
-	lines = append(lines, "update_repo_detail="+updateDetail)
+	lines = append(lines, "update_repo_detail="+sanitizeSensitiveText(updateDetail))
 	lines = append(lines, "update_repo_action="+updateAction)
 
 	if ui.Protocol != nil {
@@ -3151,7 +3158,7 @@ func (ui *UI) buildFullDiagnosticReport() string {
 	lines = append(lines, "last_error_phase="+strings.TrimSpace(ui.LastErrorPhase))
 	lines = append(lines, "last_error_operation="+strings.TrimSpace(ui.LastErrorOperation))
 	lines = append(lines, "last_error_hint="+strings.TrimSpace(ui.LastErrorHint))
-	lines = append(lines, "last_error_detail="+strings.TrimSpace(ui.LastErrorTechnical))
+	lines = append(lines, "last_error_detail="+sanitizeSensitiveText(strings.TrimSpace(ui.LastErrorTechnical)))
 
 	if trustLines, err := localTLSTrustStatus(); err == nil {
 		for _, l := range trustLines {
@@ -3166,7 +3173,7 @@ func (ui *UI) buildFullDiagnosticReport() string {
 		if i >= 20 {
 			break
 		}
-		lines = append(lines, fmt.Sprintf("history_%02d=%s|%s|%s|%s|%s|%s", i+1, item.At, item.Operation, item.Format, item.Result, item.Cert, item.Path))
+		lines = append(lines, fmt.Sprintf("history_%02d=%s|%s|%s|%s|%s|%s", i+1, item.At, item.Operation, item.Format, item.Result, sanitizeSensitiveText(item.Cert), sanitizeSensitiveText(item.Path)))
 	}
 
 	logFile := resolveCurrentLogFile()
@@ -3339,10 +3346,40 @@ func sanitizeReportLogLine(line string) string {
 		return "-"
 	}
 	trimmed = afirmaURIRegex.ReplaceAllStringFunc(trimmed, applog.SanitizeURI)
+	trimmed = sanitizeSensitiveText(trimmed)
 	if len(trimmed) > 260 {
 		return trimmed[:260] + "...(trunc)"
 	}
 	return trimmed
+}
+
+func sanitizeSensitiveText(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	if strings.TrimSpace(home) != "" {
+		v = strings.ReplaceAll(v, home, "~")
+	}
+	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
+		v = strings.ReplaceAll(v, tmp, "$TMP")
+	}
+	if h := strings.TrimSpace(os.Getenv("HOME")); h != "" {
+		v = strings.ReplaceAll(v, h, "~")
+	}
+	if up := strings.TrimSpace(os.Getenv("USERPROFILE")); up != "" {
+		v = strings.ReplaceAll(v, up, "%USERPROFILE%")
+	}
+
+	// Reduce exposure of long DN-like strings.
+	if strings.Contains(v, "CN=") && len(v) > 120 {
+		v = v[:120] + "...(trunc)"
+	}
+	if len(v) > 240 {
+		v = v[:240] + "...(trunc)"
+	}
+	return v
 }
 
 func buildAfirmaUploadErrorMessage(err error, stServlet string, rtServlet string) string {
@@ -3736,11 +3773,51 @@ func certificateCapabilitySummary(cert protocol.Certificate) string {
 		padesState = "no recomendado"
 	}
 
-	msg := fmt.Sprintf("Certificado seleccionado: %s | Firma: %s | PAdES: %s", name, signState, padesState)
+	validity := certValidityStatus(cert.ValidFrom, cert.ValidTo)
+	source := strings.TrimSpace(cert.Source)
+	if source == "" {
+		source = "desconocido"
+	}
+	serial := strings.TrimSpace(cert.SerialNumber)
+	if len(serial) > 12 {
+		serial = serial[:12] + "..."
+	}
+	if serial == "" {
+		serial = "-"
+	}
+
+	msg := fmt.Sprintf("Certificado seleccionado: %s | Firma: %s | PAdES: %s | Vigencia: %s | Origen: %s | Serie: %s", name, signState, padesState, validity, source, serial)
 	if issue != "" {
 		msg += " | Detalle: " + issue
 	}
 	return msg
+}
+
+func certValidityStatus(validFrom, validTo string) string {
+	from := strings.TrimSpace(validFrom)
+	to := strings.TrimSpace(validTo)
+	if from == "" && to == "" {
+		return "sin datos"
+	}
+	now := time.Now().UTC()
+	layout := "2006-01-02T15:04:05Z"
+	fromT, fromErr := time.Parse(layout, from)
+	toT, toErr := time.Parse(layout, to)
+
+	if fromErr == nil && now.Before(fromT) {
+		return "aún no válido hasta " + fromT.Format("2006-01-02")
+	}
+	if toErr == nil {
+		if now.After(toT) {
+			return "caducado (" + toT.Format("2006-01-02") + ")"
+		}
+		days := int(toT.Sub(now).Hours() / 24)
+		if days <= 30 {
+			return fmt.Sprintf("válido hasta %s (caduca en %d días)", toT.Format("2006-01-02"), days)
+		}
+		return "válido hasta " + toT.Format("2006-01-02")
+	}
+	return "desde " + from + " hasta " + to
 }
 
 func containsAnyInsensitive(value string, terms ...string) bool {
