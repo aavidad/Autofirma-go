@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+var signDataCompatFallbackFunc = SignData
+
 // CoSignData performs a best-effort local co-sign operation.
 // Current native support is implemented for CAdES signatures.
 func CoSignData(dataB64 string, certificateID string, pin string, format string, options map[string]interface{}) (string, error) {
@@ -27,17 +29,14 @@ func CoSignData(dataB64 string, certificateID string, pin string, format string,
 		applog.SecretMeta("dataB64", dataB64),
 	)
 
-	if !strings.EqualFold(format, "cades") {
-		return "", fmt.Errorf("operacion cosign no soportada para formato: %s", format)
-	}
-
 	data, err := base64.StdEncoding.DecodeString(dataB64)
 	if err != nil {
 		return "", fmt.Errorf("datos base64 inválidos: %v", err)
 	}
 	format = resolveSignFormat(format, data)
 	if !strings.EqualFold(format, "cades") {
-		return "", fmt.Errorf("operacion cosign no soportada para formato: %s", format)
+		log.Printf("[Signer] CoSign fallback to SignData for format=%s", format)
+		return signDataCompatFallbackFunc(dataB64, certificateID, pin, format, options)
 	}
 	cert, nickname, err := getCertificateByID(certificateID, options)
 	if err != nil {
@@ -73,7 +72,8 @@ func CounterSignData(dataB64 string, certificateID string, pin string, format st
 	}
 	format = resolveSignFormat(format, data)
 	if !strings.EqualFold(format, "cades") {
-		return "", fmt.Errorf("operacion countersign no soportada para formato: %s", format)
+		log.Printf("[Signer] CounterSign fallback to SignData for format=%s", format)
+		return signDataCompatFallbackFunc(dataB64, certificateID, pin, format, options)
 	}
 	cert, _, err := getCertificateByID(certificateID, options)
 	if err != nil {
