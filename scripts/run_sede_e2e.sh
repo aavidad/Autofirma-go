@@ -34,9 +34,29 @@ require_cmd() {
   }
 }
 
+resolve_launcher_log() {
+  if [[ -f "${LAUNCHER_LOG}" ]]; then
+    return 0
+  fi
+
+  local candidates=(
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-desktop-$(date +%F).log"
+    "/tmp/AutofirmaDipgra/logs/autofirma-desktop-$(date +%F).log"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -f "${c}" ]]; then
+      LAUNCHER_LOG="${c}"
+      echo "[sede-e2e] launcher log auto-detectado: ${LAUNCHER_LOG}"
+      return 0
+    fi
+  done
+}
+
 cmd_start() {
   require_cmd python3
   cd "${ROOT_DIR}"
+  resolve_launcher_log || true
 
   if [[ "${CLEAN_LOGS}" -eq 1 ]]; then
     : > "${WEB_LOG}"
@@ -139,6 +159,7 @@ sanitize_report_lines() {
 
 cmd_check() {
   cd "${ROOT_DIR}"
+  resolve_launcher_log || true
 
   if [[ ! -f "${WEB_LOG}" ]]; then
     echo "FAIL: no existe log web: ${WEB_LOG}" >&2
@@ -180,10 +201,21 @@ cmd_check() {
   fi
 
   local ws_seen=0
-  if emit_recent_matches "${WEB_LOG}" 'Processing afirma protocol request|Sent result len=' "web" "${SINCE_MINUTES}" >/tmp/sede-e2e-flow.tmp && grep -q . /tmp/sede-e2e-flow.tmp; then
+  local legacy_seen=0
+  if emit_recent_matches "${WEB_LOG}" 'Processing afirma protocol request|Sent result len=|WebSocket] Sent result .*protocol_error=false' "web" "${SINCE_MINUTES}" >/tmp/sede-e2e-flow.tmp && grep -q . /tmp/sede-e2e-flow.tmp; then
     ws_seen=1
-  else
-    echo "FAIL: no hay trazas de peticiones protocolarias WSS recientes en ${WEB_LOG}" >&2
+  elif emit_recent_matches "${LAUNCHER_LOG}" 'Processing afirma protocol request|Sent result len=|WebSocket] Sent result .*protocol_error=false' "launcher" "${SINCE_MINUTES}" >/tmp/sede-e2e-flow.tmp && grep -q . /tmp/sede-e2e-flow.tmp; then
+    ws_seen=1
+  fi
+
+  if emit_recent_matches "${LAUNCHER_LOG}" 'java-style upload response status=200 body="OK"' "launcher" "${SINCE_MINUTES}" >/tmp/sede-e2e-legacy.tmp && grep -q . /tmp/sede-e2e-legacy.tmp; then
+    legacy_seen=1
+  elif emit_recent_matches "${WEB_LOG}" 'java-style upload response status=200 body="OK"' "web" "${SINCE_MINUTES}" >/tmp/sede-e2e-legacy.tmp && grep -q . /tmp/sede-e2e-legacy.tmp; then
+    legacy_seen=1
+  fi
+
+  if [[ "${ws_seen}" -eq 0 && "${legacy_seen}" -eq 0 ]]; then
+    echo "FAIL: no hay evidencias recientes de flujo sede (ni websocket ni legacy-upload)" >&2
     err_found=1
   fi
 
@@ -196,6 +228,7 @@ cmd_check() {
     echo "web_log: ${WEB_LOG}"
     echo "since_minutes: ${SINCE_MINUTES}"
     echo "websocket_protocol_traffic_seen: ${ws_seen}"
+    echo "legacy_upload_traffic_seen: ${legacy_seen}"
     echo "require_xades_countersign: ${REQUIRE_XADES_COUNTERSIGN}"
     echo "xades_countersign_evidence_seen: ${xades_countersign_seen}"
     if [[ "${err_found}" -eq 0 ]]; then
@@ -212,7 +245,7 @@ cmd_check() {
   } > "${report_file}"
   echo "[sede-e2e] report: ${report_file}"
 
-  rm -f /tmp/sede-e2e-errors.tmp /tmp/sede-e2e-flow.tmp
+  rm -f /tmp/sede-e2e-errors.tmp /tmp/sede-e2e-flow.tmp /tmp/sede-e2e-legacy.tmp
   rm -f /tmp/sede-e2e-xades.tmp
 
   if [[ "${err_found}" -ne 0 ]]; then
