@@ -28,16 +28,16 @@ Evidencias objetivas:
 - Objetivo: marcar este caso como `SKIP`/`ENV_BLOCKED` con mensaje explícito.
 
 ### P1 - Paridad funcional aún no cerrada al 100%
-1. Extender `cosign/countersign` fuera de CAdES (si la paridad Java requerida lo exige).
-- Estado actual: soporte efectivo limitado a CAdES.
-- Evidencia: `pkg/signer/operations.go` devuelve `operacion ... no soportada` para formatos distintos de `cades`.
+1. Completar cofirma/contrafirma nativa avanzada fuera de CAdES (si la sede lo exige).
+- Estado actual: existe fallback compatible a `sign` fuera de CAdES (no rompe flujo), pero no hay implementacion nativa avanzada equivalente para todos los formatos.
+- Evidencia: `pkg/signer/operations.go` aplica fallback a `SignData` cuando formato no es CAdES.
 
 2. Completar estrategia PKCS#11 multi-plataforma (si alcance incluye Windows/macOS).
 - Estado actual:
-  - Firma PKCS#11 directa implementada en `linux+cgo`.
-  - En no Linux/no cgo hay stub de no soporte.
+  - Firma PKCS#11 directa implementada para builds con `cgo` (Linux/macOS/Windows segun runtime y modulo disponible).
+  - En entornos sin `cgo` se mantiene stub de no soporte.
 - Evidencia:
-  - `pkg/signer/pkcs1_pkcs11_linux.go`
+  - `pkg/signer/pkcs1_pkcs11_cgo.go`
   - `pkg/signer/pkcs1_pkcs11_stub.go`
   - `pkg/certstore/pkcs11_stub.go`
 
@@ -63,13 +63,13 @@ Evidencias objetivas:
 - Parser y compatibilidad protocolaria (`afirma://`, aliases, versiones, errores SAF).
 - Flujos de operación básicos y batch remoto/local.
 - Filtros `selectcert` y manejo de hints de almacén (`defaultKeyStore`, `defaultKeyStoreLib`, `disableOpeningExternalStores`).
-- Fallback PKCS#11 directo para `PRE -> PK1` en Linux.
+- Fallback PKCS#11 directo para `PRE -> PK1` en builds con `cgo`.
 - Robustez de `service` legacy en framing, URL-encoding y control de errores.
 
 ## Plan de ejecución corto (orden recomendado)
 1. Endurecer `scripts/run_full_validation.sh` y dejar resultado reproducible en local CI-like.
 2. Ejecutar batería E2E real en sedes y convertir hallazgos a tests de regresión.
-3. Cerrar brechas de formato/plataforma según alcance real (cosign/countersign no CAdES y/o PKCS#11 fuera Linux).
+3. Cerrar brechas de formato/plataforma según alcance real (cofirma/contrafirma nativa avanzada no CAdES y validacion real PKCS#11 fuera Linux).
 4. Cierre de release (Linux/Windows) con checklist Go/No-Go.
 
 ## Definición de terminado

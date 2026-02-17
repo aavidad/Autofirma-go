@@ -35,6 +35,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - PKCS#11 con fallback directo para PKCS#1 en Linux (`linux+cgo`).
 - Ampliada base PKCS#11 directa a entornos `cgo` (no limitada artificialmente a Linux):
   - build tags ajustados a `cgo` en `certstore` y firma PKCS#1 directa.
+  - correccion de limitacion por nombre de fichero en signer: `pkcs1_pkcs11_linux.go` -> `pkcs1_pkcs11_cgo.go` para habilitar compilacion real fuera de Linux cuando haya `cgo`.
   - rutas candidatas de modulo PKCS#11 ampliadas para Linux/macOS/Windows.
   - fallback PKCS#11 en PKCS#1 acepta aliases de store (`defaultKeyStore/defaultkeystore/...`) y mejora trazabilidad de error cuando fallan exportacion y fallback.
 - Robustez `service` legacy (framing, URL-encoding, errores y limites de memoria).
