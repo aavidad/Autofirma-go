@@ -6,8 +6,10 @@ package main
 
 import (
 	"autofirma-host/pkg/applog"
+	"autofirma-host/pkg/version"
 	"fmt"
 	"flag"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -22,12 +24,29 @@ var (
 	serverModeFlag    = flag.Bool("server", false, "Iniciar como servidor WebSocket en el puerto 63117")
 	generateCertsFlag = flag.Bool("generate-certs", false, "Generar certificados TLS locales y salir")
 	installTrustFlag  = flag.Bool("install-trust", false, "Instalar la CA local en los almacenes de confianza (Linux/Windows)")
-	trustStatusFlag   = flag.Bool("trust-status", false, "Mostrar estado de confianza de la CA local (Linux/Windows)")
+	trustStatusFlag   = flag.Bool("trust-status", false, "Mostrar el estado de confianza de la CA local (Linux/Windows)")
+	versionFlag       = flag.Bool("version", false, "Mostrar versión de la aplicación y salir")
+	detailHelpFlag    = flag.Bool("ayuda-detallada", false, "Mostrar ayuda detallada en castellano y salir")
 )
 
 func main() {
+	flag.Usage = func() {
+		writeSpanishFlagUsage(flag.CommandLine.Output(), os.Args[0])
+	}
+
 	// Parse command-line flags
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("AutoFirma Dipgra %s\n", version.CurrentVersion)
+		fmt.Println("Software libre bajo licencia GPLv3.")
+		fmt.Println("Creado por Alberto Avidad Fernandez (Oficina de Software Libre de la Diputacion de Granada).")
+		return
+	}
+	if *detailHelpFlag {
+		writeSpanishDetailedUsage(flag.CommandLine.Output(), os.Args[0])
+		return
+	}
 
 	// Setup logging
 	logPath, err := applog.Init("autofirma-desktop")
@@ -104,6 +123,32 @@ func main() {
 		os.Exit(0)
 	}()
 	app.Main()
+}
+
+func writeSpanishFlagUsage(out io.Writer, program string) {
+	_, _ = fmt.Fprintf(out, "Uso de %s:\n", program)
+	flag.CommandLine.SetOutput(out)
+	flag.CommandLine.PrintDefaults()
+	_, _ = fmt.Fprintln(out, "\nConsejo: usa -ayuda-detallada para ver explicación completa de cada opción.")
+}
+
+func writeSpanishDetailedUsage(out io.Writer, program string) {
+	writeSpanishFlagUsage(out, program)
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "Descripción detallada de opciones:")
+	_, _ = fmt.Fprintln(out, "  -generate-certs")
+	_, _ = fmt.Fprintln(out, "    Genera certificados TLS locales para el canal HTTPS/WSS en loopback (127.0.0.1).")
+	_, _ = fmt.Fprintln(out, "    Son necesarios para que el navegador confíe en la conexión local con AutoFirma.")
+	_, _ = fmt.Fprintln(out, "  -install-trust")
+	_, _ = fmt.Fprintln(out, "    Instala la CA local en almacenes de confianza (NSS/sistema) para evitar avisos TLS.")
+	_, _ = fmt.Fprintln(out, "  -trust-status")
+	_, _ = fmt.Fprintln(out, "    Muestra si la CA local está correctamente confiada en los almacenes detectados.")
+	_, _ = fmt.Fprintln(out, "  -server")
+	_, _ = fmt.Fprintln(out, "    Inicia AutoFirma en modo servicio WebSocket, esperando solicitudes del navegador.")
+	_, _ = fmt.Fprintln(out, "  -version")
+	_, _ = fmt.Fprintln(out, "    Muestra la versión actual del binario.")
+	_, _ = fmt.Fprintln(out, "  -ayuda-detallada")
+	_, _ = fmt.Fprintln(out, "    Muestra esta ayuda ampliada.")
 }
 
 func runWebSocketServer() {
