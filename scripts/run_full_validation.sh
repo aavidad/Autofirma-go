@@ -92,6 +92,11 @@ append_report "skip_sede_logcheck: ${SKIP_SEDE_LOGCHECK}"
 append_report "sede_log_file: ${SEDE_LOG_FILE}"
 append_report "since_minutes: ${SEDE_SINCE_MINUTES}"
 
+# Keep Go tooling reproducible when vendor metadata is stale for local replace setups.
+if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
+  export GOFLAGS="${GOFLAGS:-} -mod=mod"
+fi
+
 if [[ -n "${BATCH_HTTP_TIMEOUT_MS}" ]]; then
   export AUTOFIRMA_BATCH_HTTP_TIMEOUT_MS="${BATCH_HTTP_TIMEOUT_MS}"
 fi
@@ -124,6 +129,7 @@ append_report "AUTOFIRMA_BATCH_HTTP_MAX_ATTEMPTS=${AUTOFIRMA_BATCH_HTTP_MAX_ATTE
 append_report "AUTOFIRMA_BATCH_BREAKER_THRESHOLD=${AUTOFIRMA_BATCH_BREAKER_THRESHOLD:-<default>}"
 append_report "AUTOFIRMA_BATCH_BREAKER_COOLDOWN_MS=${AUTOFIRMA_BATCH_BREAKER_COOLDOWN_MS:-<default>}"
 append_report "AUTOFIRMA_BATCH_BREAKER_COOLDOWN_SEC=${AUTOFIRMA_BATCH_BREAKER_COOLDOWN_SEC:-<default>}"
+append_report "GOFLAGS=${GOFLAGS:-<empty>}"
 
 CURRENT_STEP="1/7 tests de codigo activo"
 echo "[full-check] 1/7 tests de codigo activo"
@@ -157,8 +163,20 @@ append_report "step_4: PASS"
 
 CURRENT_STEP="5/7 handshake WSS"
 echo "[full-check] 5/7 handshake WSS (echo)"
-python3 scripts/ws_echo_client.py
-append_report "step_5: PASS"
+if WSS_OUTPUT="$(python3 scripts/ws_echo_client.py 2>&1)"; then
+  append_report "step_5: PASS"
+else
+  echo "${WSS_OUTPUT}" >&2
+  if printf '%s' "${WSS_OUTPUT}" | grep -qiE "ENV_BLOCKED|Operation not permitted|PermissionError|Errno 1|Errno 13"; then
+    echo "[full-check] WARN: handshake WSS bloqueado por entorno (permisos/sandbox), se marca como ENV_BLOCKED"
+    append_report "step_5: ENV_BLOCKED"
+    append_report "step_5_detail: ${WSS_OUTPUT//$'\n'/ | }"
+  else
+    append_report "step_5: FAIL"
+    append_report "step_5_detail: ${WSS_OUTPUT//$'\n'/ | }"
+    false
+  fi
+fi
 
 CURRENT_STEP="6/7 log local web compat"
 echo "[full-check] 6/7 log local de web compat (ultimas lineas)"

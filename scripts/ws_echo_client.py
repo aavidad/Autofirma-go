@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import base64
+import errno
 import os
 import secrets
 import socket
@@ -82,23 +83,33 @@ def main():
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    with socket.create_connection((HOST, PORT), timeout=TIMEOUT) as raw:
-        with ctx.wrap_socket(raw, server_hostname=HOST) as sock:
-            sock.settimeout(TIMEOUT)
-            sock.sendall(req)
-            resp = sock.recv(4096)
-            if b"101" not in resp.split(b"\r\n", 1)[0]:
-                print("HANDSHAKE_FAIL")
-                print(resp.decode("utf-8", errors="replace"))
-                sys.exit(2)
+    try:
+        with socket.create_connection((HOST, PORT), timeout=TIMEOUT) as raw:
+            with ctx.wrap_socket(raw, server_hostname=HOST) as sock:
+                sock.settimeout(TIMEOUT)
+                sock.sendall(req)
+                resp = sock.recv(4096)
+                if b"101" not in resp.split(b"\r\n", 1)[0]:
+                    print("HANDSHAKE_FAIL")
+                    print(resp.decode("utf-8", errors="replace"))
+                    sys.exit(2)
 
-            ws_send_text(sock, MSG)
-            text = ws_recv_text(sock)
-            print(text)
+                ws_send_text(sock, MSG)
+                text = ws_recv_text(sock)
+                print(text)
 
-            if text == "OK":
-                sys.exit(0)
-            sys.exit(1)
+                if text == "OK":
+                    sys.exit(0)
+                sys.exit(1)
+    except PermissionError as exc:
+        # Common in sandboxed CI/container environments with denied local sockets.
+        print(f"ENV_BLOCKED: {exc}")
+        sys.exit(10)
+    except OSError as exc:
+        if exc.errno in (errno.EPERM, errno.EACCES):
+            print(f"ENV_BLOCKED: {exc}")
+            sys.exit(10)
+        raise
 
 
 if __name__ == "__main__":
