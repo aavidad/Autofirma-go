@@ -1002,7 +1002,7 @@ func (s *WebSocketServer) executeBatchSingle(state *ProtocolState, item batchSin
 	if algorithm == "" {
 		algorithm = strings.TrimSpace(req.Algorithm)
 	}
-	operation, opErr := resolveBatchOperation(item.SubOp, req.SubOp)
+	operation, counterTargetHint, opErr := resolveBatchOperation(item.SubOp, req.SubOp)
 	if opErr != nil {
 		result.Result = batchResultError
 		result.Description = opErr.Error()
@@ -1026,6 +1026,11 @@ func (s *WebSocketServer) executeBatchSingle(state *ProtocolState, item batchSin
 	if strings.TrimSpace(algorithm) != "" {
 		opts["algorithm"] = algorithm
 	}
+	if operation == batchOperationCounterSign && strings.TrimSpace(counterTargetHint) != "" {
+		if _, hasTarget := opts["target"]; !hasTarget {
+			opts["target"] = counterTargetHint
+		}
+	}
 	expandProtocolPolicyOptions(opts, format)
 	applyProtocolStoreHints(opts, state)
 
@@ -1048,23 +1053,27 @@ func (s *WebSocketServer) executeBatchSingle(state *ProtocolState, item batchSin
 	return result
 }
 
-func resolveBatchOperation(singleOp, globalOp string) (string, error) {
+func resolveBatchOperation(singleOp, globalOp string) (string, string, error) {
 	op := strings.TrimSpace(singleOp)
 	if op == "" {
 		op = strings.TrimSpace(globalOp)
 	}
 	if op == "" {
-		return batchOperationSign, nil
+		return batchOperationSign, "", nil
 	}
 	switch strings.ToLower(op) {
 	case "sign", "firmar":
-		return batchOperationSign, nil
+		return batchOperationSign, "", nil
 	case "cosign", "cofirmar":
-		return batchOperationCoSign, nil
-	case "countersign", "contrafirmar", "contrafirmar_arbol", "contrafirmar_hojas":
-		return batchOperationCounterSign, nil
+		return batchOperationCoSign, "", nil
+	case "countersign", "contrafirmar":
+		return batchOperationCounterSign, "", nil
+	case "contrafirmar_arbol":
+		return batchOperationCounterSign, "tree", nil
+	case "contrafirmar_hojas":
+		return batchOperationCounterSign, "leafs", nil
 	default:
-		return "", fmt.Errorf("Operacion de lote no soportada")
+		return "", "", fmt.Errorf("Operacion de lote no soportada")
 	}
 }
 

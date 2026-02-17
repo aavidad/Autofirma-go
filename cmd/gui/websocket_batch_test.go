@@ -910,6 +910,133 @@ func TestExecuteBatchSingleUsesCounterSignSubOperation(t *testing.T) {
 	}
 }
 
+func TestExecuteBatchSingleCounterSignAliasTreeSetsTarget(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+
+	oldSign := signDataFunc
+	oldCoSign := coSignDataFunc
+	oldCounter := counterSignDataFunc
+	defer func() {
+		signDataFunc = oldSign
+		coSignDataFunc = oldCoSign
+		counterSignDataFunc = oldCounter
+	}()
+
+	counterSignDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		if got := strings.TrimSpace(signOptionString(options, "target")); got != "tree" {
+			t.Fatalf("target esperado tree para alias contrafirmar_arbol, obtenido: %q", got)
+		}
+		return base64.StdEncoding.EncodeToString([]byte("COUNTERSIG")), nil
+	}
+	signDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		t.Fatalf("no debe invocarse signData en suboperation=contrafirmar_arbol")
+		return "", nil
+	}
+	coSignDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		t.Fatalf("no debe invocarse cosign en suboperation=contrafirmar_arbol")
+		return "", nil
+	}
+
+	item := batchSingleEntry{
+		ID:      "d1",
+		SubOp:   "contrafirmar_arbol",
+		DataRef: base64.StdEncoding.EncodeToString([]byte("sig-previa")),
+	}
+	req := &batchRequest{
+		Format:    "CAdES",
+		Algorithm: "SHA256withRSA",
+	}
+	res := s.executeBatchSingle(nil, item, req, "c1", map[string]string{})
+	if res.Result != batchResultDone || strings.TrimSpace(res.Signature) == "" {
+		t.Fatalf("resultado inesperado: %#v", res)
+	}
+}
+
+func TestExecuteBatchSingleCounterSignAliasLeafsSetsTarget(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+
+	oldSign := signDataFunc
+	oldCoSign := coSignDataFunc
+	oldCounter := counterSignDataFunc
+	defer func() {
+		signDataFunc = oldSign
+		coSignDataFunc = oldCoSign
+		counterSignDataFunc = oldCounter
+	}()
+
+	counterSignDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		if got := strings.TrimSpace(signOptionString(options, "target")); got != "leafs" {
+			t.Fatalf("target esperado leafs para alias contrafirmar_hojas, obtenido: %q", got)
+		}
+		return base64.StdEncoding.EncodeToString([]byte("COUNTERSIG")), nil
+	}
+	signDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		t.Fatalf("no debe invocarse signData en suboperation=contrafirmar_hojas")
+		return "", nil
+	}
+	coSignDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		t.Fatalf("no debe invocarse cosign en suboperation=contrafirmar_hojas")
+		return "", nil
+	}
+
+	item := batchSingleEntry{
+		ID:      "d1",
+		SubOp:   "contrafirmar_hojas",
+		DataRef: base64.StdEncoding.EncodeToString([]byte("sig-previa")),
+	}
+	req := &batchRequest{
+		Format:    "CAdES",
+		Algorithm: "SHA256withRSA",
+	}
+	res := s.executeBatchSingle(nil, item, req, "c1", map[string]string{})
+	if res.Result != batchResultDone || strings.TrimSpace(res.Signature) == "" {
+		t.Fatalf("resultado inesperado: %#v", res)
+	}
+}
+
+func TestExecuteBatchSingleCounterSignAliasDoesNotOverrideExplicitTarget(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+
+	oldSign := signDataFunc
+	oldCoSign := coSignDataFunc
+	oldCounter := counterSignDataFunc
+	defer func() {
+		signDataFunc = oldSign
+		coSignDataFunc = oldCoSign
+		counterSignDataFunc = oldCounter
+	}()
+
+	counterSignDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		if got := strings.TrimSpace(signOptionString(options, "target")); got != "signers" {
+			t.Fatalf("target explicito no debe sobreescribirse, obtenido: %q", got)
+		}
+		return base64.StdEncoding.EncodeToString([]byte("COUNTERSIG")), nil
+	}
+	signDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		t.Fatalf("no debe invocarse signData en este caso")
+		return "", nil
+	}
+	coSignDataFunc = func(dataB64, certificateID, pin, format string, options map[string]interface{}) (string, error) {
+		t.Fatalf("no debe invocarse cosign en este caso")
+		return "", nil
+	}
+
+	item := batchSingleEntry{
+		ID:         "d1",
+		SubOp:      "contrafirmar_arbol",
+		ExtraParams: "target=signers",
+		DataRef:    base64.StdEncoding.EncodeToString([]byte("sig-previa")),
+	}
+	req := &batchRequest{
+		Format:    "CAdES",
+		Algorithm: "SHA256withRSA",
+	}
+	res := s.executeBatchSingle(nil, item, req, "c1", map[string]string{})
+	if res.Result != batchResultDone || strings.TrimSpace(res.Signature) == "" {
+		t.Fatalf("resultado inesperado: %#v", res)
+	}
+}
+
 func TestExecuteBatchSinglePropagatesStoreHintsToSigner(t *testing.T) {
 	s := NewWebSocketServer([]int{63117}, "", &UI{})
 

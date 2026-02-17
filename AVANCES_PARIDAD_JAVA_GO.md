@@ -15,6 +15,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - Protocolo `afirma://` robusto en `websocket/service` con mapeo de errores `SAF_*`.
 - Operaciones funcionales en flujo protocolario/web:
   - `sign`, `cosign`, `countersign`, `selectcert`, `save`, `load`, `signandsave`.
+  - `batch` contrafirma: aliases Java `contrafirmar_arbol` y `contrafirmar_hojas` ahora propagan automaticamente `target=tree/leafs` cuando no se define target explicito.
 - Mejora de compatibilidad en nucleo de firma:
   - `cosign/countersign` en formatos no-CAdES ya no fallan, ahora hacen fallback compatible a `sign`.
   - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
