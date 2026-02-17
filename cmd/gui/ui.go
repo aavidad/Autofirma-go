@@ -13,6 +13,7 @@ import (
 	"autofirma-host/pkg/version"
 	"bufio"
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/base64"
 	"fmt"
@@ -22,12 +23,14 @@ import (
 	"image/png"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync" // Added for WaitGroup
 	"time"
@@ -41,6 +44,12 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+)
+
+const (
+	diagLevelOK = iota
+	diagLevelWarn
+	diagLevelError
 )
 
 //go:embed logo.png
@@ -1281,6 +1290,54 @@ func withSolution(message string, hint string) string {
 	return message + "\nPosible solución: " + hint
 }
 
+func opensslInstallHint() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Instala OpenSSL para Windows y asegúrate de que `openssl.exe` esté en el PATH."
+	case "darwin":
+		return "Instala OpenSSL (ejemplo: `brew install openssl`) y verifica que `openssl` esté en PATH."
+	default:
+		return "Instala OpenSSL (ejemplo: `sudo apt install openssl`) y verifica que `openssl` esté en PATH."
+	}
+}
+
+func pk12utilInstallHint() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Instala herramientas NSS que incluyan `pk12util` o usa un almacén/certificado compatible sin exportación PKCS#12."
+	case "darwin":
+		return "Instala NSS tools (ejemplo: `brew install nss`) para disponer de `pk12util`."
+	default:
+		return "Instala NSS tools (ejemplo: `sudo apt install libnss3-tools`) para disponer de `pk12util`."
+	}
+}
+
+func dnsCheckHint(endpoint string) string {
+	if strings.TrimSpace(endpoint) == "" {
+		endpoint = "host-de-afirma"
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return "Comprueba DNS/red (ejemplo: `nslookup " + endpoint + "`) y que la URL de @firma sea correcta."
+	case "darwin":
+		return "Comprueba DNS/red (ejemplo: `dscacheutil -q host -a name " + endpoint + "`) y que la URL de @firma sea correcta."
+	default:
+		return "Comprueba DNS/red (ejemplo: `getent hosts " + endpoint + "`) y que la URL de @firma sea correcta."
+	}
+}
+
+func httpsCheckHint(endpoint string) string {
+	if strings.TrimSpace(endpoint) == "" {
+		endpoint = "host-de-afirma"
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return "Reintenta y comprueba conectividad HTTPS (ejemplo: `powershell -Command \"Test-NetConnection " + endpoint + " -Port 443\"`)."
+	default:
+		return "Reintenta y comprueba conectividad HTTPS (ejemplo: `curl -I https://" + endpoint + "`)."
+	}
+}
+
 func (ui *UI) verifyCurrentFile() {
 	filePath := ui.InputFile.Text()
 	if filePath == "" {
@@ -2122,16 +2179,11 @@ func (ui *UI) runLocalHealthCheck() {
 		detail string
 		action string
 	}
-	const (
-		levelOK = iota
-		levelWarn
-		levelError
-	)
 	levelText := func(level int) string {
 		switch level {
-		case levelError:
+		case diagLevelError:
 			return "ERROR"
-		case levelWarn:
+		case diagLevelWarn:
 			return "AVISO"
 		default:
 			return "OK"
@@ -2147,7 +2199,7 @@ func (ui *UI) runLocalHealthCheck() {
 		return false
 	}
 	results := make([]checkResult, 0, 8)
-	maxLevel := levelOK
+	maxLevel := diagLevelOK
 	setResult := func(level int, title, detail, action string) {
 		results = append(results, checkResult{
 			level:  level,
@@ -2163,16 +2215,16 @@ func (ui *UI) runLocalHealthCheck() {
 	if trustLines, err := localTLSTrustStatus(); err == nil {
 		joined := strings.ToLower(strings.Join(trustLines, " | "))
 		if containsAny(joined, "error", "fail", "sin", "no ") {
-			setResult(levelWarn, "Confianza TLS local", "Estado parcial o incompleto en almacenes de confianza.", "Reejecuta: autofirma-dipgra --install-trust")
+			setResult(diagLevelWarn, "Confianza TLS local", "Estado parcial o incompleto en almacenes de confianza.", "Reejecuta: autofirma-dipgra --install-trust")
 		} else {
-			setResult(levelOK, "Confianza TLS local", "Certificados locales presentes en almacenes detectados.", "")
+			setResult(diagLevelOK, "Confianza TLS local", "Certificados locales presentes en almacenes detectados.", "")
 		}
 	} else {
-		setResult(levelError, "Confianza TLS local", "No se pudo comprobar el estado de confianza local.", "Revisa permisos y ejecuta: autofirma-dipgra --trust-status")
+		setResult(diagLevelError, "Confianza TLS local", "No se pudo comprobar el estado de confianza local.", "Revisa permisos y ejecuta: autofirma-dipgra --trust-status")
 	}
 	certs, err := certstore.GetSystemCertificates()
 	if err != nil {
-		setResult(levelError, "Almacén de certificados", "No se pudo leer el almacén de certificados.", "Comprueba NSS/almacén del sistema y reinicia la aplicación")
+		setResult(diagLevelError, "Almacén de certificados", "No se pudo leer el almacén de certificados.", "Comprueba NSS/almacén del sistema y reinicia la aplicación")
 	} else {
 		signable := 0
 		for _, c := range certs {
@@ -2181,35 +2233,49 @@ func (ui *UI) runLocalHealthCheck() {
 			}
 		}
 		if len(certs) == 0 {
-			setResult(levelError, "Certificados de usuario", "No hay certificados cargados en el sistema.", "Instala/importa un certificado de firma y recarga la aplicación")
+			setResult(diagLevelError, "Certificados de usuario", "No hay certificados cargados en el sistema.", "Instala/importa un certificado de firma y recarga la aplicación")
 		} else if signable == 0 {
-			setResult(levelWarn, "Certificados de usuario", fmt.Sprintf("Detectados %d certificados, pero ninguno apto para firma.", len(certs)), "Selecciona otro certificado o revisa validez/uso de clave")
+			setResult(diagLevelWarn, "Certificados de usuario", fmt.Sprintf("Detectados %d certificados, pero ninguno apto para firma.", len(certs)), "Selecciona otro certificado o revisa validez/uso de clave")
 		} else {
-			setResult(levelOK, "Certificados de usuario", fmt.Sprintf("Detectados %d certificados, aptos para firma: %d.", len(certs), signable), "")
+			setResult(diagLevelOK, "Certificados de usuario", fmt.Sprintf("Detectados %d certificados, aptos para firma: %d.", len(certs), signable), "")
 		}
 	}
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:63117", 800*time.Millisecond)
 	if err != nil {
-		setResult(levelWarn, "Servidor local WebSocket", "No hay escucha activa en 127.0.0.1:63117.", "Abre una sede de firma o inicia: ./scripts/run_web_compat_server.sh start")
+		setResult(diagLevelWarn, "Servidor local WebSocket", "No hay escucha activa en 127.0.0.1:63117.", "Abre una sede de firma o inicia: ./scripts/run_web_compat_server.sh start")
 	} else {
 		_ = conn.Close()
-		setResult(levelOK, "Servidor local WebSocket", "Hay escucha activa en 127.0.0.1:63117.", "")
+		setResult(diagLevelOK, "Servidor local WebSocket", "Hay escucha activa en 127.0.0.1:63117.", "")
 	}
 
 	if ui.Protocol != nil {
 		if endpoint := describeAfirmaEndpoint(ui.Protocol.STServlet, ui.Protocol.RTServlet); endpoint != "" {
+			diagLines := endpointNetworkDiagnostics(ui.Protocol.STServlet, ui.Protocol.RTServlet)
 			if err := checkEndpointReachability(ui.Protocol.STServlet, ui.Protocol.RTServlet); err != nil {
-				setResult(levelWarn, "Conectividad con @firma", "No se alcanza el endpoint remoto de firma en este momento.", "Comprueba red/proxy/DNS o reintenta más tarde")
+				detail := "No se alcanza el endpoint remoto de firma en este momento."
+				if len(diagLines) > 0 {
+					detail += " " + strings.Join(diagLines, " ")
+				}
+				setResult(diagLevelWarn, "Conectividad con @firma", detail, "Comprueba red/proxy/DNS o reintenta más tarde")
 			} else {
-				setResult(levelOK, "Conectividad con @firma", "El endpoint remoto responde por red.", "")
+				detail := "El endpoint remoto responde por red."
+				if len(diagLines) > 0 {
+					detail += " " + strings.Join(diagLines, " ")
+				}
+				setResult(diagLevelOK, "Conectividad con @firma", detail, "")
 			}
 		}
 	}
+	netSummary, netAction, netLevel := technicianNetworkChecklist(ui.Protocol)
+	setResult(netLevel, "Diagnóstico técnico de red", netSummary, netAction)
+	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
+	setResult(updateLevel, "Repositorio de actualizaciones", updateDetail, updateAction)
+
 	if _, err := exec.LookPath("openssl"); err != nil {
-		setResult(levelWarn, "Dependencia OpenSSL", "No se detecta 'openssl' en PATH.", "Instala OpenSSL para flujos de firma/verificación compatibles")
+		setResult(diagLevelWarn, "Dependencia OpenSSL", "No se detecta 'openssl' en PATH.", opensslInstallHint())
 	}
 	if _, err := exec.LookPath("pk12util"); err != nil {
-		setResult(levelWarn, "Dependencia NSS tools", "No se detecta 'pk12util' en PATH.", "Instala 'libnss3-tools' para operaciones con almacenes NSS")
+		setResult(diagLevelWarn, "Dependencia NSS tools", "No se detecta 'pk12util' en PATH.", pk12utilInstallHint())
 	}
 
 	lines := []string{fmt.Sprintf("Diagnóstico rápido: %s", levelText(maxLevel))}
@@ -2236,11 +2302,11 @@ func (ui *UI) runProblemFinder() {
 	var lines []string
 	if _, err := exec.LookPath("openssl"); err != nil {
 		lines = append(lines, "Causa probable: falta OpenSSL en el sistema.")
-		lines = append(lines, "Acción: instala openssl y reintenta.")
+		lines = append(lines, "Acción: "+opensslInstallHint())
 	}
 	if _, err := exec.LookPath("pk12util"); err != nil {
 		lines = append(lines, "Causa probable: falta pk12util (NSS tools).")
-		lines = append(lines, "Acción: instala libnss3-tools y reintenta.")
+		lines = append(lines, "Acción: "+pk12utilInstallHint())
 	}
 
 	certs, err := certstore.GetSystemCertificates()
@@ -2263,11 +2329,20 @@ func (ui *UI) runProblemFinder() {
 
 	if ui.Protocol != nil {
 		if host := describeAfirmaEndpoint(ui.Protocol.STServlet, ui.Protocol.RTServlet); host != "" {
+			diagLines := endpointNetworkDiagnostics(ui.Protocol.STServlet, ui.Protocol.RTServlet)
+			if len(diagLines) > 0 {
+				lines = append(lines, "Diagnóstico de red @firma: "+strings.Join(diagLines, " | "))
+			}
 			if err := checkEndpointReachability(ui.Protocol.STServlet, ui.Protocol.RTServlet); err != nil {
 				lines = append(lines, "Causa probable externa: no se alcanza el servidor @firma ("+host+").")
 				lines = append(lines, "Detalle: "+summarizeServerBody(err.Error()))
 			}
 		}
+	}
+	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
+	lines = append(lines, "Comprobación repo actualizaciones: "+updateDetail)
+	if updateLevel != diagLevelOK && strings.TrimSpace(updateAction) != "" {
+		lines = append(lines, "Acción repo actualizaciones: "+updateAction)
 	}
 
 	errHints := collectRecentErrorHints(resolveCurrentLogFile())
@@ -2419,6 +2494,238 @@ func checkEndpointReachability(stServlet string, rtServlet string) error {
 	}
 	_ = conn.Close()
 	return nil
+}
+
+func endpointNetworkDiagnostics(stServlet string, rtServlet string) []string {
+	raw := strings.TrimSpace(stServlet)
+	if raw == "" {
+		raw = strings.TrimSpace(rtServlet)
+	}
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return []string{"URL inválida para diagnóstico de red"}
+	}
+	hostOnly := strings.TrimSpace(u.Hostname())
+	if hostOnly == "" {
+		return []string{"host vacío para diagnóstico de red"}
+	}
+	port := strings.TrimSpace(u.Port())
+	if port == "" {
+		if strings.EqualFold(u.Scheme, "https") {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	target := net.JoinHostPort(hostOnly, port)
+
+	lines := make([]string, 0, 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	startDNS := time.Now()
+	addrs, dnsErr := net.DefaultResolver.LookupHost(ctx, hostOnly)
+	dnsMs := time.Since(startDNS).Milliseconds()
+	if dnsErr != nil {
+		lines = append(lines, fmt.Sprintf("DNS ERROR (%d ms): %s", dnsMs, summarizeServerBody(dnsErr.Error())))
+	} else {
+		lines = append(lines, fmt.Sprintf("DNS OK (%d ms): %s", dnsMs, strings.Join(addrs, ",")))
+	}
+
+	startTCP := time.Now()
+	conn, tcpErr := net.DialTimeout("tcp", target, 2*time.Second)
+	tcpMs := time.Since(startTCP).Milliseconds()
+	if tcpErr != nil {
+		lines = append(lines, fmt.Sprintf("TCP %s ERROR (%d ms): %s", target, tcpMs, summarizeServerBody(tcpErr.Error())))
+	} else {
+		_ = conn.Close()
+		lines = append(lines, fmt.Sprintf("TCP %s OK (%d ms)", target, tcpMs))
+	}
+
+	return lines
+}
+
+func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
+	lines := make([]string, 0, 8)
+	level := diagLevelOK
+	action := ""
+	raise := func(newLevel int, newAction string) {
+		if newLevel > level {
+			level = newLevel
+		}
+		if strings.TrimSpace(action) == "" && strings.TrimSpace(newAction) != "" {
+			action = strings.TrimSpace(newAction)
+		}
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		lines = append(lines, "interfaces=ERROR")
+		raise(diagLevelWarn, "Revisa configuración de red local.")
+	} else {
+		upCount := 0
+		ipCount := 0
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			upCount++
+			addrs, _ := iface.Addrs()
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP != nil && ipnet.IP.To4() != nil {
+					ipCount++
+				}
+			}
+		}
+		lines = append(lines, fmt.Sprintf("interfaces_up=%d ip_v4=%d", upCount, ipCount))
+		if upCount == 0 || ipCount == 0 {
+			raise(diagLevelError, "No hay interfaz de red activa con IPv4. Revisa cable/WiFi.")
+		}
+	}
+
+	if gw := defaultGatewayIPv4(); gw != "" {
+		lines = append(lines, "gateway="+gw)
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(gw, "53"), 1200*time.Millisecond)
+		if err != nil {
+			lines = append(lines, "gateway_reachable=NO")
+			raise(diagLevelWarn, "No se alcanzó el gateway por TCP/53. Revisa router o red local.")
+		} else {
+			_ = conn.Close()
+			lines = append(lines, "gateway_reachable=SI")
+		}
+	} else {
+		lines = append(lines, "gateway=desconocido")
+		raise(diagLevelWarn, "No se pudo detectar gateway por defecto.")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := net.DefaultResolver.LookupHost(ctx, "cloudflare.com"); err != nil {
+		lines = append(lines, "dns_publico=ERROR")
+		raise(diagLevelWarn, "Fallo de resolución DNS. Revisa servidor DNS configurado.")
+	} else {
+		lines = append(lines, "dns_publico=OK")
+	}
+
+	publicTargets := []string{"1.1.1.1:53", "8.8.8.8:53"}
+	publicOK := false
+	for _, target := range publicTargets {
+		conn, err := net.DialTimeout("tcp", target, 1500*time.Millisecond)
+		if err == nil {
+			publicOK = true
+			_ = conn.Close()
+			lines = append(lines, "salida_internet=OK("+target+")")
+			break
+		}
+	}
+	if !publicOK {
+		lines = append(lines, "salida_internet=ERROR")
+		raise(diagLevelWarn, "No hay salida TCP a Internet (puerto 53). Revisa red/proxy/firewall.")
+	}
+
+	if state != nil {
+		raw := strings.TrimSpace(state.STServlet)
+		if raw == "" {
+			raw = strings.TrimSpace(state.RTServlet)
+		}
+		if raw != "" {
+			if diag := endpointNetworkDiagnostics(state.STServlet, state.RTServlet); len(diag) > 0 {
+				lines = append(lines, "afirma="+strings.Join(diag, " / "))
+				joined := strings.ToLower(strings.Join(diag, " "))
+				if strings.Contains(joined, "dns error") || strings.Contains(joined, "tcp") && strings.Contains(joined, "error") {
+					raise(diagLevelWarn, "No se alcanza @firma desde esta red. Revisa DNS/rutas/proxy.")
+				}
+			}
+		}
+	}
+
+	if strings.TrimSpace(action) == "" {
+		action = "Red básica operativa."
+	}
+	return strings.Join(lines, " | "), action, level
+}
+
+func defaultGatewayIPv4() string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	for i := 1; i < len(lines); i++ {
+		fields := strings.Fields(lines[i])
+		if len(fields) < 3 {
+			continue
+		}
+		destinationHex := strings.TrimSpace(fields[1])
+		gatewayHex := strings.TrimSpace(fields[2])
+		if destinationHex != "00000000" || gatewayHex == "00000000" {
+			continue
+		}
+		if ip := littleEndianHexIPv4(gatewayHex); ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+func littleEndianHexIPv4(v string) string {
+	if len(v) != 8 {
+		return ""
+	}
+	var b [4]byte
+	for i := 0; i < 4; i++ {
+		chunk := v[i*2 : i*2+2]
+		n, err := strconv.ParseUint(chunk, 16, 8)
+		if err != nil {
+			return ""
+		}
+		b[3-i] = byte(n)
+	}
+	return net.IPv4(b[0], b[1], b[2], b[3]).String()
+}
+
+func checkUpdateRepositoryReachability() (string, string, int) {
+	const updateHost = "autofirma.dipgra.es"
+	const updateURL = "https://autofirma.dipgra.es/version.json"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+
+	addrs, dnsErr := net.DefaultResolver.LookupHost(ctx, updateHost)
+	if dnsErr != nil {
+		return "DNS ERROR para autofirma.dipgra.es: " + summarizeServerBody(dnsErr.Error()), "Revisa DNS/red para poder consultar actualizaciones.", diagLevelWarn
+	}
+
+	conn, tcpErr := net.DialTimeout("tcp", net.JoinHostPort(updateHost, "443"), 2500*time.Millisecond)
+	if tcpErr != nil {
+		return "TCP ERROR con autofirma.dipgra.es:443: " + summarizeServerBody(tcpErr.Error()), "Comprueba salida HTTPS (puerto 443) hacia el repositorio de actualizaciones.", diagLevelWarn
+	}
+	_ = conn.Close()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", updateURL, nil)
+	if err != nil {
+		return "No se pudo construir la petición de actualización.", "Revisa configuración local de red.", diagLevelWarn
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "HTTPS ERROR consultando version.json: " + summarizeServerBody(err.Error()), "Revisa proxy/SSL y conectividad con autofirma.dipgra.es.", diagLevelWarn
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return fmt.Sprintf("OK (DNS=%d IPs, HTTPS=%d)", len(addrs), resp.StatusCode), "", diagLevelOK
+	}
+	if resp.StatusCode >= 500 {
+		return fmt.Sprintf("HTTP %d en version.json", resp.StatusCode), "Incidencia temporal en el servidor de actualizaciones. Reintenta más tarde.", diagLevelWarn
+	}
+	return fmt.Sprintf("HTTP %d en version.json", resp.StatusCode), "Revisa acceso al repositorio de actualizaciones y posibles bloqueos de red.", diagLevelWarn
 }
 
 func collectRecentErrorHints(logFile string) []string {
@@ -2822,13 +3129,13 @@ func buildAfirmaUploadErrorMessage(err error, stServlet string, rtServlet string
 	}
 
 	if strings.Contains(lower, "no such host") || strings.Contains(lower, "name or service not known") {
-		return withSolution(fmt.Sprintf("No se pudo resolver el DNS de %s.", endpoint), "Revisa red/VPN/DNS y que la URL de @firma sea correcta.")
+		return withSolution(fmt.Sprintf("No se pudo resolver el DNS de %s.", endpoint), dnsCheckHint(endpoint))
 	}
 	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
-		return withSolution(fmt.Sprintf("El %s no respondió a tiempo.", endpoint), "Espera unos segundos y reintenta. Si persiste, revisa conectividad o estado del servicio @firma.")
+		return withSolution(fmt.Sprintf("El %s no respondió a tiempo.", endpoint), httpsCheckHint(endpoint))
 	}
 	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "no route to host") {
-		return withSolution(fmt.Sprintf("No se pudo conectar con %s (conexión rechazada o sin ruta).", endpoint), "Comprueba red/proxy/firewall y disponibilidad del servidor remoto.")
+		return withSolution(fmt.Sprintf("No se pudo conectar con %s (conexión rechazada o sin ruta).", endpoint), "Comprueba red/proxy/firewall y que el endpoint esté accesible desde esta máquina.")
 	}
 	if strings.Contains(lower, "tls:") || strings.Contains(lower, "x509:") || strings.Contains(lower, "certificate") {
 		return withSolution(fmt.Sprintf("Falló la conexión TLS con %s.", endpoint), "Revisa certificados de confianza locales, proxy HTTPS y fecha/hora del sistema.")
@@ -3011,7 +3318,7 @@ func buildUserSignErrorMessage(err error, format string) string {
 		return withSolution("Los datos de entrada para firmar son inválidos o están corruptos.", "Regenera la solicitud desde origen y vuelve a intentar.")
 	}
 	if strings.Contains(lower, "openssl") || strings.Contains(lower, "pk12util") {
-		return withSolution("Falló una dependencia criptográfica local (OpenSSL/pk12util).", "Instala/verifica OpenSSL y libnss3-tools en el sistema.")
+		return withSolution("Falló una dependencia criptográfica local (OpenSSL/pk12util).", opensslInstallHint()+" "+pk12utilInstallHint())
 	}
 	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
 		return withSolution("La operación de firma agotó el tiempo de espera.", "Reintenta y comprueba conectividad/carga del sistema.")
@@ -3037,7 +3344,7 @@ func appendStrictCompatSuggestion(msg string, err error, state *ProtocolState, s
 		strings.Contains(lower, "non-ok body") ||
 		strings.Contains(lower, "cuerpo no-ok") ||
 		strings.Contains(lower, "wait") {
-		return msg + " Sugerencia: activa 'Modo compatibilidad estricta' e inténtalo de nuevo."
+		return withSolution(msg, "Activa 'Modo compatibilidad estricta' e inténtalo de nuevo.")
 	}
 	return msg
 }
