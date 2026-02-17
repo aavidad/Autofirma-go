@@ -53,6 +53,17 @@ const (
 	diagLevelError
 )
 
+func diagLevelLabel(level int) string {
+	switch level {
+	case diagLevelError:
+		return "ERROR"
+	case diagLevelWarn:
+		return "AVISO"
+	default:
+		return "OK"
+	}
+}
+
 //go:embed logo.png
 var embeddedHeaderLogo []byte
 
@@ -115,6 +126,7 @@ type UI struct {
 	BtnSelfTest        widget.Clickable
 	BtnOpenReports     widget.Clickable
 	BtnExportFullDiag  widget.Clickable
+	BtnCopyFullDiag    widget.Clickable
 	BtnRunFullCheck    widget.Clickable
 	BtnOpenSealWeb     widget.Clickable
 	ShowAbout          bool
@@ -1168,6 +1180,14 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													}
 													btn := material.Button(ui.Theme, &ui.BtnExportFullDiag, "Exportar diagnóstico completo")
 													btn.Background = color.NRGBA{R: 60, G: 95, B: 70, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnCopyFullDiag.Clicked(gtx) {
+														ui.copyFullDiagnosticReport()
+													}
+													btn := material.Button(ui.Theme, &ui.BtnCopyFullDiag, "Copiar diagnóstico completo")
+													btn.Background = color.NRGBA{R: 72, G: 90, B: 70, A: 255}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2279,16 +2299,6 @@ func (ui *UI) runLocalHealthCheck() {
 		detail string
 		action string
 	}
-	levelText := func(level int) string {
-		switch level {
-		case diagLevelError:
-			return "ERROR"
-		case diagLevelWarn:
-			return "AVISO"
-		default:
-			return "OK"
-		}
-	}
 	containsAny := func(v string, terms ...string) bool {
 		lower := strings.ToLower(strings.TrimSpace(v))
 		for _, term := range terms {
@@ -2378,9 +2388,9 @@ func (ui *UI) runLocalHealthCheck() {
 		setResult(diagLevelWarn, "Dependencia NSS tools", "No se detecta 'pk12util' en PATH.", pk12utilInstallHint())
 	}
 
-	lines := []string{fmt.Sprintf("Diagnóstico rápido: %s", levelText(maxLevel))}
+	lines := []string{fmt.Sprintf("Diagnóstico rápido: %s", diagLevelLabel(maxLevel))}
 	for _, item := range results {
-		line := fmt.Sprintf("- [%s] %s: %s", levelText(item.level), item.title, item.detail)
+		line := fmt.Sprintf("- [%s] %s: %s", diagLevelLabel(item.level), item.title, item.detail)
 		if item.action != "" {
 			line += " Acción: " + item.action
 		}
@@ -3117,6 +3127,23 @@ func (ui *UI) exportFullDiagnosticReport() {
 	ui.Window.Invalidate()
 }
 
+func (ui *UI) copyFullDiagnosticReport() {
+	report := ui.buildFullDiagnosticReport()
+	if err := copyToClipboard(report); err != nil {
+		path, saveErr := writeTechnicalReportFile(report)
+		if saveErr != nil {
+			ui.HealthStatus = "No se pudo copiar ni guardar el diagnóstico completo: " + err.Error()
+			ui.Window.Invalidate()
+			return
+		}
+		ui.HealthStatus = "No se pudo copiar al portapapeles. Diagnóstico completo guardado en: " + path
+		ui.Window.Invalidate()
+		return
+	}
+	ui.HealthStatus = "Diagnóstico completo copiado al portapapeles."
+	ui.Window.Invalidate()
+}
+
 func (ui *UI) buildFullDiagnosticReport() string {
 	lines := []string{
 		"Autofirma Dipgra - Diagnóstico completo",
@@ -3133,11 +3160,13 @@ func (ui *UI) buildFullDiagnosticReport() string {
 
 	netSummary, netAction, netLevel := technicianNetworkChecklist(ui.Protocol)
 	lines = append(lines, "network_level="+fmt.Sprintf("%d", netLevel))
+	lines = append(lines, "network_level_label="+diagLevelLabel(netLevel))
 	lines = append(lines, "network_summary="+netSummary)
 	lines = append(lines, "network_action="+netAction)
 
 	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
 	lines = append(lines, "update_repo_level="+fmt.Sprintf("%d", updateLevel))
+	lines = append(lines, "update_repo_level_label="+diagLevelLabel(updateLevel))
 	lines = append(lines, "update_repo_detail="+sanitizeSensitiveText(updateDetail))
 	lines = append(lines, "update_repo_action="+updateAction)
 
