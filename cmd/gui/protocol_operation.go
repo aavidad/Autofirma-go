@@ -14,6 +14,9 @@ func protocolSignOperation(
 	format string,
 	options map[string]interface{},
 ) (string, error) {
+	if strings.TrimSpace(pin) == "" {
+		pin = signOptionString(options, "_pin", "pin")
+	}
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "cosign":
 		return coSignDataFunc(dataB64, certificateID, pin, format, options)
@@ -22,4 +25,25 @@ func protocolSignOperation(
 	default:
 		return signDataFunc(dataB64, certificateID, pin, format, options)
 	}
+}
+
+func signOptionString(options map[string]interface{}, keys ...string) string {
+	if options == nil {
+		return ""
+	}
+	for _, key := range keys {
+		raw, ok := options[key]
+		if !ok || raw == nil {
+			continue
+		}
+		s, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

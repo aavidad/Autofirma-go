@@ -39,7 +39,7 @@ func CoSignData(dataB64 string, certificateID string, pin string, format string,
 	if !strings.EqualFold(format, "cades") {
 		return "", fmt.Errorf("operacion cosign no soportada para formato: %s", format)
 	}
-	cert, nickname, err := getCertificateByID(certificateID)
+	cert, nickname, err := getCertificateByID(certificateID, options)
 	if err != nil {
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
 	}
@@ -75,7 +75,7 @@ func CounterSignData(dataB64 string, certificateID string, pin string, format st
 	if !strings.EqualFold(format, "cades") {
 		return "", fmt.Errorf("operacion countersign no soportada para formato: %s", format)
 	}
-	cert, _, err := getCertificateByID(certificateID)
+	cert, _, err := getCertificateByID(certificateID, options)
 	if err != nil {
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
 	}

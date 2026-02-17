@@ -8,6 +8,7 @@ import (
 	"autofirma-host/pkg/protocol"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -20,15 +21,23 @@ import (
 )
 
 type selectCertFilterOptions struct {
-	forceAutoSelection bool
-	allowExternalStores bool
+	forceAutoSelection   bool
+	autoSelectWhenSingle bool
+	allowExternalStores  bool
 }
 
 func applySelectCertFilters(certs []protocol.Certificate, state *ProtocolState) ([]protocol.Certificate, selectCertFilterOptions) {
-	props := decodeProtocolProperties(state.Params.Get("properties"))
+	rawProps := ""
+	if state != nil {
+		rawProps = getQueryParam(state.Params, "properties")
+	}
+	props := decodeProtocolProperties(rawProps)
+	headless := isHeadlessMode(props)
+	autoSingle := isMandatorySelectionDisabled(props)
 	opts := selectCertFilterOptions{
-		forceAutoSelection: isHeadlessOrMandatorySelectionDisabled(props),
-		allowExternalStores: true,
+		forceAutoSelection:   headless,
+		autoSelectWhenSingle: autoSingle,
+		allowExternalStores:  true,
 	}
 
 	filterGroups := extractFilterGroups(props)
@@ -38,7 +47,7 @@ func applySelectCertFilters(certs []protocol.Certificate, state *ProtocolState) 
 	if containsDisableOpeningExternalStoresFilter(filterGroups) {
 		opts.allowExternalStores = false
 	}
-	log.Printf("[SelectCertFilter] groups=%d force_auto=%t", len(filterGroups), opts.forceAutoSelection)
+	log.Printf("[SelectCertFilter] groups=%d force_auto=%t auto_single=%t", len(filterGroups), opts.forceAutoSelection, opts.autoSelectWhenSingle)
 
 	filtered := make([]protocol.Certificate, 0, len(certs))
 	for _, cert := range certs {
@@ -80,6 +89,25 @@ func decodeProtocolProperties(raw string) map[string]string {
 	return parseProperties(strings.ReplaceAll(raw, `\n`, "\n"))
 }
 
+func getProtocolProperty(props map[string]string, keys ...string) (string, bool) {
+	if len(props) == 0 || len(keys) == 0 {
+		return "", false
+	}
+	for _, k := range keys {
+		if v, ok := props[k]; ok {
+			return strings.TrimSpace(v), true
+		}
+	}
+	for rawKey, rawVal := range props {
+		for _, k := range keys {
+			if strings.EqualFold(strings.TrimSpace(rawKey), strings.TrimSpace(k)) {
+				return strings.TrimSpace(rawVal), true
+			}
+		}
+	}
+	return "", false
+}
+
 func parseProperties(body string) map[string]string {
 	props := make(map[string]string)
 	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
@@ -102,25 +130,28 @@ func parseProperties(body string) map[string]string {
 	return props
 }
 
-func isHeadlessOrMandatorySelectionDisabled(props map[string]string) bool {
-	headless := strings.EqualFold(strings.TrimSpace(props["headless"]), "true")
-	mandatorySelection, hasMandatory := props["mandatoryCertSelection"]
-	omitSelection := hasMandatory && strings.EqualFold(strings.TrimSpace(mandatorySelection), "false")
-	return headless || omitSelection
+func isHeadlessMode(props map[string]string) bool {
+	v, _ := getProtocolProperty(props, "headless")
+	return strings.EqualFold(v, "true")
+}
+
+func isMandatorySelectionDisabled(props map[string]string) bool {
+	mandatorySelection, hasMandatory := getProtocolProperty(props, "mandatoryCertSelection")
+	return hasMandatory && strings.EqualFold(mandatorySelection, "false")
 }
 
 func extractFilterGroups(props map[string]string) []string {
-	if v := strings.TrimSpace(props["filter"]); v != "" {
+	if v, ok := getProtocolProperty(props, "filter"); ok && v != "" {
 		return []string{v}
 	}
-	if v := strings.TrimSpace(props["filters"]); v != "" {
+	if v, ok := getProtocolProperty(props, "filters"); ok && v != "" {
 		return []string{v}
 	}
 	out := make([]string, 0, 4)
 	for i := 1; i <= 20; i++ {
 		k := "filters." + strconvItoa(i)
-		v := strings.TrimSpace(props[k])
-		if v == "" {
+		v, ok := getProtocolProperty(props, k)
+		if !ok || v == "" {
 			if i == 1 {
 				continue
 			}
@@ -173,7 +204,9 @@ func certMatchesFilterToken(cert protocol.Certificate, token string) bool {
 		q := strings.TrimSpace(token[len("issuer.contains:"):])
 		return containsInMapValues(cert.Issuer, q)
 	case strings.HasPrefix(lower, "signingcert:"):
-		return hasSignatureUsage(cert)
+		// Java SigningCertificateFilter keeps all sign-capable certificates and
+		// excludes known authentication-only certs (notably DNIe auth).
+		return !isAuthenticationDNIe(cert)
 	case strings.HasPrefix(lower, "thumbprint:"):
 		spec := strings.TrimSpace(token[len("thumbprint:"):])
 		return matchesThumbprint(cert, spec)
@@ -225,6 +258,10 @@ func certIsCurrentlyValid(cert protocol.Certificate) bool {
 	nb, errNB := time.Parse(time.RFC3339, strings.TrimSpace(cert.ValidFrom))
 	na, errNA := time.Parse(time.RFC3339, strings.TrimSpace(cert.ValidTo))
 	if errNB != nil || errNA != nil {
+		if xc, err := parseProtocolX509(cert); err == nil {
+			now := time.Now()
+			return !now.Before(xc.NotBefore) && !now.After(xc.NotAfter)
+		}
 		return cert.CanSign
 	}
 	now := time.Now()
@@ -269,22 +306,57 @@ func matchesThumbprint(cert protocol.Certificate, spec string) bool {
 		return true
 	}
 	parts := strings.Split(spec, ":")
-	want := normalizeHex(parts[0])
+	want := ""
 	algo := "sha256"
-	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-		algo = strings.ToLower(strings.TrimSpace(parts[1]))
+	if len(parts) >= 2 {
+		p0 := strings.TrimSpace(parts[0])
+		p1 := strings.TrimSpace(parts[1])
+		// Java format: thumbprint:<algorithm>:<hex>
+		if isThumbprintAlgorithm(p0) {
+			algo = normalizeThumbprintAlgorithm(p0)
+			want = normalizeHex(p1)
+		} else {
+			// Backward compatible fallback: thumbprint:<hex>:<algorithm>
+			want = normalizeHex(p0)
+			if p1 != "" {
+				algo = normalizeThumbprintAlgorithm(p1)
+			}
+		}
+	} else {
+		want = normalizeHex(parts[0])
 	}
 	if want == "" {
 		return true
 	}
-	switch algo {
+	switch normalizeThumbprintAlgorithm(algo) {
 	case "sha1":
 		sum := sha1.Sum(cert.Content)
+		return normalizeHex(hex.EncodeToString(sum[:])) == want
+	case "sha384":
+		sum := sha512.Sum384(cert.Content)
+		return normalizeHex(hex.EncodeToString(sum[:])) == want
+	case "sha512":
+		sum := sha512.Sum512(cert.Content)
 		return normalizeHex(hex.EncodeToString(sum[:])) == want
 	default:
 		sum := sha256.Sum256(cert.Content)
 		return normalizeHex(hex.EncodeToString(sum[:])) == want
 	}
+}
+
+func isThumbprintAlgorithm(v string) bool {
+	switch normalizeThumbprintAlgorithm(v) {
+	case "sha1", "sha256", "sha384", "sha512":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeThumbprintAlgorithm(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.ReplaceAll(v, "-", "")
+	return v
 }
 
 func normalizeHex(s string) string {
@@ -426,7 +498,12 @@ func matchesKeyUsage(cert protocol.Certificate, tokenLower string) bool {
 	name := strings.TrimSpace(parts[0])
 	want := true
 	if len(parts) == 2 {
-		want = strings.EqualFold(strings.TrimSpace(parts[1]), "true")
+		raw := strings.TrimSpace(parts[1])
+		// Java keyusage parser accepts "null" to leave this key-usage unconstrained.
+		if strings.EqualFold(raw, "null") || raw == "" {
+			return true
+		}
+		want = strings.EqualFold(raw, "true")
 	}
 
 	xc, err := parseProtocolX509(cert)
@@ -539,6 +616,12 @@ func x509NameToAttrs(name pkix.Name) map[string]string {
 	if len(name.Country) > 0 {
 		out["C"] = name.Country[0]
 	}
+	if len(name.Locality) > 0 {
+		out["L"] = name.Locality[0]
+	}
+	if len(name.Province) > 0 {
+		out["ST"] = name.Province[0]
+	}
 	return out
 }
 
@@ -614,7 +697,6 @@ func findAssociatedSignatureCert(cert protocol.Certificate, all []protocol.Certi
 		return protocol.Certificate{}, false
 	}
 	expire := certificateExpireDate(cert)
-	issuer := normalizeAttrs(protocolIssuerAttrs(cert))
 
 	for _, cand := range all {
 		if cand.ID == cert.ID {
@@ -623,17 +705,7 @@ func findAssociatedSignatureCert(cert protocol.Certificate, all []protocol.Certi
 		if !hasSignatureUsage(cand) {
 			continue
 		}
-		candIssuer := normalizeAttrs(protocolIssuerAttrs(cand))
-		if candIssuer["CN"] != issuer["CN"] {
-			continue
-		}
-		if candIssuer["O"] != issuer["O"] {
-			continue
-		}
-		if candIssuer["OU"] != issuer["OU"] {
-			continue
-		}
-		if candIssuer["C"] != issuer["C"] {
+		if !sameIssuerForPairing(cert, cand) {
 			continue
 		}
 		if extractProtocolSubjectSerialNumber(cand) != subjectSN {
@@ -645,6 +717,32 @@ func findAssociatedSignatureCert(cert protocol.Certificate, all []protocol.Certi
 		return cand, true
 	}
 	return protocol.Certificate{}, false
+}
+
+func sameIssuerForPairing(a, b protocol.Certificate) bool {
+	attrsA := issuerAttrsForPairing(a)
+	attrsB := issuerAttrsForPairing(b)
+	return attrsA["CN"] == attrsB["CN"] &&
+		attrsA["O"] == attrsB["O"] &&
+		attrsA["OU"] == attrsB["OU"] &&
+		attrsA["C"] == attrsB["C"] &&
+		attrsA["L"] == attrsB["L"] &&
+		attrsA["ST"] == attrsB["ST"]
+}
+
+func issuerAttrsForPairing(cert protocol.Certificate) map[string]string {
+	base := normalizeAttrs(protocolIssuerAttrs(cert))
+	xc, err := parseProtocolX509(cert)
+	if err != nil || xc == nil {
+		return base
+	}
+	parsed := normalizeAttrs(x509NameToAttrs(xc.Issuer))
+	for _, k := range []string{"CN", "O", "OU", "C", "L", "ST"} {
+		if strings.TrimSpace(base[k]) == "" {
+			base[k] = parsed[k]
+		}
+	}
+	return base
 }
 
 func hasSignatureUsage(cert protocol.Certificate) bool {

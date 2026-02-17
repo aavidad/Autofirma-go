@@ -13,3 +13,7 @@ import "autofirma-host/pkg/protocol"
 func getPKCS11Certificates() ([]protocol.Certificate, error) {
 	return nil, nil
 }
+
+func getPKCS11CertificatesWithModules(_ []string) ([]protocol.Certificate, error) {
+	return nil, nil
+}

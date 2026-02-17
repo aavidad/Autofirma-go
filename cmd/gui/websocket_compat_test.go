@@ -5,8 +5,11 @@
 package main
 
 import (
+	"autofirma-host/pkg/certstore"
 	"autofirma-host/pkg/protocol"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,8 +37,10 @@ func TestFormatErrorReturnsJavaStyleSAF(t *testing.T) {
 		{"ERROR_NO_CERTIFICATES_SYSTEM", "SAF_10:"},
 		{"ERROR_NO_CERTIFICATES_KEYSTORE", "SAF_19:"},
 		{"ERROR_LOCAL_BATCH_SIGN", "SAF_20:"},
+		{"ERROR_UNSUPPORTED_PROCEDURE", "SAF_21:"},
 		{"ERROR_CONTACT_BATCH_SERVICE", "SAF_26:"},
 		{"ERROR_BATCH_SIGNATURE", "SAF_27:"},
+		{"ERROR_MINIMUM_VERSION_NOT_SATISFIED", "SAF_41:"},
 		{"ERROR_CANNOT_OPEN_SOCKET", "SAF_45:"},
 		{"ERROR_INVALID_SESSION_ID", "SAF_46:"},
 		{"ERROR_EXTERNAL_REQUEST_TO_SOCKET", "SAF_47:"},
@@ -82,6 +87,76 @@ func TestProcessProtocolRequestNeedsUIForSign(t *testing.T) {
 	got := strings.TrimSpace(s.processProtocolRequest("afirma://sign?id=abc&stservlet=https%3A%2F%2Fexample.com%2FStorageService"))
 	if !strings.HasPrefix(strings.ToUpper(got), "SAF_09:") {
 		t.Fatalf("se esperaba SAF_09 por UI no disponible, obtenido: %q", got)
+	}
+}
+
+func TestProcessProtocolRequestMinimumClientVersionNotSatisfiedReturnsSaf41(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	got := strings.TrimSpace(s.processProtocolRequest("afirma://sign?id=abc&stservlet=https%3A%2F%2Fexample.com%2FStorageService&mcv=9.0"))
+	if !strings.HasPrefix(strings.ToUpper(got), "SAF_41:") {
+		t.Fatalf("se esperaba SAF_41 para mcv no satisfecha, obtenido: %q", got)
+	}
+}
+
+func TestProcessProtocolRequestUnsupportedProcedureVersionReturnsSaf21(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	got := strings.TrimSpace(s.processProtocolRequest("afirma://sign?id=abc&stservlet=https%3A%2F%2Fexample.com%2FStorageService&v=5"))
+	if !strings.HasPrefix(strings.ToUpper(got), "SAF_21:") {
+		t.Fatalf("se esperaba SAF_21 para version de protocolo no soportada, obtenido: %q", got)
+	}
+}
+
+func TestBuildProtocolExtraInfo(t *testing.T) {
+	if got := buildProtocolExtraInfo(&ProtocolState{ProtocolVersion: 2}, "/tmp/a.pdf"); got != nil {
+		t.Fatalf("v<3 no debe devolver extraInfo")
+	}
+	got := buildProtocolExtraInfo(&ProtocolState{ProtocolVersion: 3}, "/tmp/a.pdf")
+	if len(got) == 0 {
+		t.Fatalf("v>=3 debe devolver extraInfo")
+	}
+	var data map[string]string
+	if err := json.Unmarshal(got, &data); err != nil {
+		t.Fatalf("extraInfo no es JSON valido: %v", err)
+	}
+	if data["filename"] != "a.pdf" {
+		t.Fatalf("filename inesperado en extraInfo: %q", data["filename"])
+	}
+}
+
+func TestBuildResponseIncludesExtraInfoWhenPresent(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	certDER := []byte{0x30, 0x82, 0x01}
+	sig := []byte("firma")
+	extra := []byte(`{"filename":"doc.pdf"}`)
+	out, err := s.buildResponse(certDER, sig, "", extra)
+	if err != nil {
+		t.Fatalf("error inesperado construyendo respuesta: %v", err)
+	}
+	parts := strings.Split(out, "|")
+	if len(parts) != 3 {
+		t.Fatalf("se esperaban 3 partes cert|sign|extra, obtenido=%d (%q)", len(parts), out)
+	}
+	decodedExtra, err := base64.URLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("extraInfo no es base64 url-safe valido: %v", err)
+	}
+	if string(decodedExtra) != string(extra) {
+		t.Fatalf("extraInfo inesperado: %q", string(decodedExtra))
+	}
+}
+
+func TestBuildResponseEncryptedIncludesExtraInfoWhenPresent(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	certDER := []byte{0x30, 0x82, 0x01}
+	sig := []byte("firma")
+	extra := []byte(`{"filename":"doc.pdf"}`)
+	out, err := s.buildResponse(certDER, sig, "12345678", extra)
+	if err != nil {
+		t.Fatalf("error inesperado construyendo respuesta cifrada: %v", err)
+	}
+	parts := strings.Split(out, "|")
+	if len(parts) != 3 {
+		t.Fatalf("en cifrado se esperaban 3 partes cert|sign|extra, obtenido=%d (%q)", len(parts), out)
 	}
 }
 
@@ -500,6 +575,386 @@ func TestProcessSelectCertRequestStickyReuse(t *testing.T) {
 	}
 }
 
+func TestProcessSelectCertRequestDefaultKeyStorePKCS11FiltersCandidates(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore": []string{"PKCS11"},
+		},
+	}
+
+	oldGetCerts := getSystemCertificatesFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{
+			{
+				ID:      "sys1",
+				CanSign: true,
+				Source:  "system",
+				Content: []byte{0x30, 0x82, 0x01, 0x01},
+				Subject: map[string]string{"CN": "System Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+			{
+				ID:      "pkcs1",
+				CanSign: true,
+				Source:  "smartcard",
+				Content: []byte{0x30, 0x82, 0x01, 0x02},
+				Subject: map[string]string{"CN": "Token Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+		}, nil
+	}
+	defer func() { getSystemCertificatesFunc = oldGetCerts }()
+
+	got := s.processSelectCertRequest(state)
+	want := base64.URLEncoding.EncodeToString([]byte{0x30, 0x82, 0x01, 0x02})
+	if got != want {
+		t.Fatalf("defaultKeyStore=PKCS11 debe priorizar cert smartcard, obtenido=%q esperado=%q", got, want)
+	}
+}
+
+func TestProcessSelectCertRequestDefaultKeyStoreUnknownFallsBack(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore": []string{"UNSUPPORTED_STORE"},
+		},
+	}
+
+	oldGetCerts := getSystemCertificatesFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{
+			{
+				ID:      "sys1",
+				CanSign: true,
+				Source:  "system",
+				Content: []byte{0x30, 0x82, 0x01, 0x0A},
+				Subject: map[string]string{"CN": "System Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+			{
+				ID:      "pkcs1",
+				CanSign: true,
+				Source:  "smartcard",
+				Content: []byte{0x30, 0x82, 0x01, 0x0B},
+				Subject: map[string]string{"CN": "Token Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+		}, nil
+	}
+	defer func() { getSystemCertificatesFunc = oldGetCerts }()
+
+	got := s.processSelectCertRequest(state)
+	want := base64.URLEncoding.EncodeToString([]byte{0x30, 0x82, 0x01, 0x0A})
+	if got != want {
+		t.Fatalf("defaultKeyStore desconocido debe mantener comportamiento previo (fallback), obtenido=%q esperado=%q", got, want)
+	}
+}
+
+func TestProcessSelectCertRequestDefaultKeyStoreLowercaseAlias(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", nil)
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultkeystore": []string{"pkcs11"},
+		},
+	}
+
+	oldGetCerts := getSystemCertificatesFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{
+			{
+				ID:      "sys1",
+				CanSign: true,
+				Source:  "system",
+				Content: []byte{0x30, 0x82, 0x01, 0x21},
+				Subject: map[string]string{"CN": "System Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+			{
+				ID:      "pkcs1",
+				CanSign: true,
+				Source:  "dnie",
+				Content: []byte{0x30, 0x82, 0x01, 0x22},
+				Subject: map[string]string{"CN": "DNIe Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+		}, nil
+	}
+	defer func() { getSystemCertificatesFunc = oldGetCerts }()
+
+	got := s.processSelectCertRequest(state)
+	want := base64.URLEncoding.EncodeToString([]byte{0x30, 0x82, 0x01, 0x22})
+	if got != want {
+		t.Fatalf("alias defaultkeystore debe funcionar como defaultKeyStore, obtenido=%q esperado=%q", got, want)
+	}
+}
+
+func TestLoadCertificatesForStateUsesPKCS11ModuleHints(t *testing.T) {
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore":    []string{"PKCS11"},
+			"defaultKeyStoreLib": []string{"/opt/lib/p11a.so;/opt/lib/p11b.so"},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		t.Fatalf("no debe usar carga general cuando hay defaultKeyStoreLib para PKCS11")
+		return nil, nil
+	}
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		if !opts.IncludePKCS11 {
+			t.Fatalf("con defaultKeyStore=PKCS11 debe incluir escaneo PKCS11")
+		}
+		if len(opts.PKCS11ModulePaths) != 2 ||
+			opts.PKCS11ModulePaths[0] != "/opt/lib/p11a.so" ||
+			opts.PKCS11ModulePaths[1] != "/opt/lib/p11b.so" {
+			t.Fatalf("hints PKCS11 inesperados: %#v", opts.PKCS11ModulePaths)
+		}
+		return []protocol.Certificate{{ID: "c1", Source: "smartcard", CanSign: true, Content: []byte{0x01}}}, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "c1" {
+		t.Fatalf("resultado inesperado loadCertificatesForState: certs=%#v err=%v", certs, err)
+	}
+}
+
+func TestLoadCertificatesForStateNonPKCS11StoreSkipsPKCS11Scan(t *testing.T) {
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore": []string{"MOZ_UNI"},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		t.Fatalf("no debe usar loader por defecto si hay preferencia de store explicita")
+		return nil, nil
+	}
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		if opts.IncludePKCS11 {
+			t.Fatalf("con MOZ_UNI debe omitirse escaneo PKCS11")
+		}
+		return []protocol.Certificate{{ID: "c2", CanSign: true, Content: []byte{0x02}}}, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "c2" {
+		t.Fatalf("resultado inesperado loadCertificatesForState con skip PKCS11: certs=%#v err=%v", certs, err)
+	}
+}
+
+func TestLoadCertificatesForStatePKCS11HintsErrorFallsBackToDefaultLoader(t *testing.T) {
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore":    []string{"PKCS11"},
+			"defaultKeyStoreLib": []string{"/opt/lib/p11.so"},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		return nil, errors.New("forced options loader error")
+	}
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{{ID: "fallback", CanSign: true, Content: []byte{0x03}}}, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "fallback" {
+		t.Fatalf("debe hacer fallback al loader por defecto ante error, certs=%#v err=%v", certs, err)
+	}
+}
+
+func TestLoadCertificatesForStateUnknownStoreUsesDefaultLoader(t *testing.T) {
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore": []string{"CUSTOM_UNKNOWN"},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		t.Fatalf("store desconocido debe mantener loader por defecto para compatibilidad")
+		return nil, nil
+	}
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{{ID: "def", CanSign: true, Content: []byte{0x04}}}, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "def" {
+		t.Fatalf("resultado inesperado para store desconocido: certs=%#v err=%v", certs, err)
+	}
+}
+
+func TestLoadCertificatesForStateDisableOpeningExternalStoresSkipsPKCS11(t *testing.T) {
+	props := base64.StdEncoding.EncodeToString([]byte("filter=disableopeningexternalstores\n"))
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"properties": []string{props},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		t.Fatalf("con disableopeningexternalstores debe usar loader con opciones para excluir PKCS11")
+		return nil, nil
+	}
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		if opts.IncludePKCS11 {
+			t.Fatalf("disableopeningexternalstores debe desactivar escaneo PKCS11")
+		}
+		return []protocol.Certificate{{ID: "sys", Source: "system", CanSign: true, Content: []byte{0x31}}}, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "sys" {
+		t.Fatalf("resultado inesperado con disableopeningexternalstores: certs=%#v err=%v", certs, err)
+	}
+}
+
+func TestLoadCertificatesForStateDisableOpeningExternalStoresDoesNotOverrideExplicitPKCS11(t *testing.T) {
+	props := base64.StdEncoding.EncodeToString([]byte("filter=disableopeningexternalstores\n"))
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore": []string{"PKCS11"},
+			"properties":      []string{props},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{{ID: "pk", Source: "smartcard", CanSign: true, Content: []byte{0x32}}}, nil
+	}
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		t.Fatalf("sin defaultKeyStoreLib no debe forzar loader con opciones")
+		return nil, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "pk" {
+		t.Fatalf("resultado inesperado con PKCS11 explicito + disableopeningexternalstores: certs=%#v err=%v", certs, err)
+	}
+}
+
+func TestSplitStoreLibHintsNormalizesAndDeduplicates(t *testing.T) {
+	got := splitStoreLibHints(" /a/p11.so ; /b/p11.so, /a/p11.so ,, ; ")
+	if len(got) != 2 || got[0] != "/a/p11.so" || got[1] != "/b/p11.so" {
+		t.Fatalf("normalizacion de hints inesperada: %#v", got)
+	}
+}
+
+func TestResolvePKCS11ModuleHintsSupportsAliasKeys(t *testing.T) {
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultkeystore":    []string{"pkcs11"},
+			"defaultkeystorelib": []string{"/x/a.so,/x/b.so"},
+		},
+	}
+	got := resolvePKCS11ModuleHints(state)
+	if len(got) != 2 || got[0] != "/x/a.so" || got[1] != "/x/b.so" {
+		t.Fatalf("hints desde alias defaultkeystorelib inesperados: %#v", got)
+	}
+}
+
+func TestSummarizeModuleHints(t *testing.T) {
+	got := summarizeModuleHints([]string{"/a/one.so", "/b/two.so", "/c/three.so", "/d/four.so"})
+	if got != "one.so,two.so,three.so,+1 more" {
+		t.Fatalf("resumen de hints inesperado: %q", got)
+	}
+}
+
+func TestHasPKCS11Certificates(t *testing.T) {
+	if hasPKCS11Certificates([]protocol.Certificate{
+		{ID: "a", Source: "system"},
+		{ID: "b", Source: "dnie"},
+	}) != true {
+		t.Fatalf("debe detectar fuente dnie como PKCS11")
+	}
+	if hasPKCS11Certificates([]protocol.Certificate{
+		{ID: "a", Source: "system"},
+		{ID: "b", Source: "windows"},
+	}) != false {
+		t.Fatalf("no debe detectar PKCS11 donde no lo hay")
+	}
+}
+
+func TestLoadCertificatesForStatePKCS11HintsWithoutTokenCertsRetriesDefaultDiscovery(t *testing.T) {
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"defaultKeyStore":    []string{"PKCS11"},
+			"defaultKeyStoreLib": []string{"/opt/lib/nonworking-p11.so"},
+		},
+	}
+
+	oldGet := getSystemCertificatesFunc
+	oldGetWithOpts := getSystemCertificatesWithOptionsFunc
+	getSystemCertificatesWithOptionsFunc = func(opts certstore.Options) ([]protocol.Certificate, error) {
+		// Simula que el módulo indicado no aporta certificados PKCS11, solo sistema.
+		return []protocol.Certificate{
+			{ID: "sys1", Source: "system", CanSign: true, Content: []byte{0x10}},
+		}, nil
+	}
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		// Descubrimiento por defecto sí encuentra token.
+		return []protocol.Certificate{
+			{ID: "pk1", Source: "smartcard", CanSign: true, Content: []byte{0x20}},
+		}, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGet
+		getSystemCertificatesWithOptionsFunc = oldGetWithOpts
+	}()
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil || len(certs) != 1 || certs[0].ID != "pk1" {
+		t.Fatalf("debe reintentar descubrimiento PKCS11 por defecto si hints no devuelven token, certs=%#v err=%v", certs, err)
+	}
+}
+
 func TestProcessProtocolRequestLoadWithoutPathReturnsSaf25(t *testing.T) {
 	s := NewWebSocketServer([]int{63117}, "", nil)
 	got := strings.TrimSpace(s.processProtocolRequest("afirma://load?id=1"))
@@ -690,6 +1145,62 @@ func TestApplySelectCertFiltersSubjectContains(t *testing.T) {
 	}
 }
 
+func TestApplySelectCertFiltersReadsPropertiesCaseInsensitive(t *testing.T) {
+	certs := []protocol.Certificate{
+		{
+			ID:      "1",
+			Subject: map[string]string{"CN": "Juan Perez"},
+			Issuer:  map[string]string{"CN": "ACME CA"},
+			Content: []byte{0x01},
+			CanSign: true,
+		},
+		{
+			ID:      "2",
+			Subject: map[string]string{"CN": "Maria Lopez"},
+			Issuer:  map[string]string{"CN": "ACME CA"},
+			Content: []byte{0x02},
+			CanSign: true,
+		},
+	}
+	propsBody := "filter=subject.contains:maria\n"
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"Properties": []string{base64.StdEncoding.EncodeToString([]byte(propsBody))},
+		},
+	}
+	filtered, _ := applySelectCertFilters(certs, state)
+	if len(filtered) != 1 || filtered[0].ID != "2" {
+		t.Fatalf("filtrado case-insensitive de properties inesperado: %#v", filtered)
+	}
+}
+
+func TestApplySelectCertFiltersPropertyKeysCaseInsensitive(t *testing.T) {
+	certs := []protocol.Certificate{
+		{
+			ID:      "1",
+			Subject: map[string]string{"CN": "Juan Perez"},
+			Issuer:  map[string]string{"CN": "ACME CA"},
+			Content: []byte{0x01},
+			CanSign: true,
+		},
+	}
+	propsBody := "FILTER=subject.contains:juan\nMANDATORYCERTSELECTION=false\n"
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"properties": []string{base64.StdEncoding.EncodeToString([]byte(propsBody))},
+		},
+	}
+	filtered, opts := applySelectCertFilters(certs, state)
+	if len(filtered) != 1 || filtered[0].ID != "1" {
+		t.Fatalf("filtro con clave FILTER no aplicado correctamente: %#v", filtered)
+	}
+	if !opts.autoSelectWhenSingle {
+		t.Fatalf("mandatoryCertSelection case-insensitive debe activar autoSelectWhenSingle")
+	}
+}
+
 func TestProcessSelectCertRequestMandatorySelectionFalseSkipsDialog(t *testing.T) {
 	s := NewWebSocketServer([]int{63117}, "", &UI{})
 	state := &ProtocolState{
@@ -737,5 +1248,55 @@ func TestProcessSelectCertRequestMandatorySelectionFalseSkipsDialog(t *testing.T
 	}
 	if dialogCalls != 0 {
 		t.Fatalf("no debia abrir dialogo con mandatoryCertSelection=false, llamadas=%d", dialogCalls)
+	}
+}
+
+func TestProcessSelectCertRequestMandatorySelectionFalseWithMultipleShowsDialog(t *testing.T) {
+	s := NewWebSocketServer([]int{63117}, "", &UI{})
+	state := &ProtocolState{
+		Action: "selectcert",
+		Params: url.Values{
+			"properties": []string{
+				base64.StdEncoding.EncodeToString([]byte("mandatoryCertSelection=false\n")),
+			},
+		},
+	}
+
+	oldGetCerts := getSystemCertificatesFunc
+	oldSelectCertDialog := selectCertDialogFunc
+	getSystemCertificatesFunc = func() ([]protocol.Certificate, error) {
+		return []protocol.Certificate{
+			{
+				ID:      "cert1",
+				CanSign: true,
+				Content: []byte{0x30, 0x82, 0x01, 0x0A},
+				Subject: map[string]string{"CN": "Juan Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+			{
+				ID:      "cert2",
+				CanSign: true,
+				Content: []byte{0x30, 0x82, 0x01, 0x0B},
+				Subject: map[string]string{"CN": "Otro Cert"},
+				Issuer:  map[string]string{"CN": "CA"},
+			},
+		}, nil
+	}
+	dialogCalls := 0
+	selectCertDialogFunc = func(certs []protocol.Certificate) (int, bool, error) {
+		dialogCalls++
+		return 1, false, nil
+	}
+	defer func() {
+		getSystemCertificatesFunc = oldGetCerts
+		selectCertDialogFunc = oldSelectCertDialog
+	}()
+
+	got := s.processSelectCertRequest(state)
+	if strings.HasPrefix(strings.ToUpper(got), "SAF_") || got == "CANCEL" {
+		t.Fatalf("resultado inesperado: %q", got)
+	}
+	if dialogCalls != 1 {
+		t.Fatalf("con mandatoryCertSelection=false y varios certificados debe abrir dialogo, llamadas=%d", dialogCalls)
 	}
 }

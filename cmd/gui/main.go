@@ -6,11 +6,11 @@ package main
 
 import (
 	"autofirma-host/pkg/applog"
+	"fmt"
 	"flag"
 	"log"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 
 	"gioui.org/app"
@@ -145,11 +145,11 @@ func loop(w *app.Window, ui *UI) error {
 		// Clean quotes if present
 		arg = strings.Trim(arg, "\"'")
 
-		if strings.Contains(arg, "afirma://") {
+		if strings.Contains(strings.ToLower(arg), "afirma://") {
 			log.Printf("Protocol detected in arg: %s", arg)
 
-			// Detect if it is just a "websocket" launch command
-			if strings.Contains(arg, "afirma://websocket") {
+			// Detect websocket launch using robust URI parser.
+			if _, wsErr := parseWebSocketLaunchURI(arg); wsErr == nil {
 				log.Println("Detected 'afirma://websocket' launch request.")
 				handleWebSocketLaunch(arg, ui)
 				// Do NOT exit, keep running to serve
@@ -158,7 +158,9 @@ func loop(w *app.Window, ui *UI) error {
 				ui.HandleProtocolInit(arg)
 			}
 		} else {
-			log.Printf("Arg present but no protocol detected: %s", arg)
+			if !strings.HasPrefix(arg, "-") {
+				log.Printf("Arg present but no protocol detected: %s", arg)
+			}
 		}
 	}
 
@@ -185,64 +187,16 @@ func loop(w *app.Window, ui *UI) error {
 
 func handleWebSocketLaunch(uriString string, ui *UI) {
 	log.Printf("[Launcher] Handling WebSocket launch request. Raw URI: %s", uriString)
-
-	// Parse ports from URI: afirma://websocket?ports=123,456&...
-	// Strip proto
-	cleanURI := uriString
-	if strings.HasPrefix(cleanURI, "afirma://") {
-		cleanURI = strings.TrimPrefix(cleanURI, "afirma://")
-	}
-
-	log.Printf("[Launcher] Clean URI for parsing: %s", cleanURI)
-
-	// Handle potential standard URL parsing
-	parts := strings.Split(cleanURI, "?")
-	if len(parts) < 2 {
-		log.Println("[Launcher] No parameters found in websocket launch URI (split failed)")
+	req, err := parseWebSocketLaunchURI(uriString)
+	if err != nil {
+		log.Printf("[Launcher] Invalid websocket launch URI: %v", err)
 		return
 	}
 
-	log.Printf("[Launcher] Query params string: %s", parts[1])
-
-	params := PartsToValues(parts[1])
-	portsStr := params.Get("ports")
-	sessionID := params.Get("idsession")
-	version := parseProtocolVersion(params.Get("v"))
-
-	if portsStr == "" {
-		log.Println("[Launcher] No 'ports' parameter found via params.Get('ports')")
-		// Try manual search in case of encoding weirdness
-		if strings.Contains(parts[1], "ports=") {
-			log.Println("[Launcher] 'ports=' found in string but parsing failed? dumping params map...")
-			for k, v := range params {
-				log.Printf("Key: %s, Val: %v", k, v)
-			}
-		}
-		return
-	}
-
-	log.Printf("[Launcher] Found ports string: %s", portsStr)
-
-	portStrs := strings.Split(portsStr, ",")
-	var ports []int
-	for _, pStr := range portStrs {
-		pStr = strings.TrimSpace(pStr)
-		if p, err := strconv.Atoi(pStr); err == nil {
-			ports = append(ports, p)
-		} else {
-			log.Printf("[Launcher] Failed to parse port '%s': %v", pStr, err)
-		}
-	}
-
-	if len(ports) == 0 {
-		log.Println("[Launcher] No valid ports found to bind after parsing")
-		return
-	}
-
-	log.Printf("[Launcher] Starting WebSocket server on one of requested ports: %v (v=%d session=%s)", ports, version, maskSessionForLog(sessionID))
+	log.Printf("[Launcher] Starting WebSocket server on one of requested ports: %v (v=%d session=%s)", req.Ports, req.Version, maskSessionForLog(req.SessionID))
 
 	// Start server (async)
-	server := NewWebSocketServer(ports, sessionID, ui)
+	server := NewWebSocketServer(req.Ports, req.SessionID, ui)
 	if err := server.Start(); err != nil {
 		log.Printf("[Launcher] Failed to start WebSocket server via launch: %v", err)
 	} else {
@@ -253,6 +207,52 @@ func handleWebSocketLaunch(uriString string, ui *UI) {
 		ui.StatusMsg = "Servidor AutoFirma activo. Esperando solicitudes del navegador..."
 		ui.Window.Invalidate()
 	}
+}
+
+type websocketLaunchRequest struct {
+	Ports     []int
+	SessionID string
+	Version   int
+}
+
+func parseWebSocketLaunchURI(uriString string) (*websocketLaunchRequest, error) {
+	u, err := url.Parse(strings.TrimSpace(uriString))
+	if err != nil {
+		return nil, fmt.Errorf("uri invalida: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "afirma") {
+		return nil, fmt.Errorf("esquema no soportado")
+	}
+	action := normalizeProtocolAction(extractProtocolAction(u))
+	if action == "" {
+		action = normalizeProtocolAction(getQueryParam(u.Query(), "op", "operation", "action"))
+	}
+	if action != "websocket" {
+		return nil, fmt.Errorf("accion no websocket")
+	}
+
+	params := u.Query()
+	notifyIfInsecureJavaScriptVersion(params)
+	version := parseRequestedProtocolVersionWithDefault(params, 4)
+	if !isSupportedWebSocketProtocolVersion(version) {
+		return nil, fmt.Errorf("version de protocolo no soportada: %d", version)
+	}
+
+	portsRaw := getQueryParam(params, "ports", "port", "portsList")
+	ports := []int{DefaultWebSocketPort}
+	if strings.TrimSpace(portsRaw) != "" {
+		parsedPorts, err := parsePortsList(portsRaw)
+		if err != nil {
+			return nil, fmt.Errorf("puertos invalidos")
+		}
+		ports = parsedPorts
+	}
+
+	return &websocketLaunchRequest{
+		Ports:     ports,
+		SessionID: getQueryParam(params, "idsession", "idSession"),
+		Version:   version,
+	}, nil
 }
 
 // PartsToValues simple parser for query string

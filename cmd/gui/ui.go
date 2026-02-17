@@ -154,9 +154,26 @@ func NewUI(w *app.Window) *UI {
 
 	// Load certificates in background
 	go ui.loadCertificates()
-	go ui.checkUpdates(true)
+	if shouldRunAutoUpdateCheck() {
+		go ui.checkUpdates(true)
+	} else {
+		log.Printf("[Update] Auto-check omitido en modo servidor/websocket")
+	}
 
 	return ui
+}
+
+func shouldRunAutoUpdateCheck() bool {
+	if serverModeFlag != nil && *serverModeFlag {
+		return false
+	}
+	for i := 1; i < len(os.Args); i++ {
+		arg := strings.ToLower(strings.Trim(os.Args[i], "\"'"))
+		if strings.HasPrefix(arg, "afirma://websocket") {
+			return false
+		}
+	}
+	return true
 }
 
 func (ui *UI) browseFile() {
@@ -1003,7 +1020,7 @@ func (ui *UI) verifyCurrentFile() {
 		}()
 
 		// Java-compatible active waiting: keep transaction alive while user signs.
-		if ui.Protocol != nil && ui.Protocol.STServlet != "" && ui.Protocol.RequestID != "" {
+		if ui.Protocol != nil && ui.Protocol.ActiveWaiting && ui.Protocol.STServlet != "" && ui.Protocol.RequestID != "" {
 			log.Printf("[UI] Starting active WAIT loop (id=%s)", ui.Protocol.RequestID)
 			stopWait = make(chan struct{})
 			ui.PendingWork.Add(1)
@@ -1192,7 +1209,7 @@ func (ui *UI) signCurrentFile() {
 		}()
 
 		// Java-compatible active waiting while user signs and result is uploaded.
-		if ui.Protocol != nil && ui.Protocol.STServlet != "" && ui.Protocol.RequestID != "" {
+		if ui.Protocol != nil && ui.Protocol.ActiveWaiting && ui.Protocol.STServlet != "" && ui.Protocol.RequestID != "" {
 			log.Printf("[UI] Starting active WAIT loop for sign (id=%s)", ui.Protocol.RequestID)
 			stopWait = make(chan struct{})
 			ui.PendingWork.Add(1)

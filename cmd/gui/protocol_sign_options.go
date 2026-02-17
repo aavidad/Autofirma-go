@@ -19,7 +19,7 @@ func buildProtocolSignOptions(state *ProtocolState, format string) map[string]in
 
 	opts := map[string]interface{}{}
 
-	props := decodeProtocolProperties(state.Params.Get("properties"))
+	props := decodeProtocolProperties(getQueryParam(state.Params, "properties"))
 	for k, v := range props {
 		applyProtocolSignOption(opts, k, v)
 	}
@@ -33,11 +33,32 @@ func buildProtocolSignOptions(state *ProtocolState, format string) map[string]in
 
 	applyProtocolVisibleGeometry(opts)
 	expandProtocolPolicyOptions(opts, format)
+	applyProtocolStoreHints(opts, state)
 	if len(opts) == 0 {
 		return nil
 	}
 	log.Printf("[Protocol] Sign options built format=%s keys=%s", format, protocolOptionKeys(opts))
 	return opts
+}
+
+func applyProtocolStoreHints(opts map[string]interface{}, state *ProtocolState) {
+	if state == nil {
+		return
+	}
+	if store := strings.TrimSpace(getQueryParam(state.Params,
+		"defaultkeystore", "defaultKeyStore", "keystore", "keyStore")); store != "" {
+		opts["_defaultKeyStore"] = store
+	}
+	if lib := strings.TrimSpace(getQueryParam(state.Params,
+		"defaultkeystorelib", "defaultKeyStoreLib", "keystorelib", "keyStoreLib")); lib != "" {
+		opts["_defaultKeyStoreLib"] = lib
+	}
+	if shouldDisableExternalStoresInState(state) {
+		opts["_disableOpeningExternalStores"] = true
+	}
+	if pin := strings.TrimSpace(getQueryParam(state.Params, "pin")); pin != "" {
+		opts["_pin"] = pin
+	}
 }
 
 func mergeSignOptions(base, overlay map[string]interface{}) map[string]interface{} {
@@ -138,6 +159,8 @@ func applyProtocolSignOption(opts map[string]interface{}, rawKey, rawValue strin
 		opts["precalculatedHashAlgorithm"] = val
 	case "signaturesubfilter":
 		opts["signatureSubFilter"] = val
+	case "pin":
+		opts["_pin"] = val
 	}
 }
 
@@ -293,7 +316,7 @@ func mergePropertiesParam(params url.Values) map[string]string {
 		}
 		props[k] = vs[len(vs)-1]
 	}
-	for k, v := range parsePropertiesFromBase64Param(params.Get("properties")) {
+	for k, v := range parsePropertiesFromBase64Param(getQueryParam(params, "properties")) {
 		props[k] = v
 	}
 	return props

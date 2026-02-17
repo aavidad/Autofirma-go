@@ -10,29 +10,80 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"autofirma-host/pkg/protocol"
 )
 
+// Options controls how certificate stores are queried.
+type Options struct {
+	// PKCS11ModulePaths optionally restricts PKCS#11 lookup to specific module paths.
+	PKCS11ModulePaths []string
+	// IncludePKCS11 controls whether PKCS#11 stores are queried.
+	// Default should be true for compatibility.
+	IncludePKCS11 bool
+}
+
 // GetSystemCertificates returns all certificates from system stores
 // Platform-specific implementations in windows.go, linux.go, darwin.go
 func GetSystemCertificates() ([]protocol.Certificate, error) {
-	var allCerts []protocol.Certificate
+	return GetSystemCertificatesWithOptions(Options{IncludePKCS11: true})
+}
+
+// GetSystemCertificatesWithOptions returns all certificates from system stores
+// with optional source-specific hints.
+func GetSystemCertificatesWithOptions(opts Options) ([]protocol.Certificate, error) {
+	allCerts := make([]protocol.Certificate, 0, 16)
+	seen := make(map[string]struct{}, 32)
 
 	// Get certificates from platform-specific store
 	systemCerts, err := getSystemCertificatesImpl()
 	if err == nil {
-		allCerts = append(allCerts, systemCerts...)
+		allCerts = appendUniqueCertificates(allCerts, seen, systemCerts)
 	}
 
 	// Get certificates from PKCS#11 devices (DNIe, smart cards)
-	pkcs11Certs, err := getPKCS11Certificates()
-	if err == nil {
-		allCerts = append(allCerts, pkcs11Certs...)
+	if opts.IncludePKCS11 {
+		pkcs11Certs, err := getPKCS11CertificatesWithModules(opts.PKCS11ModulePaths)
+		if err == nil {
+			allCerts = appendUniqueCertificates(allCerts, seen, pkcs11Certs)
+		}
 	}
 
 	return allCerts, nil
+}
+
+func appendUniqueCertificates(dst []protocol.Certificate, seen map[string]struct{}, src []protocol.Certificate) []protocol.Certificate {
+	for _, c := range src {
+		key := certificateUniqueKey(c)
+		if key == "" {
+			// Conservative behavior: if no stable key can be built, keep cert.
+			dst = append(dst, c)
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		dst = append(dst, c)
+	}
+	return dst
+}
+
+func certificateUniqueKey(c protocol.Certificate) string {
+	if fp := strings.TrimSpace(strings.ToLower(c.Fingerprint)); fp != "" {
+		return "fp:" + fp
+	}
+	if len(c.Content) > 0 {
+		sum := sha256.Sum256(c.Content)
+		return "der:" + hex.EncodeToString(sum[:])
+	}
+	if pem := strings.TrimSpace(c.PEM); pem != "" {
+		sum := sha256.Sum256([]byte(pem))
+		return "pem:" + hex.EncodeToString(sum[:])
+	}
+	return ""
 }
 
 // ParseCertificate converts x509.Certificate to protocol.Certificate

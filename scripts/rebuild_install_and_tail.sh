@@ -30,6 +30,9 @@ if [[ "${TAIL_LOG}" -eq 1 ]]; then
   touch "${LOG_FILE}"
   echo
   echo "Siguiendo log (Ctrl+C para salir):"
-  tail -f "${LOG_FILE}" | rg -n "Received: afirma://sign|Sign format resolved|Sign success|Sign unsupported|Sent result|SAF_|ERR-"
+  if command -v rg >/dev/null 2>&1; then
+    tail -f "${LOG_FILE}" | rg -n "Received: afirma://sign|Sign format resolved|Sign success|Sign unsupported|Sent result|SAF_|ERR-"
+  else
+    tail -f "${LOG_FILE}" | grep -nE "Received: afirma://sign|Sign format resolved|Sign success|Sign unsupported|Sent result|SAF_|ERR-"
+  fi
 fi
-

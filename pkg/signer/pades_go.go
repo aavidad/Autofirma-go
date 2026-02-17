@@ -82,7 +82,7 @@ func signPadesWithGo(inputFile, p12Path, p12Password string, options map[string]
 		Certificate:       cert,
 		CertificateChains: chains,
 	}
-	applyPadesAppearanceOptions(&signData, options)
+	applyPadesAppearanceOptions(&signData, options, cert, info.Date)
 
 	if tsaURL := strings.TrimSpace(optionString(options, "tsaURL", "")); tsaURL != "" {
 		signData.TSA.URL = tsaURL
@@ -135,7 +135,7 @@ func signPadesWithWindowsStoreGo(inputFile string, certInfo *protocol.Certificat
 		DigestAlgorithm: resolveDigestHash(options, crypto.SHA256),
 		Certificate:     leaf,
 	}
-	applyPadesAppearanceOptions(&signData, options)
+	applyPadesAppearanceOptions(&signData, options, leaf, info.Date)
 
 	if tsaURL := strings.TrimSpace(optionString(options, "tsaURL", "")); tsaURL != "" {
 		signData.TSA.URL = tsaURL
@@ -558,7 +558,7 @@ func optionUint32(options map[string]interface{}, key string, def uint32) uint32
 	return def
 }
 
-func applyPadesAppearanceOptions(signData *pdfsign.SignData, options map[string]interface{}) {
+func applyPadesAppearanceOptions(signData *pdfsign.SignData, options map[string]interface{}, cert *x509.Certificate, signingTime time.Time) {
 	if signData == nil {
 		return
 	}
@@ -584,6 +584,7 @@ func applyPadesAppearanceOptions(signData *pdfsign.SignData, options map[string]
 	signData.Appearance.LowerLeftY = y
 	signData.Appearance.UpperRightX = x + w
 	signData.Appearance.UpperRightY = y + h
+	signData.Appearance.Text = buildPadesVisibleSignatureText(cert, signingTime)
 }
 
 func buildCertificateLabel(options map[string]interface{}) string {
@@ -599,4 +600,14 @@ func buildCertificateLabel(options map[string]interface{}) string {
 	default:
 		return "Certificado digital cualificado"
 	}
+}
+
+func buildPadesVisibleSignatureText(cert *x509.Certificate, signingTime time.Time) string {
+	cn := "Desconocido"
+	if cert != nil {
+		if v := strings.TrimSpace(cert.Subject.CommonName); v != "" {
+			cn = v
+		}
+	}
+	return "CN=" + cn + "\nFirmado el " + signingTime.Format("02/01/2006 15:04:05") + " por un certificado de la FNMT"
 }

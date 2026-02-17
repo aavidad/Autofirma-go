@@ -25,3 +25,5 @@ require (
 	golang.org/x/image v0.26.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 )
+
+replace github.com/digitorus/pdfsign => ./third_party/pdfsign

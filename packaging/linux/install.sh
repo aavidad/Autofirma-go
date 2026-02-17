@@ -18,6 +18,41 @@ if [[ -n "${USER_NAME}" ]]; then
   USER_HOME="$(getent passwd "${USER_NAME}" | cut -d: -f6 || true)"
 fi
 
+stop_running_instances() {
+  echo "[install] Checking running Autofirma instances..."
+  local patterns=(
+    "/opt/autofirma-dipgra/autofirma-desktop"
+    "/autofirma-web-compat"
+    "/autofirma-desktop --server"
+    "/autofirma-desktop afirma://websocket"
+  )
+  local found=0
+  local pat pid_list
+  for pat in "${patterns[@]}"; do
+    pid_list="$(pgrep -f "${pat}" 2>/dev/null || true)"
+    if [[ -n "${pid_list}" ]]; then
+      found=1
+      echo "[install] Stopping processes matching: ${pat}"
+      while IFS= read -r pid; do
+        [[ -n "${pid}" ]] || continue
+        kill -TERM "${pid}" 2>/dev/null || true
+      done <<< "${pid_list}"
+    fi
+  done
+  if [[ "${found}" -eq 1 ]]; then
+    sleep 1
+    for pat in "${patterns[@]}"; do
+      pid_list="$(pgrep -f "${pat}" 2>/dev/null || true)"
+      if [[ -n "${pid_list}" ]]; then
+        while IFS= read -r pid; do
+          [[ -n "${pid}" ]] || continue
+          kill -KILL "${pid}" 2>/dev/null || true
+        done <<< "${pid_list}"
+      fi
+    done
+  fi
+}
+
 append_unique() {
   local val="$1"
   shift || true
@@ -108,6 +143,8 @@ if [[ ! -d "${APP_SRC}" ]]; then
   echo "ERROR: payload not found at ${APP_SRC}" >&2
   exit 1
 fi
+
+stop_running_instances
 
 echo "[install] Installing into ${PREFIX}"
 mkdir -p "${PREFIX}"

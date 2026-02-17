@@ -11,22 +11,42 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"autofirma-host/pkg/protocol"
+)
+
+var (
+	lookupCertificateByIDFunc  = getCertificateByID
+	exportCertificateToP12Func = exportCertificateToP12
+	signPKCS1PKCS11Func        = signPKCS1WithPKCS11
 )
 
 // SignPKCS1 signs arbitrary pre-sign data with the selected certificate private key.
 // It returns the PKCS#1 signature encoded in standard Base64.
 func SignPKCS1(preSignData []byte, certificateID string, algorithm string) (string, error) {
+	return SignPKCS1WithOptions(preSignData, certificateID, algorithm, nil)
+}
+
+// SignPKCS1WithOptions signs arbitrary pre-sign data with the selected certificate private key.
+// It allows passing store-selection hints for certificate lookup parity with protocol operations.
+func SignPKCS1WithOptions(preSignData []byte, certificateID string, algorithm string, options map[string]interface{}) (string, error) {
 	if len(preSignData) == 0 {
 		return "", fmt.Errorf("datos de prefirma vacios")
 	}
-	cert, nickname, err := getCertificateByID(strings.TrimSpace(certificateID))
+	cert, nickname, err := lookupCertificateByIDFunc(strings.TrimSpace(certificateID), options)
 	if err != nil || cert == nil {
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
 	}
 
 	tmpPassword := fmt.Sprintf("auto-pk1-%d-%d", time.Now().UnixNano(), os.Getpid())
-	p12Path, err := exportCertificateToP12(nickname, tmpPassword)
+	p12Path, err := exportCertificateToP12Func(nickname, tmpPassword)
 	if err != nil {
+		if shouldTryPKCS11DirectSign(cert, options) {
+			sig, pkcs11Err := signPKCS1PKCS11Func(preSignData, cert, algorithm, options)
+			if pkcs11Err == nil && len(sig) > 0 {
+				return base64.StdEncoding.EncodeToString(sig), nil
+			}
+		}
 		return "", fmt.Errorf("fallo al exportar certificado: %v", err)
 	}
 	defer os.Remove(p12Path)
@@ -72,4 +92,16 @@ func SignPKCS1(preSignData []byte, certificateID string, algorithm string) (stri
 		return "", fmt.Errorf("firma PKCS#1 vacia")
 	}
 	return base64.StdEncoding.EncodeToString(sig), nil
+}
+
+func shouldTryPKCS11DirectSign(cert *protocol.Certificate, options map[string]interface{}) bool {
+	if cert == nil {
+		return false
+	}
+	src := strings.ToLower(strings.TrimSpace(cert.Source))
+	if src == "smartcard" || src == "dnie" {
+		return true
+	}
+	store := strings.ToUpper(strings.TrimSpace(optionString(options, "_defaultKeyStore", "")))
+	return store == "PKCS11"
 }

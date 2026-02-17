@@ -10,6 +10,8 @@ import (
 	"autofirma-host/pkg/protocol"
 	"autofirma-host/pkg/signer"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -40,14 +42,16 @@ var upgrader = websocket.Upgrader{
 }
 
 var (
-	getSystemCertificatesFunc = certstore.GetSystemCertificates
-	selectCertDialogFunc      = protocolSelectCertDialog
-	saveDialogFunc            = protocolSaveDialog
-	loadDialogFunc            = protocolLoadDialog
-	signDataFunc              = signer.SignData
-	coSignDataFunc            = signer.CoSignData
-	counterSignDataFunc       = signer.CounterSignData
-	signPKCS1Func             = signer.SignPKCS1
+	getSystemCertificatesFunc            = certstore.GetSystemCertificates
+	getSystemCertificatesWithOptionsFunc = certstore.GetSystemCertificatesWithOptions
+	selectCertDialogFunc                 = protocolSelectCertDialog
+	saveDialogFunc                       = protocolSaveDialog
+	loadDialogFunc                       = protocolLoadDialog
+	signDataFunc                         = signer.SignData
+	coSignDataFunc                       = signer.CoSignData
+	counterSignDataFunc                  = signer.CounterSignData
+	signPKCS1Func                        = signer.SignPKCS1
+	signPKCS1WithOptionsFunc             = signer.SignPKCS1WithOptions
 )
 
 type WebSocketServer struct {
@@ -65,15 +69,17 @@ type WebSocketServer struct {
 	serviceListener      net.Listener
 	serviceFragments     []string
 	serviceResponseParts []string
+	serviceProtocolVer   int
 }
 
 func NewWebSocketServer(ports []int, sessionID string, ui *UI) *WebSocketServer {
 	return &WebSocketServer{
-		ports:    ports,
-		session:  strings.TrimSpace(sessionID),
-		ui:       ui,
-		stopChan: make(chan struct{}),
-		store:    make(map[string]string),
+		ports:              ports,
+		session:            strings.TrimSpace(sessionID),
+		ui:                 ui,
+		stopChan:           make(chan struct{}),
+		store:              make(map[string]string),
+		serviceProtocolVer: 1,
 	}
 }
 
@@ -276,8 +282,13 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			// Normal closure or error
-			if !websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			errLower := strings.ToLower(err.Error())
+			switch {
+			case websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure):
+				// Normal close path; no extra log noise.
+			case websocket.IsCloseError(err, websocket.CloseAbnormalClosure) || strings.Contains(errLower, "unexpected eof"):
+				log.Printf("[WebSocket] Client disconnected abruptly")
+			default:
 				log.Printf("[WebSocket] Read error: %v", err)
 			}
 			break
@@ -369,6 +380,12 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 	}
 	state, err := ParseProtocolURI(uriString)
 	if err != nil {
+		if errors.Is(err, errMinimumClientVersionNotSatisfied) {
+			return s.formatError("ERROR_MINIMUM_VERSION_NOT_SATISFIED", err.Error())
+		}
+		if errors.Is(err, errUnsupportedProcedureVersion) {
+			return s.formatError("ERROR_UNSUPPORTED_PROCEDURE", err.Error())
+		}
 		return s.formatError("ERROR_PARSING_URI", err.Error())
 	}
 	action := normalizeProtocolAction(state.Action)
@@ -452,7 +469,7 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 	sigBytes, _ := base64.StdEncoding.DecodeString(sigResult.SignatureB64)
 
 	// Helper to encrypt/encode depending on 'key' param
-	resp, err := s.buildResponse(sigResult.CertDER, sigBytes, state.Key)
+	resp, err := s.buildResponse(sigResult.CertDER, sigBytes, state.Key, buildProtocolExtraInfo(state, filePath))
 	if err != nil {
 		return s.formatError("ERROR_BUILD_RESP", err.Error())
 	}
@@ -468,10 +485,11 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 }
 
 func (s *WebSocketServer) processSelectCertRequest(state *ProtocolState) string {
-	certs, err := getSystemCertificatesFunc()
+	certs, err := loadCertificatesForState(state)
 	if err != nil {
 		return "SAF_08: Error accediendo al almacen de certificados"
 	}
+	certs, storeFilter := filterSelectCertByDefaultStore(certs, state)
 	if len(certs) == 0 {
 		return "SAF_19: No hay certificados disponibles"
 	}
@@ -495,11 +513,14 @@ func (s *WebSocketServer) processSelectCertRequest(state *ProtocolState) string 
 	}
 	filtered, filterOpts := applySelectCertFilters(certs, state)
 	log.Printf(
-		"[WebSocket] selectcert candidates total=%d filtered=%d auto_selection=%t sticky=%t",
+		"[WebSocket] selectcert candidates total=%d filtered=%d auto_selection=%t auto_single=%t sticky=%t allow_external_stores=%t store_filter=%s",
 		len(certs),
 		len(filtered),
 		filterOpts.forceAutoSelection,
+		filterOpts.autoSelectWhenSingle,
 		sticky,
+		filterOpts.allowExternalStores,
+		storeFilter,
 	)
 	if len(filtered) == 0 {
 		return "SAF_19: No hay certificados disponibles"
@@ -512,18 +533,22 @@ func (s *WebSocketServer) processSelectCertRequest(state *ProtocolState) string 
 
 	if s.ui != nil && !filterOpts.forceAutoSelection {
 		if !(sticky && s.stickyID != "" && findCertificateIndexByID(certs, s.stickyID) >= 0) {
-			chosenIdx, canceled, selErr := selectCertDialogFunc(filtered)
-			if canceled {
-				return "CANCEL"
+			// Java parity: mandatoryCertSelection=false omits the dialog only when
+			// there is a single candidate after filtering.
+			if !(filterOpts.autoSelectWhenSingle && len(filtered) == 1) {
+				chosenIdx, canceled, selErr := selectCertDialogFunc(filtered)
+				if canceled {
+					return "CANCEL"
+				}
+				if selErr != nil {
+					log.Printf("[WebSocket] selectcert dialog error: %v", selErr)
+					return "SAF_08: Error accediendo al almacen de certificados"
+				}
+				if chosenIdx < 0 || chosenIdx >= len(filtered) || len(filtered[chosenIdx].Content) == 0 {
+					return "SAF_19: No hay certificados disponibles"
+				}
+				idx = chosenIdx
 			}
-			if selErr != nil {
-				log.Printf("[WebSocket] selectcert dialog error: %v", selErr)
-				return "SAF_08: Error accediendo al almacen de certificados"
-			}
-			if chosenIdx < 0 || chosenIdx >= len(filtered) || len(filtered[chosenIdx].Content) == 0 {
-				return "SAF_19: No hay certificados disponibles"
-			}
-			idx = chosenIdx
 		}
 	}
 	if sticky && idx >= 0 && idx < len(filtered) {
@@ -536,6 +561,206 @@ func (s *WebSocketServer) processSelectCertRequest(state *ProtocolState) string 
 		return "SAF_12: Error preparando respuesta de certificado"
 	}
 	return resp
+}
+
+func loadCertificatesForState(state *ProtocolState) ([]protocol.Certificate, error) {
+	storePref := resolveDefaultKeyStorePreference(state)
+	moduleHints := resolvePKCS11ModuleHints(state)
+	includePKCS11 := shouldIncludePKCS11ForStore(storePref)
+	if includePKCS11 && shouldDisableExternalStoresInState(state) && storePref != "PKCS11" {
+		includePKCS11 = false
+		log.Printf("[SelectCert] PKCS11 scan disabled by disableopeningexternalstores")
+	}
+	if len(moduleHints) == 0 && includePKCS11 {
+		return getSystemCertificatesFunc()
+	}
+	if len(moduleHints) > 0 {
+		log.Printf("[SelectCert] PKCS11 module hints requested (%d): %s", len(moduleHints), summarizeModuleHints(moduleHints))
+	}
+	if !includePKCS11 {
+		log.Printf("[SelectCert] PKCS11 scan skipped by defaultKeyStore=%s", storePref)
+	}
+	certs, err := getSystemCertificatesWithOptionsFunc(certstore.Options{
+		PKCS11ModulePaths: moduleHints,
+		IncludePKCS11:     includePKCS11,
+	})
+	if err == nil {
+		if len(moduleHints) > 0 && storePref == "PKCS11" && !hasPKCS11Certificates(certs) {
+			log.Printf("[SelectCert] no PKCS11 certificates found using hints, retrying with default PKCS11 discovery")
+			return getSystemCertificatesFunc()
+		}
+		log.Printf("[SelectCert] options loader returned %d certificates", len(certs))
+		return certs, nil
+	}
+	log.Printf("[SelectCert] defaultKeyStoreLib hints failed, fallback to default loader: %v", err)
+	return getSystemCertificatesFunc()
+}
+
+func resolvePKCS11ModuleHints(state *ProtocolState) []string {
+	if state == nil {
+		return nil
+	}
+	store := resolveDefaultKeyStorePreference(state)
+	if store != "PKCS11" {
+		return nil
+	}
+	raw := strings.TrimSpace(getQueryParam(state.Params,
+		"defaultkeystorelib", "defaultKeyStoreLib", "keystorelib", "keyStoreLib"))
+	if raw == "" {
+		return nil
+	}
+	return splitStoreLibHints(raw)
+}
+
+func resolveDefaultKeyStorePreference(state *ProtocolState) string {
+	if state == nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(getQueryParam(state.Params,
+		"defaultkeystore", "defaultKeyStore", "keystore", "keyStore")))
+}
+
+func shouldIncludePKCS11ForStore(store string) bool {
+	store = strings.ToUpper(strings.TrimSpace(store))
+	switch store {
+	case "":
+		return true
+	case "PKCS11":
+		return true
+	case "MOZ_UNI", "SHARED_NSS", "MOZILLA", "WINDOWS", "WINADDRESSBOOK", "APPLE", "MACOS", "KEYCHAIN":
+		return false
+	default:
+		return true
+	}
+}
+
+func shouldDisableExternalStoresInState(state *ProtocolState) bool {
+	if state == nil {
+		return false
+	}
+	rawProps := getQueryParam(state.Params, "properties")
+	props := decodeProtocolProperties(rawProps)
+	groups := extractFilterGroups(props)
+	return containsDisableOpeningExternalStoresFilter(groups)
+}
+
+func splitStoreLibHints(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ';' || r == ',' })
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+func summarizeModuleHints(hints []string) string {
+	if len(hints) == 0 {
+		return "none"
+	}
+	max := len(hints)
+	if max > 3 {
+		max = 3
+	}
+	out := make([]string, 0, max+1)
+	for i := 0; i < max; i++ {
+		base := strings.TrimSpace(filepath.Base(hints[i]))
+		if base == "" || base == "." || base == string(filepath.Separator) {
+			base = "<unknown>"
+		}
+		out = append(out, base)
+	}
+	if len(hints) > max {
+		out = append(out, fmt.Sprintf("+%d more", len(hints)-max))
+	}
+	return strings.Join(out, ",")
+}
+
+func hasPKCS11Certificates(certs []protocol.Certificate) bool {
+	for _, c := range certs {
+		src := strings.ToLower(strings.TrimSpace(c.Source))
+		if src == "smartcard" || src == "dnie" {
+			return true
+		}
+	}
+	return false
+}
+
+func filterSelectCertByDefaultStore(certs []protocol.Certificate, state *ProtocolState) ([]protocol.Certificate, string) {
+	if len(certs) == 0 || state == nil {
+		return certs, "none"
+	}
+	store := resolveDefaultKeyStorePreference(state)
+	if store == "" {
+		return certs, "none"
+	}
+
+	// Best-effort compatibility: apply only when mapping is explicit.
+	// Unknown values keep previous behavior (no filtering).
+	switch store {
+	case "PKCS11":
+		filtered := make([]protocol.Certificate, 0, len(certs))
+		for _, c := range certs {
+			src := strings.ToLower(strings.TrimSpace(c.Source))
+			if src == "smartcard" || src == "dnie" {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered, "pkcs11"
+		}
+		return certs, "pkcs11-empty-fallback"
+	case "MOZ_UNI", "SHARED_NSS", "MOZILLA":
+		filtered := make([]protocol.Certificate, 0, len(certs))
+		for _, c := range certs {
+			src := strings.ToLower(strings.TrimSpace(c.Source))
+			if src == "system" {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered, "nss"
+		}
+		return certs, "nss-empty-fallback"
+	case "WINDOWS", "WINADDRESSBOOK":
+		filtered := make([]protocol.Certificate, 0, len(certs))
+		for _, c := range certs {
+			src := strings.ToLower(strings.TrimSpace(c.Source))
+			if src == "windows" {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered, "windows"
+		}
+		return certs, "windows-empty-fallback"
+	case "APPLE", "MACOS", "KEYCHAIN":
+		filtered := make([]protocol.Certificate, 0, len(certs))
+		for _, c := range certs {
+			src := strings.ToLower(strings.TrimSpace(c.Source))
+			if src == "system" {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered, "keychain"
+		}
+		return certs, "keychain-empty-fallback"
+	default:
+		return certs, "unknown-fallback"
+	}
 }
 
 func buildSelectCertResponse(certDER []byte, key string) (string, error) {
@@ -813,7 +1038,22 @@ func (s *WebSocketServer) processSignAndSaveRequest(state *ProtocolState) string
 	return "SAVE_OK"
 }
 
-func (s *WebSocketServer) buildResponse(certDER []byte, sigBytes []byte, key string) (string, error) {
+func buildProtocolExtraInfo(state *ProtocolState, filePath string) []byte {
+	if state == nil || state.ProtocolVersion < 3 {
+		return nil
+	}
+	name := strings.TrimSpace(filepath.Base(filePath))
+	if name == "" || name == "." || name == "/" {
+		return nil
+	}
+	raw, err := json.Marshal(map[string]string{"filename": name})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func (s *WebSocketServer) buildResponse(certDER []byte, sigBytes []byte, key string, extraInfo []byte) (string, error) {
 	// If key is present, encrypt.
 	if key != "" {
 		// We need to encrypt.
@@ -832,10 +1072,21 @@ func (s *WebSocketServer) buildResponse(certDER []byte, sigBytes []byte, key str
 		if err != nil {
 			return "", err
 		}
-		return cCert + "|" + cSig, nil
+		if len(extraInfo) == 0 {
+			return cCert + "|" + cSig, nil
+		}
+		cExtra, err := AutoFirmaEncryptAndFormat(extraInfo, keyBytes)
+		if err != nil {
+			return "", err
+		}
+		return cCert + "|" + cSig + "|" + cExtra, nil
 	}
 	// No key -> Plain URL Safe Base64 (Standard Java AutoFirma behavior)
-	return base64.URLEncoding.EncodeToString(certDER) + "|" + base64.URLEncoding.EncodeToString(sigBytes), nil
+	out := base64.URLEncoding.EncodeToString(certDER) + "|" + base64.URLEncoding.EncodeToString(sigBytes)
+	if len(extraInfo) == 0 {
+		return out, nil
+	}
+	return out + "|" + base64.URLEncoding.EncodeToString(extraInfo), nil
 }
 
 func (s *WebSocketServer) formatError(code string, message string) string {
@@ -885,6 +1136,12 @@ func (s *WebSocketServer) formatError(code string, message string) string {
 	case "ERROR_BATCH_SIGNATURE":
 		errCode = "SAF_27"
 		defaultMsg = "Error en firma de lote"
+	case "ERROR_UNSUPPORTED_PROCEDURE":
+		errCode = "SAF_21"
+		defaultMsg = "Version de protocolo no soportada"
+	case "ERROR_MINIMUM_VERSION_NOT_SATISFIED":
+		errCode = "SAF_41"
+		defaultMsg = "Se requiere una version mas reciente de la aplicacion"
 	case "ERROR_CANNOT_OPEN_SOCKET":
 		errCode = "SAF_45"
 		defaultMsg = "No se pudo abrir el socket"

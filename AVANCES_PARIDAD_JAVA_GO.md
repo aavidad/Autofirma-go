@@ -10,6 +10,7 @@ Alcanzar paridad funcional progresiva con la app Java de AutoFirma, con trazabil
 - Hacer cambios por partes pequeñas y verificables.
 - Tras cada cambio terminado: marcar checklist y añadir entrada en la bitácora.
 - No registrar secretos en texto plano (PIN, claves privadas, payloads completos).
+- Registrar cada sesión en `docs/SEGUIMIENTO_DIARIO.md` (hecho, pendiente y siguiente paso) para evitar repetir trabajo.
 
 ## Estado global
 - [ ] P0 - Estabilidad WebSocket y confianza TLS local
@@ -510,24 +511,321 @@ Alcanzar paridad funcional progresiva con la app Java de AutoFirma, con trazabil
 - Validación ejecutada:
   - `GOCACHE=/tmp/go-build go test ./cmd/gui -run TestParseProtocolURI_AliasAndRequiredParams -v` OK.
   - `GOCACHE=/tmp/go-build go test ./cmd/gui/...` OK.
+- Validación integral de bloque (avance):
+  - Ejecutado `scripts/run_full_validation.sh --skip-sede-logcheck` con red habilitada:
+    - `1/7` tests de código activo: `OK`.
+    - `2/7` smoke host nativo: `OK` (CAdES/XAdES), PAdES `SKIP` por falta de `testdata/original.pdf`.
+    - `3/7` trust local: bloqueado en entorno no interactivo por `sudo` (sin TTY).
+  - Detectado y corregido fallo en script:
+    - `scripts/run_full_validation.sh` ejecutaba `ws_echo_client.py` con `bash` en lugar de `python3`.
+    - parche aplicado: paso `5/7` usa `python3 scripts/ws_echo_client.py`.
+  - Re-ejecución `scripts/run_full_validation.sh --skip-trust --skip-sede-logcheck`:
+    - handshake WSS (`5/7`) `OK`.
+    - validación global del script `OK` (con skips declarados).
+  - Hallazgo adicional en logs:
+    - comprobación de updates (`https://autofirma.dipgra.es/version.json`) falla por CA no confiada en este entorno (`x509: certificate signed by unknown authority`).
+    - no bloquea el flujo de compatibilidad WSS/protocolo.
+  - Ajuste aplicado en código:
+    - en `cmd/gui/ui.go`, el auto-check de actualizaciones se omite cuando se arranca en modo `--server` o `afirma://websocket`.
+    - objetivo: eliminar ruido de error TLS de updates en logs de compatibilidad web y dejar foco en trazas de protocolo.
+  - Ajuste adicional de ruido en logs:
+    - en `cmd/gui/main.go`, ya no se registra `Arg present but no protocol detected` cuando el argumento es un flag CLI (por ejemplo `--server`).
+    - en `cmd/gui/websocket.go`, cierre abrupto de cliente (`close 1006` / `unexpected EOF`) se registra como desconexión abrupta en lugar de error genérico de lectura.
+  - Robustez adicional `service` legacy (casuística de integradores):
+    - `extractLegacyParam` ahora decodifica valores URL-encoded (`%2B`, `%2F`, `%3D`) antes de procesar `cmd/fragment/send`.
+    - impacto: mejora compatibilidad cuando la sede/intermediario transporta base64 escapado en query.
+    - tests añadidos:
+      - `TestLegacyServiceCmdURLEncodedBase64`
+      - `TestLegacyServiceFragmentURLEncodedChunk`
+  - Robustez adicional `batch` trifásico remoto (sede real):
+    - reintentos automáticos en llamadas HTTP de `prefirma/postfirma` para errores transitorios:
+      - red/transporte
+      - `408`, `429`, `5xx`
+    - no se reintenta en errores de parámetros (`400`), preservando mapeo `SAF_03`.
+    - tests añadidos:
+      - `TestBatchHTTPPostWithRetryRetriesTransientHTTP5xx`
+      - `TestBatchHTTPPostWithRetryDoesNotRetryOnHTTP400`
+      - `TestBatchHTTPPostWithRetryRetriesOnNetworkError`
+    - timeout HTTP configurable para pre/post remoto:
+      - variables soportadas:
+        - `AUTOFIRMA_BATCH_HTTP_TIMEOUT_MS`
+        - `AUTOFIRMA_BATCH_HTTP_TIMEOUT_SEC`
+      - por defecto: `15s`.
+      - tests añadidos:
+        - `TestResolveBatchHTTPTimeoutDefault`
+        - `TestResolveBatchHTTPTimeoutFromMS`
+        - `TestResolveBatchHTTPTimeoutFromSec`
+        - `TestResolveBatchHTTPTimeoutInvalidFallsBackDefault`
+    - número de reintentos configurable:
+      - variable soportada:
+        - `AUTOFIRMA_BATCH_HTTP_MAX_ATTEMPTS`
+      - por defecto: `3` (capado a `6`).
+      - tests añadidos:
+        - `TestResolveBatchHTTPMaxAttemptsDefault`
+        - `TestResolveBatchHTTPMaxAttemptsFromEnv`
+        - `TestResolveBatchHTTPMaxAttemptsInvalidFallsBackDefault`
+        - `TestResolveBatchHTTPMaxAttemptsCapped`
+    - trazas operativas añadidas para diagnóstico en sedes:
+      - log de configuración efectiva por petición remota (`timeout`, `max_attempts`).
+      - log por reintento transitorio con `attempt=n/m`.
+      - saneado de URL en logs (solo `scheme://host/path`, sin query sensible).
+    - circuito de protección por host remoto (circuit breaker simple):
+      - se abre temporalmente tras 3 fallos consecutivos al mismo host de pre/post batch.
+      - cooldown de 20s antes de permitir nuevos intentos.
+      - éxito posterior reinicia estado del host.
+      - cuando está abierto, mapea a `SAF_26` (servicio temporalmente no disponible).
+      - tests añadidos:
+        - `TestBatchRemoteCircuitOpensAfterThresholdFailures`
+        - `TestBatchRemoteCircuitResetsOnSuccess`
+        - `TestMapBatchRemoteHTTPErrorCircuitOpenReturnsSaf26`
+    - parámetros del circuit breaker configurables por entorno:
+      - `AUTOFIRMA_BATCH_BREAKER_THRESHOLD` (default `3`, cap `10`)
+      - `AUTOFIRMA_BATCH_BREAKER_COOLDOWN_MS` / `AUTOFIRMA_BATCH_BREAKER_COOLDOWN_SEC` (default `20s`, cap `5m`)
+      - tests añadidos:
+        - `TestResolveBatchRemoteBreakerThresholdDefault`
+        - `TestResolveBatchRemoteBreakerThresholdFromEnv`
+        - `TestResolveBatchRemoteBreakerThresholdCapped`
+        - `TestResolveBatchRemoteBreakerCooldownDefault`
+        - `TestResolveBatchRemoteBreakerCooldownFromMS`
+        - `TestResolveBatchRemoteBreakerCooldownFromSec`
+        - `TestResolveBatchRemoteBreakerCooldownCapped`
+  - Soporte operativo para P1/E2E de sedes:
+    - añadido `scripts/run_sede_e2e.sh` con comandos:
+      - `start --clean-logs` (arranque + handshake WSS)
+      - `check --since-minutes N` (validación de logs de sede y búsqueda de `SAF_03`/`ERR-*`)
+      - `stop`
+    - documentación actualizada en `docs/WEB_COMPAT_TEST.md`.
+    - `scripts/run_sede_e2e.sh check` ahora adjunta en el reporte extractos recientes de:
+      - log web compat (`/tmp/autofirma-web-compat.log`)
+      - log launcher (`/tmp/autofirma-launcher.log`, si existe)
+      para facilitar evidencias sin copia manual.
+    - saneado adicional de extractos en reporte:
+      - enmascarado de `idsession/idSession`, `dat`, `certs`, `tridata` y `key` en líneas de evidencia.
+  - Automatización de validación con tuning batch:
+    - `scripts/run_full_validation.sh` ahora acepta flags para ajustar en ejecución:
+      - `--batch-timeout-ms|--batch-timeout-sec`
+      - `--batch-max-attempts`
+      - `--batch-breaker-threshold`
+      - `--batch-breaker-cooldown-ms|--batch-breaker-cooldown-sec`
+    - el script exporta las variables de entorno correspondientes y muestra valores efectivos al inicio.
+    - `scripts/run_full_validation.sh` ahora genera reporte en `/tmp` con:
+      - estado por paso (`PASS`/`SKIP`)
+      - resultado final (`PASS`/`FAIL`)
+      - paso fallido y código de salida cuando hay error.
+    - al finalizar en `PASS`, `scripts/run_full_validation.sh` regenera `docs/CHANGELOG_PARIDAD.md`
+      mediante `scripts/generate_parity_changelog.sh` (best-effort, sin romper el check si falla).
+  - Paridad de control de versiones web (`mcv/jvc`) alineada con Java:
+    - `mcv` (minimum client version) ya se valida en el parser protocolario.
+    - cuando la versión mínima solicitada es superior a la del cliente Go, el canal WSS responde `SAF_41`.
+    - `mcv` malformado se trata como error de parámetros (`SAF_03`).
+  - Robustez adicional en batch trifásico remoto:
+    - construcción de opciones de firma reutiliza el `batchRequest` ya parseado (sin reprocesar payload crudo).
+    - mapeo `extraParams` por `singlesign` ahora case-insensitive en `id`.
+    - fallback por `signid` cuando el `tridata` JSON no informa `id`.
+    - tests añadidos:
+      - `TestBuildBatchRemoteSignOptionsNormalizesPerSignIDs`
+      - `TestSignTriphaseDataAppliesPerSignOptionsBySignIDFallback`
+    - `jvc` se parsea en modo tolerante y, si llega por debajo del mínimo seguro, se registra advertencia en log (sin bloquear la operación), en línea con Java.
+    - tests añadidos:
+      - `TestParseProtocolURI_MinimumClientVersionSatisfied`
+      - `TestParseProtocolURI_MinimumClientVersionNotSatisfied`
+      - `TestParseProtocolURI_MinimumClientVersionMalformed`
+      - `TestIsRequestedVersionGreater`
+      - `TestIsRequestedVersionGreaterInvalidInput`
+      - `TestProcessProtocolRequestMinimumClientVersionNotSatisfiedReturnsSaf41`
+      - ampliación de matriz `TestFormatErrorReturnsJavaStyleSAF` para `SAF_41`
+  - Paridad de espera activa (`aw`) con Java:
+    - la señal de espera activa (`#WAIT`) ahora solo se envía cuando el parámetro `aw=true` está presente en la invocación de protocolo.
+    - antes se enviaba siempre que existía `stservlet`/`id`, lo que podía generar tráfico innecesario al servidor intermedio.
+  - Paridad de versión de protocolo en arranque `service/websocket`:
+    - añadida validación de versión soportada por canal:
+      - `websocket`: soporta `v=3` y `v=4` (si no se informa, fallback compat a `4`).
+      - `service`: soporta `v=1`, `v=2`, `v=3` (si no se informa, fallback compat a `3`).
+    - cuando llega una versión explícita no soportada, se devuelve `SAF_21`.
+    - mapeo de error añadido:
+      - `ERROR_UNSUPPORTED_PROCEDURE` -> `SAF_21`
+    - tests añadidos/actualizados:
+      - `TestProcessProtocolRequestWebSocketReturnsOK` (con `v=4`)
+      - `TestProcessProtocolRequestWebSocketUnsupportedVersionReturnsSaf21`
+      - `TestProcessProtocolRequestServiceUnsupportedVersionReturnsSaf21`
+      - `TestParseRequestedProtocolVersion`
+      - ampliación de `TestFormatErrorReturnsJavaStyleSAF` para `SAF_21`
+  - Paridad de versión de protocolo en operaciones `afirma://`:
+    - el parser protocolario ahora valida `v` en operaciones normales (`sign/cosign/countersign/...`):
+      - soportadas `0..4` (alineado con máximo Java protocol launcher `VERSION_4`).
+      - si llega una versión fuera de rango, se devuelve `SAF_21`.
+    - tests añadidos:
+      - `TestParseProtocolURI_UnsupportedProcedureVersion`
+      - `TestProcessProtocolRequestUnsupportedProcedureVersionReturnsSaf21`
+  - Paridad de respuesta de firma en protocolo v3+:
+    - `buildResponse` ahora soporta tercer bloque opcional `extraInfo` (`cert|sign|extra`), alineado con Java `NativeSignDataProcessor`.
+    - en flujo protocolario, cuando `v>=3`, se incluye `extraInfo` JSON con `filename` del documento firmado.
+    - en modo cifrado (`key`), el tercer bloque también se cifra de forma independiente.
+    - tests añadidos:
+      - `TestBuildProtocolExtraInfo`
+      - `TestBuildResponseIncludesExtraInfoWhenPresent`
+      - `TestBuildResponseEncryptedIncludesExtraInfoWhenPresent`
+  - Robustez de lanzamiento nativo `afirma://websocket` (main/arranque):
+    - refactor de parseo de URI de lanzamiento en helper dedicado:
+      - valida esquema `afirma://` de forma case-insensitive.
+      - valida acción `websocket` por host/path/op query.
+      - acepta aliases `ports|port|portsList` y `idsession|idSession`.
+      - valida versión de protocolo de websocket (3/4) con fallback a `4` cuando no viene `v`.
+    - reduce discrepancias entre arranque por argumento de línea de comandos y ruta de procesado interno.
+    - tests añadidos:
+      - `TestParseWebSocketLaunchURI`
+      - `TestParseWebSocketLaunchURIAliasesAndDefaults`
+      - `TestParseWebSocketLaunchURIUnsupportedVersion`
+      - `TestParseWebSocketLaunchURIMissingPortsUsesDefault`
+    - ajuste adicional de paridad:
+      - sin `ports` en launch `afirma://websocket`, se usa puerto por defecto `63117`
+        (comportamiento alineado con Java).
+    - detección de launch websocket en `main.loop` ahora usa parser robusto:
+      - acepta esquema en mayúsculas/minúsculas.
+      - acepta `afirma:///websocket` y `afirma://?op=websocket`.
+      - evita depender de `strings.Contains("afirma://websocket")`.
+    - test añadido:
+      - `TestParseWebSocketLaunchURIActionInQueryOp`
+    - paridad adicional `jvc` en launch:
+      - en launch `service/websocket` se evalúa `jvc` y, si es menor al mínimo seguro, se registra advertencia en log sin bloquear la operación (comportamiento Java).
+    - test añadido:
+      - `TestParseJavaScriptVersionWithDefault`
+  - Paridad `service` legacy: herencia de versión de protocolo hacia `cmd/firm`:
+    - en canal legacy `service`, si una URI de operación llega sin `v`, se inyecta la versión del canal (`v` del `afirma://service` inicial) para mantener consistencia con Java.
+    - la herencia se aplica a operaciones normales y excluye comandos de lanzamiento (`afirma://websocket` / `afirma://service`) para no alterar compatibilidad existente.
+    - tests añadidos/ajustados:
+      - validación de persistencia de versión de servicio en `TestProcessProtocolRequestServiceReturnsOK`.
+      - `TestEnsureProtocolVersionParam` ampliado (inyección en `sign`, no inyección en `websocket` launch).
+      - `TestLegacyServiceCmdInheritsServiceProtocolVersion` (regresión conductual en flujo `cmd -> send`).
+  - Ajuste de paridad en validación de sesión de `service` legacy:
+    - cuando `idsession` no coincide en canal socket legacy, la respuesta se alinea con Java `CommandProcessorThread` como error de parámetros (`SAF_03`) en lugar de `SAF_46`.
+    - se mantiene `SAF_46` para canal WebSocket (no legacy), donde Java sí usa código específico de sesión.
+  - Robustez adicional `service` legacy para integraciones detrás de proxy:
+    - `processLegacyServicePayload` normaliza payload completamente URL-encoded (`cmd%3D...`) antes de validar sesión/comando.
+    - evita rechazos `SAF_03` cuando el body llega escapado completo por intermediarios.
+    - test añadido:
+      - `TestLegacyServicePayloadFullyURLEncoded`
+    - ampliado: tolerancia de payload doblemente URL-encoded (`%25`-escape encadenado).
+    - test añadido:
+      - `TestLegacyServicePayloadDoubleURLEncoded`
+  - Robustez de delimitación en parseo legacy HTTP:
+    - `extractLegacyParam`/`extractLegacySessionID` ya no cortan valores por espacio genérico.
+    - se usa marcador de inicio de línea HTTP (`" HTTP/"`) para evitar truncar payloads con espacios internos en valores legacy.
+    - test añadido:
+      - `TestExtractLegacyParamPreservesInternalSpacesUntilHTTPMarker`
+  - Paridad de ensamblado de fragmentos `service` legacy:
+    - `fragment=@...` ahora rechaza inserciones fuera de orden con huecos (alineado con semántica de `ArrayList.add(index, ...)` en Java).
+    - mantiene soporte de reenvío/reemplazo de fragmento ya existente.
+    - test añadido:
+      - `TestLegacyServiceFragmentOutOfOrderReturnsSaf03`
+  - Mejora propia (Go) de robustez en `service` legacy:
+    - límite de tamaño agregado para payload fragmentado (`legacyMaxServicePayloadBytes`, default 32 MiB).
+    - al superar límite se devuelve `MEMORY_ERROR` y se limpia estado de fragmentos/respuesta para evitar OOM.
+    - decisión deliberada: mantener comportamiento Go más seguro aunque no replique Java al detalle.
+    - test añadido:
+      - `TestLegacyServiceFragmentTooLargeReturnsMemoryError`
+  - Robustez adicional `service` legacy en framing bruto de socket:
+    - límite de tamaño para petición cruda antes de parseo (`legacyMaxRawRequestBytes`, default 8 MiB).
+    - si se supera, se devuelve `MEMORY_ERROR` y se rechaza la petición sin procesarla.
+    - test añadido:
+      - `TestReadLegacySocketPayloadTooLargeReturnsError`
+      - `TestHandleLegacyServiceConnTooLargeReturnsMemoryError`
+  - Ajuste de paridad en errores de lectura de socket legacy:
+    - cuando hay error real de lectura (no timeout/empty), el canal `service` responde `SAF_03` en vez de ignorar silenciosamente.
+    - alineado con `CommandProcessorThread` Java, que informa error de parámetros ante fallo de lectura/proceso.
+    - test añadido:
+      - `TestHandleLegacyServiceConnReadErrorReturnsSaf03`
+  - Ajuste de paridad `selectcert` (comportamiento `mandatoryCertSelection=false`):
+    - en Java se omite el diálogo solo cuando queda un único certificado tras filtros.
+    - corregido en Go: con varios candidatos se mantiene diálogo de selección.
+    - tests añadidos/validados:
+      - `TestProcessSelectCertRequestMandatorySelectionFalseSkipsDialog`
+      - `TestProcessSelectCertRequestMandatorySelectionFalseWithMultipleShowsDialog`
+  - Compatibilidad adicional en parseo de `selectcert`:
+    - lectura case-insensitive del parámetro `properties` en query (`properties`/`Properties`/etc.).
+    - lectura case-insensitive de claves internas de `properties` (`filter`, `filters`, `mandatoryCertSelection`, `headless`).
+    - evita perder filtros por diferencias de capitalización en integradores legacy.
+    - test añadido:
+      - `TestApplySelectCertFiltersReadsPropertiesCaseInsensitive`
+      - `TestApplySelectCertFiltersPropertyKeysCaseInsensitive`
+  - Ajuste de robustez/paridad en validación de certificados `selectcert`:
+    - `nonexpired` ahora usa validez de fechas del certificado X.509 (`NotBefore/NotAfter`) cuando `ValidFrom/ValidTo` no están informadas en el modelo.
+    - fallback final mantiene comportamiento previo (`CanSign`) solo si tampoco hay X.509 parseable.
+    - test añadido:
+      - `TestCertIsCurrentlyValidFallsBackToX509Dates`
+  - Compatibilidad legacy adicional de versión de protocolo:
+    - parser protocolario y launch `service/websocket` aceptan `ver` como alias de `v`.
+    - mantiene validaciones actuales de rango/versiones soportadas, evitando regresiones.
+    - tests añadidos:
+      - `TestParseRequestedProtocolVersion` (alias `ver`)
+      - `TestParseProtocolURI_UnsupportedProcedureVersionFromVerAlias`
+  - Mejora incremental `selectcert` sobre preferencia de almacén:
+    - soporte best-effort de `defaultKeyStore` para prefiltrar candidatos:
+      - `PKCS11` -> prioriza certificados de `smartcard/dnie`.
+      - `MOZ_UNI`/`SHARED_NSS`/`MOZILLA` -> prioriza certificados de almacén sistema/NSS.
+      - `WINDOWS`/`WINADDRESSBOOK` -> prioriza certificados `windows`.
+      - `APPLE`/`MACOS`/`KEYCHAIN` -> prioriza certificados de sistema (keychain).
+    - si la preferencia no se reconoce o no produce candidatos, se mantiene fallback al comportamiento previo (sin ruptura).
+    - aplicada también al flujo de selección de certificado para `batch` (consistencia funcional con `selectcert`).
+    - soporte de `defaultKeyStoreLib` para `PKCS11`:
+      - cuando se informa ruta(s) de módulo PKCS#11 en la invocación, la carga de certificados usa esos módulos como hint prioritario.
+      - soporta lista separada por `;` o `,` y deduplica entradas.
+      - fallback seguro: sin `defaultKeyStoreLib` o con `defaultKeyStore` distinto de `PKCS11`, mantiene la carga general previa.
+      - fallback adicional de robustez: si falla la carga con hints, vuelve automáticamente al loader por defecto en lugar de cortar el flujo.
+      - trazas de diagnóstico añadidas:
+        - resumen de hints de módulo (solo nombre de librería, sin ruta completa sensible).
+        - número de certificados devueltos por loader con opciones.
+      - optimización de carga por `defaultKeyStore`:
+        - cuando el store solicitado no es PKCS#11 (`MOZ_UNI/SHARED_NSS/MOZILLA`, `WINDOWS/WINADDRESSBOOK`, `APPLE/MACOS/KEYCHAIN`), se omite escaneo PKCS#11 para reducir latencia/prompts.
+        - store desconocido mantiene ruta de carga por defecto (compatibilidad conservadora).
+      - `disableopeningexternalstores` con efecto operativo:
+        - si se indica en filtros y no hay `defaultKeyStore=PKCS11` explícito, se desactiva escaneo PKCS#11.
+        - si `defaultKeyStore=PKCS11` está explícito, prevalece la selección explícita del integrador.
+      - reintento inteligente para `PKCS11` con hints:
+        - si `defaultKeyStoreLib` no devuelve certificados de token (`smartcard/dnie`), reintenta con descubrimiento PKCS#11 por defecto.
+        - mejora resiliencia ante rutas de módulo desactualizadas.
+    - tests añadidos:
+      - `TestProcessSelectCertRequestDefaultKeyStorePKCS11FiltersCandidates`
+      - `TestProcessSelectCertRequestDefaultKeyStoreUnknownFallsBack`
+      - `TestProcessSelectCertRequestDefaultKeyStoreLowercaseAlias`
+      - `TestSelectBatchSigningCertificateDefaultKeyStorePKCS11`
+      - `TestSelectBatchSigningCertificateStickyCaseInsensitiveParam`
+      - `TestLoadCertificatesForStateUsesPKCS11ModuleHints`
+      - `TestLoadCertificatesForStateNonPKCS11StoreSkipsPKCS11Scan`
+      - `TestLoadCertificatesForStatePKCS11HintsErrorFallsBackToDefaultLoader`
+      - `TestLoadCertificatesForStateUnknownStoreUsesDefaultLoader`
+      - `TestLoadCertificatesForStateDisableOpeningExternalStoresSkipsPKCS11`
+      - `TestLoadCertificatesForStateDisableOpeningExternalStoresDoesNotOverrideExplicitPKCS11`
+      - `TestSplitStoreLibHintsNormalizesAndDeduplicates`
+      - `TestResolvePKCS11ModuleHintsSupportsAliasKeys`
+      - `TestSummarizeModuleHints`
+      - `TestHasPKCS11Certificates`
+      - `TestLoadCertificatesForStatePKCS11HintsWithoutTokenCertsRetriesDefaultDiscovery`
+  - Consistencia de parseo en `batch`:
+    - `sticky/resetsticky` ahora se leen con resolver case-insensitive y aliases (igual que en flujo protocolario principal).
+  - Alineación funcional `batch` con criterios de auto-selección de `selectcert`:
+    - si hay `headless=true` (o modo auto equivalente con único candidato), `batch` puede seleccionar certificado sin UI.
+    - cuando no aplica auto-selección, se mantiene requisito de UI y respuesta `SAF_09`.
+    - test añadido:
+      - `TestProcessProtocolRequestBatchLocalJSONHeadlessWithoutUIWorks`
 
-## Pendiente para mañana
-- Ejecutar pruebas E2E completas en sedes reales (al menos Valide + una sede adicional):
+## Pendiente para hoy (2026-02-17) - revisado
+- [ ] Ejecutar pruebas E2E completas en sedes reales (al menos Valide + una sede adicional):
   - flujo `sign -> save -> upload/retorno`.
   - revisar logs para confirmar ausencia de `SAF_03`/`ERR-` no esperados.
-- Completar robustez final de `service`/legacy:
-  - cubrir variantes de framing/comandos que aparezcan en logs reales.
-  - añadir test de regresión por cada variante nueva detectada.
-- Cerrar batch “real” end-to-end:
+- [x] Completar robustez final de `service`/legacy (código + tests unitarios):
+  - cubierta casuística principal de framing/comandos y límites de memoria.
+  - pendiente solo vigilancia en E2E real: si aparece una variante nueva en logs, añadir test de regresión.
+- [ ] Cerrar batch “real” end-to-end:
   - validar prefirma/postfirma contra servicio real.
   - ajustar/revisar timeouts y reintentos.
-- Validación ampliada de certificados/dispositivos:
+- [ ] Validación ampliada de certificados/dispositivos:
   - escenarios NSS/PKCS#11 adicionales.
   - verificación de manejo de errores PIN/CAN y mensajes de UI.
-- Empaquetado e instalación final:
+- [ ] Empaquetado e instalación final:
   - generar artefactos de release (`.deb`/`.run`) con binario actualizado.
   - validar instalación limpia y asociación `afirma://` en otro equipo.
-- QA y cierre de bloque:
+- [ ] QA y cierre de bloque:
   - ejecutar `scripts/run_full_validation.sh`.
   - anotar resultados y bloqueantes de release en este mismo archivo.
 
@@ -553,3 +851,159 @@ Alcanzar paridad funcional progresiva con la app Java de AutoFirma, con trazabil
 - Cierre de release:
   - actualizar documentación de uso Windows (`instalación`, `troubleshooting`, `logs`).
   - dejar lista corta de bloqueantes Go/No-Go.
+
+## Avance incremental (2026-02-17, bloque paridad real)
+- Firma alineada con contexto de almacén de `selectcert`:
+  - `buildProtocolSignOptions` ahora propaga hints internos para el firmador:
+    - `_defaultKeyStore`
+    - `_defaultKeyStoreLib`
+    - `_disableOpeningExternalStores`
+  - el firmador (`pkg/signer`) usa esas pistas para resolver certificados con el mismo criterio de almacén:
+    - usa loader con opciones cuando hay override/hints.
+    - conserva fallback seguro al loader por defecto si falla la ruta con opciones.
+- Robustez adicional en lookup de certificado para firma:
+  - si el certificado seleccionado no trae `nickname` (caso típico de origen PKCS#11 crudo), se intenta resolver un certificado equivalente con `nickname` desde la carga por defecto.
+  - esto reduce fallos por “certificado sin apodo” en escenarios mixtos de almacén.
+- Tests añadidos:
+  - `cmd/gui/protocol_sign_options_test.go`
+    - `TestBuildProtocolSignOptionsPropagatesStoreHintsForSigner`
+  - `pkg/signer/cert_lookup_test.go`
+    - `TestGetCertificateByIDUsesStoreOptionsForLookup`
+    - `TestGetCertificateByIDFallsBackToNicknameCertificate`
+    - `TestResolveCertstoreOptionsPKCS11Hints`
+
+## Avance incremental (2026-02-17, selectcert filtro thumbprint)
+- Paridad Java en filtro `thumbprint`:
+  - Java espera el formato `thumbprint:<algoritmo>:<huellaHex>`.
+  - Go ahora soporta ese formato como preferente (`SHA1/SHA-1/SHA256/SHA-256/SHA384/SHA512`).
+  - Se mantiene compatibilidad con el formato legacy ya existente en Go (`thumbprint:<huella>:<algoritmo>`).
+  - Se amplía soporte de digest en filtro a `SHA-384` y `SHA-512` (además de `SHA-1` y `SHA-256`).
+- Tests añadidos:
+  - `TestThumbprintFilterSupportsJavaAlgorithmFirstFormat`
+  - `TestThumbprintFilterKeepsBackwardCompatibilityHexFirst`
+
+## Avance incremental (2026-02-17, selectcert keyusage:null)
+- Paridad Java en filtros `keyusage.*`:
+  - `keyusage.<uso>:null` ahora se trata como no restrictivo (equivalente a no aplicar ese uso en el patrón), en línea con `CertFilterManager` Java.
+- Test de regresión:
+  - `TestMatchesKeyUsage` ampliado con caso `keyusage.keyencipherment:null`.
+
+## Avance incremental (2026-02-17, signingcert + batch firma coherente)
+- Paridad de filtro `signingcert` con Java:
+  - Java `SigningCertificateFilter` excluye certificados de autenticación DNIe, pero no exige KU de no repudio para el resto.
+  - Go alineado a ese comportamiento (mejor compatibilidad en certificados no-DNIe con solo `digitalSignature`).
+- Consistencia selectcert/firma en `batch` local:
+  - `executeBatchSingle` ahora propaga al firmador los hints de almacén (`_defaultKeyStore`, `_defaultKeyStoreLib`, `_disableOpeningExternalStores`).
+  - mejora robustez cuando el certificado seleccionado en batch viene de contexto de almacén no estándar.
+- Tests añadidos/actualizados:
+  - `TestSigningCertFilterUsesNonRepudiationUsage` (ajustado a semántica Java real).
+  - `TestExecuteBatchSinglePropagatesStoreHintsToSigner`.
+
+## Avance incremental (2026-02-17, emparejado qualified/ssl más estricto)
+- Endurecido el criterio de emparejado para `qualified`/`ssl`:
+  - además de `CN/O/OU/C`, ahora se consideran `L/ST` cuando están disponibles.
+  - mantiene compatibilidad con el modelo actual de certificado (fallback sin romper flujos existentes).
+- Test de regresión añadido:
+  - `TestFindAssociatedSignatureCertRequiresSameIssuerDN`.
+
+## Avance incremental (2026-02-17, cierre de brecha batch trifásico PKCS1)
+- `batch` remoto trifásico: la prefirma cliente (`PK1`) ahora se ejecuta con contexto de almacén de la operación.
+  - añadido `pkg/signer.SignPKCS1WithOptions(...)`.
+  - `executeRemoteTriphaseBatch` pasa opciones protocolarias (incluyendo hints de store) a la fase `PRE -> PK1`.
+- Mejora funcional:
+  - alinea `PK1` con el mismo criterio de lookup de certificado que `sign/cosign/countersign`.
+  - reduce discrepancias en entornos con `defaultKeyStore/defaultKeyStoreLib`.
+- Test actualizado:
+  - `TestProcessProtocolRequestBatchRemoteJSONSuccess` verifica propagación de store hints a PKCS1 trifásico.
+
+## Avance incremental (2026-02-17, parseo robusto de properties en firma)
+- `buildProtocolSignOptions` ahora resuelve `properties` en query de forma case-insensitive.
+  - evita pérdida de `extraParams` cuando integradores envían `Properties`/`PROPERTIES`.
+  - aplicado también en `mergePropertiesParam`.
+- Test añadido:
+  - `TestBuildProtocolSignOptionsReadsPropertiesCaseInsensitiveParam`.
+
+## Avance incremental (2026-02-17, corrección store-hints en signer)
+- Corregida evaluación de `_disableOpeningExternalStores` en `pkg/signer`:
+  - antes se trataba como string y podía no aplicarse cuando la GUI lo propagaba como booleano.
+  - ahora se usa parseo booleano (`optionBool`) y se aplica correctamente en lookup de certificados.
+- Cobertura añadida:
+  - `TestResolveCertstoreOptionsDisableExternalStoresBoolDisablesPKCS11`
+  - `TestResolveCertstoreOptionsDisableExternalStoresDoesNotOverrideExplicitPKCS11`
+
+## Avance incremental (2026-02-17, fallback PKCS11 hints en signer)
+- `pkg/signer` ahora replica estrategia de resiliencia ya aplicada en `selectcert`:
+  - si `defaultKeyStore=PKCS11` + `defaultKeyStoreLib` no devuelve certificados de token, reintenta con descubrimiento PKCS#11 por defecto.
+- Mejora funcional:
+  - evita errores de firma por hints de módulo desactualizados cuando el token sí es detectable por configuración estándar.
+- Test añadido:
+  - `TestGetCertificatesForSignOptionsPKCS11HintsWithoutTokenFallbacksToDefaultDiscovery`.
+
+## Avance incremental (2026-02-17, cobertura XML en PKCS1 trifásico)
+- Refuerzo de paridad en batch remoto XML:
+  - verificada propagación de `defaultKeyStore/defaultKeyStoreLib` a la fase cliente `PRE -> PK1`.
+  - ya quedaba cubierto en JSON; con este ajuste queda validado también en XML.
+- Test ampliado:
+  - `TestProcessProtocolRequestBatchRemoteXMLSuccess` ahora comprueba hints de store en PKCS1.
+
+## Avance incremental (2026-02-17, PKCS1 directo por PKCS11)
+- Implementado fallback de firma PKCS#1 directa por PKCS#11 cuando falla exportación P12:
+  - `pkg/signer.SignPKCS1WithOptions` ahora intenta ruta directa PKCS#11 en contexto de token (`smartcard/dnie` o `defaultKeyStore=PKCS11`).
+  - backend Linux (`linux+cgo`) añadido:
+    - búsqueda de certificado en token por DER (`CKA_VALUE`),
+    - resolución de clave privada por `CKA_ID`,
+    - firma con mecanismo `CKM_RSA_PKCS`.
+  - stub en plataformas no compatibles mantiene error controlado.
+- Alcance funcional:
+  - mejora especialmente flujo trifásico (PRE->PK1) y escenarios de clave no exportable donde `pk12util` falla.
+- Tests añadidos:
+  - `TestSignPKCS1WithOptionsFallsBackToPKCS11DirectSign`
+  - `TestShouldTryPKCS11DirectSign`.
+
+## Avance incremental (2026-02-17, PIN y extraparams en trifásico remoto)
+- `buildProtocolSignOptions` ahora mapea `pin` a `_pin` para backend de firma.
+- `batch` trifásico remoto integra `extraparams` globales del lote en opciones de `PK1`:
+  - JSON: ya disponible por `extraparams` raíz, ahora aplicado también en ruta remota de prefirma.
+  - XML: añadido parseo de `<signbatch><extraparams>...</extraparams>` y aplicación en `PK1`.
+- Impacto funcional:
+  - mejora escenarios de token que requieren PIN en fallback PKCS11 directo para `PRE -> PK1`.
+- Tests añadidos/ampliados:
+  - `TestBuildProtocolSignOptionsPropagatesPINForSigner`
+  - `TestParseBatchXMLRequestReadsGlobalExtraParams`
+  - `TestProcessProtocolRequestBatchRemoteJSONSuccess` (verifica `_pin`)
+  - `TestProcessProtocolRequestBatchRemoteXMLSuccess` (verifica `_pin`).
+
+## Avance incremental (2026-02-17, PIN efectivo en dispatch de firma)
+- `protocolSignOperation` recupera PIN desde opciones (`_pin`/`pin`) cuando no llega como argumento directo.
+- `batch` local (`executeBatchSingle`) reenvía ese PIN al backend de firma (`sign/cosign/countersign`).
+- Mejora funcional:
+  - evita pérdidas de PIN entre capas y reduce fallos en escenarios de token/proveedor que lo requieren.
+- Tests:
+  - `TestProtocolSignOperationTakesPinFromOptions`
+  - ampliación de `TestExecuteBatchSinglePropagatesStoreHintsToSigner` para verificar PIN.
+
+## Avance incremental (2026-02-17, robustez de mecanismos PKCS11 para PK1)
+- Fallback PKCS11 directo de `PK1` reforzado en Linux:
+  - tolerancia explícita a `CKR_USER_ALREADY_LOGGED_IN`.
+  - mantenimiento explícito de mecanismo `CKM_RSA_PKCS` para respetar semántica `PRE -> PK1`.
+- Mejora:
+  - incrementa robustez de sesión manteniendo compatibilidad criptográfica en trifásico.
+
+## Avance incremental (2026-02-17, compatibilidad JSON batch camelCase)
+- `batch` JSON ahora soporta aliases camelCase comunes en integraciones:
+  - `stopOnError`, `subOperation`, `extraParams`, `singleSigns`, `dataReference`.
+- Objetivo:
+  - mejorar compatibilidad de entrada sin alterar semántica del formato original.
+- Test añadido:
+  - `TestParseBatchJSONRequestSupportsCamelCaseCompat`.
+
+  - Robustez adicional en batch trifásico remoto XML:
+    - en `tridata` XML, aplicación de `extraParams` por firma con fallback `signid` cuando `Id` no está disponible.
+    - test añadido:
+      - `TestSignTriphaseDataXMLAppliesPerSignOptionsBySignIDFallback`
+
+- Mejora funcional de sello visible PAdES:
+  - texto personalizado en 2 líneas (`CN=...` + línea de firma FNMT con fecha/hora), alineado a la izquierda.
+  - tamaño de texto máximo reducido al 50% del comportamiento anterior.
+  - render de texto proporcional al rectángulo y protegido contra desbordes (truncado con elipsis).
+  - integración persistente mediante `replace` de `pdfsign` a copia local parcheada en `third_party/pdfsign`.

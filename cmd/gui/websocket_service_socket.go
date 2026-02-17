@@ -7,9 +7,11 @@ package main
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +25,12 @@ const (
 	legacyMaxReadEmptyTries  = 10
 	legacyEOFMarker          = "@EOF"
 )
+
+var legacyMaxServicePayloadBytes = 32 * 1024 * 1024
+var legacyMaxRawRequestBytes = 8 * 1024 * 1024
+var errLegacyRequestTooLarge = errors.New("legacy request too large")
+
+const legacyMemoryError = "MEMORY_ERROR"
 
 type legacySocketReadResult struct {
 	RequestBody string
@@ -87,11 +95,19 @@ func (s *WebSocketServer) handleLegacyServiceConn(conn net.Conn) {
 		return
 	}
 	readRes, err := readLegacySocketPayload(conn)
-	if err != nil || strings.TrimSpace(readRes.RequestBody) == "" {
+	if errors.Is(err, errLegacyRequestTooLarge) {
+		_, _ = conn.Write(buildLegacyHTTPResponse(legacyMemoryError))
+		return
+	}
+	if err != nil {
+		_, _ = conn.Write(buildLegacyHTTPResponse("SAF_03: Parametros incorrectos"))
+		return
+	}
+	if strings.TrimSpace(readRes.RequestBody) == "" {
 		return
 	}
 	if err := s.checkLegacySessionIDValue(readRes.SessionID); err != nil {
-		_, _ = conn.Write(buildLegacyHTTPResponse("SAF_46: Id de sesion invalido"))
+		_, _ = conn.Write(buildLegacyHTTPResponse("SAF_03: Parametros incorrectos"))
 		return
 	}
 	res := s.processLegacyServiceCommand(readRes.RequestBody)
@@ -143,6 +159,9 @@ func readLegacySocketPayload(conn net.Conn) (legacySocketReadResult, error) {
 						}
 						if end > 0 {
 							data.WriteString(source[:end])
+							if data.Len() > legacyMaxRawRequestBytes {
+								return legacySocketReadResult{}, errLegacyRequestTooLarge
+							}
 						}
 					}
 				} else {
@@ -152,6 +171,9 @@ func readLegacySocketPayload(conn net.Conn) (legacySocketReadResult, error) {
 					}
 					if end > 0 {
 						data.WriteString(insert[:end])
+						if data.Len() > legacyMaxRawRequestBytes {
+							return legacySocketReadResult{}, errLegacyRequestTooLarge
+						}
 					}
 				}
 				return legacySocketReadResult{
@@ -161,6 +183,9 @@ func readLegacySocketPayload(conn net.Conn) (legacySocketReadResult, error) {
 			}
 
 			data.WriteString(insert)
+			if data.Len() > legacyMaxRawRequestBytes {
+				return legacySocketReadResult{}, errLegacyRequestTooLarge
+			}
 			if len(insert) > legacyBufferedSecRange {
 				subFragment = insert[len(insert)-legacyBufferedSecRange:]
 			} else {
@@ -194,12 +219,12 @@ func buildLegacyHTTPResponse(message string) []byte {
 }
 
 func (s *WebSocketServer) processLegacyServicePayload(raw string) string {
-	req := strings.TrimSpace(extractLegacyPayload(raw))
+	req := strings.TrimSpace(normalizeLegacyRequestPayload(extractLegacyPayload(raw)))
 	if req == "" {
 		return "SAF_03: Peticion vacia"
 	}
 	if err := s.checkLegacySessionID(req); err != nil {
-		return "SAF_46: Id de sesion invalido"
+		return "SAF_03: Parametros incorrectos"
 	}
 	return s.processLegacyServiceCommand(req)
 }
@@ -213,6 +238,7 @@ func (s *WebSocketServer) processLegacyServiceCommand(req string) string {
 			return "SAF_03: Comando cmd invalido"
 		}
 		uri := strings.TrimSpace(string(cmd))
+		uri = ensureProtocolVersionParam(uri, s.getServiceProtocolVersion())
 		uriLower := strings.ToLower(uri)
 		if !strings.HasPrefix(uriLower, "afirma://") ||
 			strings.HasPrefix(uriLower, "afirma://service?") ||
@@ -270,10 +296,18 @@ func (s *WebSocketServer) processLegacyServiceCommand(req string) string {
 			return "SAF_03: Fragmento invalido"
 		}
 		s.serviceMux.Lock()
-		if len(s.serviceFragments) < partTotal {
-			s.serviceFragments = make([]string, partTotal)
+		next, upErr := upsertLegacyFragment(s.serviceFragments, partIdx, string(chunk))
+		if upErr != nil {
+			s.serviceMux.Unlock()
+			return "SAF_03: Fragmento invalido"
 		}
-		s.serviceFragments[partIdx-1] = string(chunk)
+		if totalLegacyFragmentsSize(next) > legacyMaxServicePayloadBytes {
+			s.serviceFragments = nil
+			s.serviceResponseParts = nil
+			s.serviceMux.Unlock()
+			return legacyMemoryError
+		}
+		s.serviceFragments = next
 		s.serviceMux.Unlock()
 		if partIdx == partTotal {
 			return "OK"
@@ -296,6 +330,7 @@ func (s *WebSocketServer) processLegacyServiceCommand(req string) string {
 		if strings.TrimSpace(joined) == "" {
 			return "SAF_03: No hay datos fragmentados"
 		}
+		joined = ensureProtocolVersionParam(joined, s.getServiceProtocolVersion())
 		result := s.processProtocolRequest(joined)
 		joinedLower := strings.ToLower(joined)
 		if strings.HasPrefix(joinedLower, "afirma://save?") || strings.HasPrefix(joinedLower, "afirma://save/?") {
@@ -364,7 +399,7 @@ func extractLegacySessionID(raw string) string {
 	start := idx + len("idsession=")
 	end := len(raw)
 	lowerTail := strings.ToLower(raw[start:])
-	for _, sep := range []string{"@eof", "&", " ", "\r", "\n"} {
+	for _, sep := range []string{"@eof", "&", " http/", "\r", "\n"} {
 		if i := strings.Index(lowerTail, sep); i >= 0 {
 			if start+i < end {
 				end = start + i
@@ -434,7 +469,7 @@ func extractLegacyParam(raw, key string) (string, bool) {
 	start := idx + len(key)
 	end := len(raw)
 	lowerTail := strings.ToLower(raw[start:])
-	for _, sep := range []string{"idsession=", "@eof", "&", " ", "\r", "\n"} {
+	for _, sep := range []string{"idsession=", "@eof", "&", " http/", "\r", "\n"} {
 		if i := strings.Index(lowerTail, sep); i >= 0 {
 			if start+i < end {
 				end = start + i
@@ -443,6 +478,9 @@ func extractLegacyParam(raw, key string) (string, bool) {
 	}
 	val := strings.TrimSpace(raw[start:end])
 	val = strings.TrimPrefix(val, "?")
+	if decoded, err := url.QueryUnescape(val); err == nil {
+		val = decoded
+	}
 	return val, true
 }
 
@@ -458,4 +496,92 @@ func extractLegacyPayload(raw string) string {
 		return raw[idx+2:]
 	}
 	return raw
+}
+
+func totalLegacyFragmentsSize(frags []string) int {
+	total := 0
+	for _, f := range frags {
+		total += len(f)
+	}
+	return total
+}
+
+func normalizeLegacyRequestPayload(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || hasAnyLegacyCommand(raw) {
+		return raw
+	}
+	candidate := raw
+	for i := 0; i < 2; i++ {
+		decoded, err := url.QueryUnescape(candidate)
+		if err != nil {
+			return raw
+		}
+		decoded = strings.TrimSpace(decoded)
+		if decoded == "" || decoded == candidate {
+			break
+		}
+		if hasAnyLegacyCommand(decoded) {
+			return decoded
+		}
+		candidate = decoded
+	}
+	return raw
+}
+
+func hasAnyLegacyCommand(raw string) bool {
+	lower := strings.ToLower(raw)
+	return strings.Contains(lower, "cmd=") ||
+		strings.Contains(lower, "echo=") ||
+		strings.Contains(lower, "fragment=") ||
+		strings.Contains(lower, "firm=") ||
+		strings.Contains(lower, "send=")
+}
+
+func upsertLegacyFragment(frags []string, partIdx int, chunk string) ([]string, error) {
+	if partIdx <= 0 {
+		return nil, fmt.Errorf("invalid part")
+	}
+	if len(frags) == partIdx {
+		// Java parity: when size == part, replace existing part.
+		frags[partIdx-1] = chunk
+		return frags, nil
+	}
+	insertPos := partIdx - 1
+	if insertPos < 0 || insertPos > len(frags) {
+		// Java ArrayList.add(index, ...) rejects gaps/out-of-order inserts.
+		return nil, fmt.Errorf("out of order")
+	}
+	frags = append(frags, "")
+	copy(frags[insertPos+1:], frags[insertPos:])
+	frags[insertPos] = chunk
+	return frags, nil
+}
+
+func ensureProtocolVersionParam(uri string, v int) string {
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return uri
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return uri
+	}
+	if !strings.EqualFold(u.Scheme, "afirma") {
+		return uri
+	}
+	action := normalizeProtocolAction(extractProtocolAction(u))
+	if action == "" {
+		action = normalizeProtocolAction(getQueryParam(u.Query(), "op", "operation", "action"))
+	}
+	if action == "websocket" || action == "service" {
+		return uri
+	}
+	if strings.TrimSpace(getQueryParam(u.Query(), "v")) != "" {
+		return uri
+	}
+	q := u.Query()
+	q.Set("v", strconv.Itoa(v))
+	u.RawQuery = q.Encode()
+	return u.String()
 }

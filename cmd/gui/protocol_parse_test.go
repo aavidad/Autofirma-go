@@ -4,7 +4,10 @@
 
 package main
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseProtocolURI_AliasAndRequiredParams(t *testing.T) {
 	tests := []struct {
@@ -129,5 +132,76 @@ func TestParseProtocolURI_AliasAndRequiredParams(t *testing.T) {
 				tc.check(t, p)
 			}
 		})
+	}
+}
+
+func TestParseProtocolURI_MinimumClientVersionSatisfied(t *testing.T) {
+	uri := "afirma://sign?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService&mcv=0.0.46"
+	p, err := ParseProtocolURI(uri)
+	if err != nil {
+		t.Fatalf("error inesperado con mcv compatible: %v", err)
+	}
+	if p == nil {
+		t.Fatalf("protocol state nil")
+	}
+	if p.MinimumClientVersion != "0.0.46" {
+		t.Fatalf("mcv inesperado: %q", p.MinimumClientVersion)
+	}
+}
+
+func TestParseProtocolURI_MinimumClientVersionNotSatisfied(t *testing.T) {
+	uri := "afirma://sign?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService&mcv=9.0"
+	_, err := ParseProtocolURI(uri)
+	if err == nil {
+		t.Fatalf("se esperaba error por mcv no satisfecha")
+	}
+	if !errors.Is(err, errMinimumClientVersionNotSatisfied) {
+		t.Fatalf("se esperaba errMinimumClientVersionNotSatisfied, obtenido: %v", err)
+	}
+}
+
+func TestParseProtocolURI_MinimumClientVersionMalformed(t *testing.T) {
+	uri := "afirma://sign?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService&mcv=1..2"
+	_, err := ParseProtocolURI(uri)
+	if err == nil {
+		t.Fatalf("se esperaba error por mcv invalido")
+	}
+}
+
+func TestParseProtocolURI_ActiveWaitingParam(t *testing.T) {
+	p1, err := ParseProtocolURI("afirma://sign?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService&aw=true")
+	if err != nil {
+		t.Fatalf("error inesperado en aw=true: %v", err)
+	}
+	if !p1.ActiveWaiting {
+		t.Fatalf("aw=true debe activar espera activa")
+	}
+
+	p2, err := ParseProtocolURI("afirma://sign?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService")
+	if err != nil {
+		t.Fatalf("error inesperado sin aw: %v", err)
+	}
+	if p2.ActiveWaiting {
+		t.Fatalf("sin aw la espera activa debe quedar desactivada")
+	}
+}
+
+func TestParseProtocolURI_UnsupportedProcedureVersion(t *testing.T) {
+	_, err := ParseProtocolURI("afirma://sign?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService&v=5")
+	if err == nil {
+		t.Fatalf("se esperaba error por version de protocolo no soportada")
+	}
+	if !errors.Is(err, errUnsupportedProcedureVersion) {
+		t.Fatalf("se esperaba errUnsupportedProcedureVersion, obtenido: %v", err)
+	}
+}
+
+func TestParseProtocolURI_UnsupportedProcedureVersionFromVerAlias(t *testing.T) {
+	_, err := ParseProtocolURI("afirma://selectcert?id=abc&stservlet=https%3A%2F%2Fs.example%2FStorageService&ver=5")
+	if err == nil {
+		t.Fatalf("se esperaba error por version de protocolo no soportada en alias ver")
+	}
+	if !errors.Is(err, errUnsupportedProcedureVersion) {
+		t.Fatalf("se esperaba errUnsupportedProcedureVersion, obtenido: %v", err)
 	}
 }

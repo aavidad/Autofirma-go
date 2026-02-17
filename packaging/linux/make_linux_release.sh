@@ -149,8 +149,8 @@ echo "[linux] Installer: ${ARTIFACT_RUN}"
 echo "Intentando registrar CA local en navegadores..."
 CERTS_DIR="$HOME/.config/AutofirmaDipgra/certs"
 if [ -f "$CERTS_DIR/rootCA.crt" ] && command -v certutil >/dev/null 2>&1; then
-    certutil -d sql:$HOME/.pki/nssdb -A -t "CT,C,C" -n "Autofirma Dipgra Local Root CA" -i "$CERTS_DIR/rootCA.crt" 2>/dev/null
-    echo "CA registrada en NSS DB."
+    certutil -d "sql:$HOME/.pki/nssdb" -A -t "CT,C,C" -n "Autofirma Dipgra Local Root CA" -i "$CERTS_DIR/rootCA.crt" 2>/dev/null || true
+    echo "CA registrada/intendada en NSS DB (best effort)."
 else
     echo "No se pudo registrar la CA automáticamente (falta certutil o no se ha ejecutado la app aun)."
 fi

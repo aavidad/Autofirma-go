@@ -42,7 +42,10 @@ Section "Install"
   SetRegView 64
   SetOutPath "$INSTDIR"
   File /r "${BUNDLE_DIR}/*"
+  ; Prepare local TLS certs and trust so WSS works out-of-the-box.
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --generate-certs'
+  ExecWait '"$INSTDIR\autofirma-desktop.exe" --install-trust'
+  ExecWait '"$INSTDIR\autofirma-desktop.exe" --trust-status'
 
   ; Main executable
   WriteRegStr HKLM "Software\${COMPANY}\${APPNAME}" "Install_Dir" "$INSTDIR"

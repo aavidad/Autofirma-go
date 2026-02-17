@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"strings"
 
 	"autofirma-host/pkg/protocol"
 
@@ -19,16 +20,13 @@ import (
 
 // getPKCS11Certificates gets certificates from PKCS#11 devices (DNIe, smart cards)
 func getPKCS11Certificates() ([]protocol.Certificate, error) {
+	return getPKCS11CertificatesWithModules(nil)
+}
+
+func getPKCS11CertificatesWithModules(moduleHints []string) ([]protocol.Certificate, error) {
 	var allCerts []protocol.Certificate
 
-	// Common PKCS#11 module paths
-	modules := []string{
-		"/usr/lib/opensc-pkcs11.so",                  // OpenSC (DNIe)
-		"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so", // Ubuntu/Debian
-		"/usr/lib64/opensc-pkcs11.so",                // Fedora/RHEL
-		"/usr/lib/pkcs11/opensc-pkcs11.so",           // Generic
-		"/usr/local/lib/opensc-pkcs11.so",            // Custom install
-	}
+	modules := normalizePKCS11ModulePaths(moduleHints)
 
 	for _, modulePath := range modules {
 		if _, err := os.Stat(modulePath); err != nil {
@@ -42,6 +40,36 @@ func getPKCS11Certificates() ([]protocol.Certificate, error) {
 	}
 
 	return allCerts, nil
+}
+
+func normalizePKCS11ModulePaths(moduleHints []string) []string {
+	if len(moduleHints) > 0 {
+		out := make([]string, 0, len(moduleHints))
+		seen := make(map[string]struct{}, len(moduleHints))
+		for _, raw := range moduleHints {
+			p := strings.TrimSpace(raw)
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+
+	// Common PKCS#11 module paths
+	return []string{
+		"/usr/lib/opensc-pkcs11.so",                  // OpenSC (DNIe)
+		"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so", // Ubuntu/Debian
+		"/usr/lib64/opensc-pkcs11.so",                // Fedora/RHEL
+		"/usr/lib/pkcs11/opensc-pkcs11.so",           // Generic
+		"/usr/local/lib/opensc-pkcs11.so",            // Custom install
+	}
 }
 
 func getCertsFromPKCS11Module(modulePath string) ([]protocol.Certificate, error) {

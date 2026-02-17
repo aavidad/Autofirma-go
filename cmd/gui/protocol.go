@@ -5,10 +5,12 @@
 package main
 
 import (
+	"autofirma-host/pkg/version"
 	// Added for padding
 	"crypto/des"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -32,17 +34,24 @@ type xmlRoot struct {
 }
 
 type ProtocolState struct {
-	IsActive   bool
-	RTServlet  string
-	STServlet  string // Dedicated Storage URL
-	FileID     string
-	RequestID  string // Original URI fileid (used by WAIT loop)
-	Key        string
-	Action     string // "sign"
-	SourceURL  string
-	Params     url.Values // Store all params
-	SignFormat string     // Format from XML: "CAdES", "PAdES", "XAdES"
+	IsActive             bool
+	RTServlet            string
+	STServlet            string // Dedicated Storage URL
+	FileID               string
+	RequestID            string // Original URI fileid (used by WAIT loop)
+	Key                  string
+	Action               string // "sign"
+	SourceURL            string
+	Params               url.Values // Store all params
+	SignFormat           string     // Format from XML: "CAdES", "PAdES", "XAdES"
+	MinimumClientVersion string
+	JavaScriptVersion    int
+	ActiveWaiting        bool
+	ProtocolVersion      int
 }
+
+var errMinimumClientVersionNotSatisfied = errors.New("minimum client version not satisfied")
+var errUnsupportedProcedureVersion = errors.New("unsupported procedure version")
 
 // ParseProtocolURI parses "afirma://..." URI
 func ParseProtocolURI(uriString string) (*ProtocolState, error) {
@@ -55,13 +64,42 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 	q := u.Query()
 
 	state := &ProtocolState{
-		IsActive:  true,
-		SourceURL: uriString,
-		Action:    normalizeProtocolAction(extractProtocolAction(u)),
-		Params:    q, // Keep all params
+		IsActive:          true,
+		SourceURL:         uriString,
+		Action:            normalizeProtocolAction(extractProtocolAction(u)),
+		Params:            q, // Keep all params
+		JavaScriptVersion: 1,
+		ProtocolVersion:   1,
 	}
 	if state.Action == "" {
 		state.Action = normalizeProtocolAction(getQueryParam(q, "op", "operation", "action"))
+	}
+	state.MinimumClientVersion = getQueryParam(q, "mcv")
+	jvc := strings.TrimSpace(getQueryParam(q, "jvc"))
+	if jvc != "" {
+		if parsed, convErr := strconv.Atoi(jvc); convErr == nil {
+			state.JavaScriptVersion = parsed
+		}
+	}
+	if state.JavaScriptVersion < 1 {
+		log.Printf("[Protocol] JavaScript version code below secure minimum (jvc=%d required>=1)", state.JavaScriptVersion)
+	}
+	if state.MinimumClientVersion != "" {
+		requestedIsGreater, cmpErr := isRequestedVersionGreater(state.MinimumClientVersion, version.CurrentVersion)
+		if cmpErr != nil {
+			return nil, fmt.Errorf("valor de mcv invalido: %w", cmpErr)
+		}
+		if requestedIsGreater {
+			return nil, fmt.Errorf("%w: mcv=%s current=%s", errMinimumClientVersionNotSatisfied, state.MinimumClientVersion, version.CurrentVersion)
+		}
+	}
+	if vRaw := strings.TrimSpace(getQueryParam(q, "v", "ver")); vRaw != "" {
+		if parsed, convErr := strconv.Atoi(vRaw); convErr == nil {
+			state.ProtocolVersion = parsed
+		}
+	}
+	if state.ProtocolVersion < 0 || state.ProtocolVersion > 4 {
+		return nil, fmt.Errorf("%w: v=%d", errUnsupportedProcedureVersion, state.ProtocolVersion)
 	}
 
 	state.FileID = getQueryParam(q, "fileid", "id", "fileId", "requestId")
@@ -74,6 +112,7 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 	state.STServlet = getQueryParam(q, "stservlet", "storageservlet", "stServlet", "storageServlet")
 
 	state.SignFormat = getQueryParam(q, "format", "signFormat")
+	state.ActiveWaiting = parseBoolParam(getQueryParam(q, "aw"))
 
 	// Java protocol in WebSocket mode allows sign/cosign/countersign without
 	// servlet/id (servicesRequired=false) and resolves data through other flows.
@@ -97,6 +136,119 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 	}
 
 	return state, nil
+}
+
+type parsedClientVersion struct {
+	parts  []int
+	suffix string
+}
+
+func isRequestedVersionGreater(requested string, current string) (bool, error) {
+	reqV, err := parseClientVersion(requested)
+	if err != nil {
+		return false, err
+	}
+	curV, err := parseClientVersion(current)
+	if err != nil {
+		return false, err
+	}
+	return compareParsedClientVersion(reqV, curV) > 0, nil
+}
+
+func parseClientVersion(v string) (*parsedClientVersion, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, fmt.Errorf("version vacia")
+	}
+	rawParts := strings.Split(v, ".")
+	if len(rawParts) == 0 {
+		return nil, fmt.Errorf("version vacia")
+	}
+	out := &parsedClientVersion{
+		parts: make([]int, 0, len(rawParts)),
+	}
+	for i := 0; i < len(rawParts)-1; i++ {
+		part := strings.TrimSpace(rawParts[i])
+		if part == "" {
+			return nil, fmt.Errorf("parte vacia en version")
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("parte no numerica en version")
+		}
+		out.parts = append(out.parts, n)
+	}
+	last := strings.TrimSpace(rawParts[len(rawParts)-1])
+	if last == "" {
+		return nil, fmt.Errorf("parte final vacia en version")
+	}
+	limit := len(last)
+	for i := 0; i < len(last); i++ {
+		if last[i] < '0' || last[i] > '9' {
+			limit = i
+			break
+		}
+	}
+	if limit == 0 {
+		return nil, fmt.Errorf("parte final no numerica en version")
+	}
+	lastNum, err := strconv.Atoi(last[:limit])
+	if err != nil {
+		return nil, fmt.Errorf("parte final no numerica en version")
+	}
+	out.parts = append(out.parts, lastNum)
+	if limit < len(last) {
+		out.suffix = last[limit:]
+	}
+	return out, nil
+}
+
+func compareParsedClientVersion(a *parsedClientVersion, b *parsedClientVersion) int {
+	min := len(a.parts)
+	if len(b.parts) < min {
+		min = len(b.parts)
+	}
+	for i := 0; i < min; i++ {
+		if a.parts[i] > b.parts[i] {
+			return 1
+		}
+		if a.parts[i] < b.parts[i] {
+			return -1
+		}
+	}
+	if len(a.parts) > len(b.parts) {
+		return 1
+	}
+	if len(a.parts) < len(b.parts) {
+		return -1
+	}
+
+	as := a.suffix
+	bs := b.suffix
+	if strings.EqualFold(as, bs) {
+		return 0
+	}
+	if (as == "" || as[0] != ' ') && len(bs) > 0 && bs[0] == ' ' {
+		return 1
+	}
+	if (bs == "" || bs[0] != ' ') && len(as) > 0 && as[0] == ' ' {
+		return -1
+	}
+	if as == "" && len(bs) > 0 && bs[0] != ' ' {
+		return -1
+	}
+	if bs == "" && len(as) > 0 && as[0] != ' ' {
+		return 1
+	}
+	las := strings.ToLower(as)
+	lbs := strings.ToLower(bs)
+	if las > lbs {
+		return 1
+	}
+	if las < lbs {
+		return -1
+	}
+	return 0
 }
 
 func extractProtocolAction(u *url.URL) string {

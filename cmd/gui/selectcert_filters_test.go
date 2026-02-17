@@ -8,10 +8,12 @@ import (
 	"autofirma-host/pkg/protocol"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
+	"encoding/hex"
 	"math/big"
 	"net/url"
 	"strconv"
@@ -63,22 +65,40 @@ func TestMatchesKeyUsage(t *testing.T) {
 	if matchesKeyUsage(cert, "keyusage.keyencipherment:true") {
 		t.Fatalf("no se esperaba match keyEncipherment")
 	}
+	if !matchesKeyUsage(cert, "keyusage.keyencipherment:null") {
+		t.Fatalf("keyusage:*:null debe no restringir (paridad Java)")
+	}
 }
 
 func TestSigningCertFilterUsesNonRepudiationUsage(t *testing.T) {
-	signCert := generateProtocolCert(t, certGenOpts{
-		subjectCN: "Sign Cert",
-		keyUsage:  x509.KeyUsageContentCommitment,
-	})
-	authLikeCert := generateProtocolCert(t, certGenOpts{
-		subjectCN: "Auth Cert",
+	nonDnieDigitalSig := generateProtocolCert(t, certGenOpts{
+		subjectCN: "Non DNIe DS",
 		keyUsage:  x509.KeyUsageDigitalSignature,
 	})
-	if !certMatchesFilterToken(signCert, "signingcert:") {
-		t.Fatalf("se esperaba match signingcert para nonRepudiation/contentCommitment")
+	dnieAuth := generateProtocolCert(t, certGenOpts{
+		subjectCN: "DNIe Auth",
+		issuerCN:  "AC DNIE 001",
+		issuerOU:  "DNIE",
+		issuerO:   "DIRECCION GENERAL DE LA POLICIA",
+		issuerC:   "ES",
+		keyUsage:  x509.KeyUsageDigitalSignature,
+	})
+	dnieSign := generateProtocolCert(t, certGenOpts{
+		subjectCN: "DNIe Sign",
+		issuerCN:  "AC DNIE 001",
+		issuerOU:  "DNIE",
+		issuerO:   "DIRECCION GENERAL DE LA POLICIA",
+		issuerC:   "ES",
+		keyUsage:  x509.KeyUsageContentCommitment,
+	})
+	if !certMatchesFilterToken(nonDnieDigitalSig, "signingcert:") {
+		t.Fatalf("signingcert debe aceptar certificado no-DNIe aunque use digitalSignature")
 	}
-	if certMatchesFilterToken(authLikeCert, "signingcert:") {
-		t.Fatalf("no se esperaba match signingcert para solo digitalSignature")
+	if certMatchesFilterToken(dnieAuth, "signingcert:") {
+		t.Fatalf("signingcert debe excluir certificado de autenticacion DNIe")
+	}
+	if !certMatchesFilterToken(dnieSign, "signingcert:") {
+		t.Fatalf("signingcert debe aceptar certificado de firma DNIe")
 	}
 }
 
@@ -149,6 +169,24 @@ func TestSSLFilterMatchesSerial(t *testing.T) {
 	}
 	if certMatchesFilterToken(cert, "ssl:ABCDEF") {
 		t.Fatalf("no se esperaba match ssl por serial distinto")
+	}
+}
+
+func TestThumbprintFilterSupportsJavaAlgorithmFirstFormat(t *testing.T) {
+	cert := generateProtocolCert(t, certGenOpts{subjectCN: "Thumb Java"})
+	sum := sha1.Sum(cert.Content)
+	thumb := hex.EncodeToString(sum[:])
+	if !certMatchesFilterToken(cert, "thumbprint:SHA1:"+thumb) {
+		t.Fatalf("formato Java thumbprint:SHA1:<hex> debe hacer match")
+	}
+}
+
+func TestThumbprintFilterKeepsBackwardCompatibilityHexFirst(t *testing.T) {
+	cert := generateProtocolCert(t, certGenOpts{subjectCN: "Thumb Legacy"})
+	sum := sha1.Sum(cert.Content)
+	thumb := hex.EncodeToString(sum[:])
+	if !certMatchesFilterToken(cert, "thumbprint:"+thumb+":sha1") {
+		t.Fatalf("formato legacy thumbprint:<hex>:sha1 debe seguir haciendo match")
 	}
 }
 
@@ -235,6 +273,33 @@ func TestApplySelectCertFiltersQualifiedKeepsNonDNIeWithoutPair(t *testing.T) {
 	}
 }
 
+func TestFindAssociatedSignatureCertRequiresSameIssuerDN(t *testing.T) {
+	auth := generateProtocolCert(t, certGenOpts{
+		subjectCN:           "Auth",
+		subjectSerialNumber: "12345678Z",
+		issuerCN:            "CA Igual",
+		issuerOU:            "Unit",
+		issuerO:             "Org",
+		issuerC:             "ES",
+		issuerL:             "Granada",
+		keyUsage:            x509.KeyUsageDigitalSignature,
+	})
+	signDifferentIssuerDN := generateProtocolCert(t, certGenOpts{
+		subjectCN:           "Sign",
+		subjectSerialNumber: "12345678Z",
+		issuerCN:            "CA Igual",
+		issuerOU:            "Unit",
+		issuerO:             "Org",
+		issuerC:             "ES",
+		issuerL:             "Madrid",
+		keyUsage:            x509.KeyUsageContentCommitment,
+		notAfter:            parseRFC3339OrPanic(t, auth.ValidTo),
+	})
+	if _, ok := findAssociatedSignatureCert(auth, []protocol.Certificate{auth, signDifferentIssuerDN}); ok {
+		t.Fatalf("no debe emparejar certificados con issuer DN distinto aunque coincidan CN/O/OU/C")
+	}
+}
+
 func TestApplySelectCertFiltersPseudonymAndOthersDropsEquivalentNormal(t *testing.T) {
 	exp := time.Now().Add(365 * 24 * time.Hour)
 	pseudo := generateProtocolCert(t, certGenOpts{
@@ -269,6 +334,30 @@ func TestApplySelectCertFiltersPseudonymAndOthersDropsEquivalentNormal(t *testin
 	}
 }
 
+func TestCertIsCurrentlyValidFallsBackToX509Dates(t *testing.T) {
+	valid := generateProtocolCert(t, certGenOpts{
+		subjectCN: "Valido",
+		notAfter:  time.Now().Add(24 * time.Hour),
+	})
+	valid.ValidFrom = ""
+	valid.ValidTo = ""
+	valid.CanSign = false
+	if !certIsCurrentlyValid(valid) {
+		t.Fatalf("con fechas vacias en modelo, debe usar validez del X509 (valido)")
+	}
+
+	expired := generateProtocolCert(t, certGenOpts{
+		subjectCN: "Caducado",
+		notAfter:  time.Now().Add(-24 * time.Hour),
+	})
+	expired.ValidFrom = ""
+	expired.ValidTo = ""
+	expired.CanSign = true
+	if certIsCurrentlyValid(expired) {
+		t.Fatalf("con fechas vacias en modelo, debe usar validez del X509 (caducado)")
+	}
+}
+
 type certGenOpts struct {
 	subjectCN           string
 	subjectSerialNumber string
@@ -276,6 +365,7 @@ type certGenOpts struct {
 	issuerO             string
 	issuerOU            string
 	issuerC             string
+	issuerL             string
 	keyUsage            x509.KeyUsage
 	policies            []string
 	addPseudonymOID     bool
@@ -326,6 +416,7 @@ func generateProtocolCert(t *testing.T, opts certGenOpts) protocol.Certificate {
 			Organization:       []string{firstOrDefault(opts.issuerO, "ACME")},
 			OrganizationalUnit: []string{firstOrDefault(opts.issuerOU, "Unit")},
 			Country:            []string{firstOrDefault(opts.issuerC, "ES")},
+			Locality:           []string{firstOrDefault(opts.issuerL, "Granada")},
 		},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              notAfter,
@@ -399,6 +490,7 @@ func generateProtocolCert(t *testing.T, opts certGenOpts) protocol.Certificate {
 			"O":  firstOrDefault(opts.issuerO, "ACME"),
 			"OU": firstOrDefault(opts.issuerOU, "Unit"),
 			"C":  firstOrDefault(opts.issuerC, "ES"),
+			"L":  firstOrDefault(opts.issuerL, "Granada"),
 		},
 		ValidFrom: tpl.NotBefore.Format(time.RFC3339),
 		ValidTo:   tpl.NotAfter.Format(time.RFC3339),

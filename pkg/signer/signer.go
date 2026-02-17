@@ -6,6 +6,7 @@ package signer
 
 import (
 	"autofirma-host/pkg/applog"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -33,6 +34,11 @@ const (
 
 	defaultRetriesSmall = 0
 	defaultRetriesLarge = 1
+)
+
+var (
+	getSystemCertificatesFunc            = certstore.GetSystemCertificates
+	getSystemCertificatesWithOptionsFunc = certstore.GetSystemCertificatesWithOptions
 )
 
 func getEnvInt(name string, def int) int {
@@ -141,7 +147,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	format = resolvedFormat
 
 	// Get certificate by ID
-	cert, nickname, err := getCertificateByID(certificateID)
+	cert, nickname, err := getCertificateByID(certificateID, options)
 	if err != nil {
 		log.Printf("[Signer] Sign cert lookup failed cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
@@ -456,25 +462,140 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 }
 
 // getCertificateByID finds certificate by fingerprint ID
-func getCertificateByID(certificateID string) (*protocol.Certificate, string, error) {
-	// Get all certificates
-	certs, err := certstore.GetSystemCertificates()
+func getCertificateByID(certificateID string, options map[string]interface{}) (*protocol.Certificate, string, error) {
+	certs, err := getCertificatesForSignOptions(options)
 	if err != nil {
 		return nil, "", err
 	}
 
 	// Find certificate with matching ID
-	for _, cert := range certs {
-		if cert.ID == certificateID {
-			// Use the stored nickname
-			if cert.Nickname == "" {
-				return nil, "", fmt.Errorf("el certificado no tiene apodo (nickname)")
-			}
+	for i := range certs {
+		cert := certs[i]
+		if cert.ID != certificateID {
+			continue
+		}
+		if cert.Nickname != "" {
 			return &cert, cert.Nickname, nil
 		}
+		// Best-effort: when selected cert came from a source without nickname
+		// (e.g. raw PKCS#11 scan), retry against default lookup to find an
+		// equivalent certificate with export nickname.
+		if fallback, ok := findCertificateWithNickname(certs[i]); ok {
+			return &fallback, fallback.Nickname, nil
+		}
+		return nil, "", fmt.Errorf("el certificado no tiene apodo (nickname)")
 	}
 
 	return nil, "", fmt.Errorf("certificado no encontrado")
+}
+
+func getCertificatesForSignOptions(options map[string]interface{}) ([]protocol.Certificate, error) {
+	storePref, hints, includePKCS11, hasHintsOrOverride := resolveCertstoreOptions(options)
+	if hasHintsOrOverride {
+		log.Printf("[Signer] loading certificates with store options store=%s include_pkcs11=%t hints=%d",
+			storePref, includePKCS11, len(hints))
+		certs, err := getSystemCertificatesWithOptionsFunc(certstore.Options{
+			PKCS11ModulePaths: hints,
+			IncludePKCS11:     includePKCS11,
+		})
+		if err == nil {
+			if len(hints) > 0 && storePref == "PKCS11" && !hasPKCS11Certificates(certs) {
+				log.Printf("[Signer] PKCS11 hints yielded no token certificates, retrying default PKCS11 discovery")
+				return getSystemCertificatesFunc()
+			}
+			return certs, nil
+		}
+		log.Printf("[Signer] options certificate loader failed, fallback to default: %v", err)
+	}
+	return getSystemCertificatesFunc()
+}
+
+func resolveCertstoreOptions(options map[string]interface{}) (store string, hints []string, includePKCS11 bool, hasHintsOrOverride bool) {
+	store = strings.ToUpper(strings.TrimSpace(optionString(options, "_defaultKeyStore", "")))
+	includePKCS11 = shouldIncludePKCS11ForStore(store)
+	hasOverride := store != ""
+	if optionBool(options, "_disableOpeningExternalStores", false) && store != "PKCS11" {
+		includePKCS11 = false
+		hasOverride = true
+	}
+	rawLib := optionString(options, "_defaultKeyStoreLib", "")
+	if strings.EqualFold(store, "PKCS11") && strings.TrimSpace(rawLib) != "" {
+		hints = splitStoreLibHints(rawLib)
+	}
+	return store, hints, includePKCS11, hasOverride || len(hints) > 0 || !includePKCS11
+}
+
+func shouldIncludePKCS11ForStore(store string) bool {
+	switch strings.ToUpper(strings.TrimSpace(store)) {
+	case "":
+		return true
+	case "PKCS11":
+		return true
+	case "MOZ_UNI", "SHARED_NSS", "MOZILLA", "WINDOWS", "WINADDRESSBOOK", "APPLE", "MACOS", "KEYCHAIN":
+		return false
+	default:
+		return true
+	}
+}
+
+func splitStoreLibHints(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ';' || r == ',' })
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+func findCertificateWithNickname(selected protocol.Certificate) (protocol.Certificate, bool) {
+	certs, err := getSystemCertificatesFunc()
+	if err != nil {
+		return protocol.Certificate{}, false
+	}
+	for i := range certs {
+		cert := certs[i]
+		if cert.Nickname == "" {
+			continue
+		}
+		if cert.ID == selected.ID || sameCertificate(cert, selected) {
+			return cert, true
+		}
+	}
+	return protocol.Certificate{}, false
+}
+
+func sameCertificate(a, b protocol.Certificate) bool {
+	if strings.EqualFold(strings.TrimSpace(a.Fingerprint), strings.TrimSpace(b.Fingerprint)) &&
+		strings.TrimSpace(a.Fingerprint) != "" && strings.TrimSpace(b.Fingerprint) != "" {
+		return true
+	}
+	if len(a.Content) > 0 && len(b.Content) > 0 && bytes.Equal(a.Content, b.Content) {
+		return true
+	}
+	return false
+}
+
+func hasPKCS11Certificates(certs []protocol.Certificate) bool {
+	for _, c := range certs {
+		src := strings.ToLower(strings.TrimSpace(c.Source))
+		if src == "smartcard" || src == "dnie" {
+			return true
+		}
+	}
+	return false
 }
 
 // exportCertificateToP12 exports certificate and private key to PKCS#12.

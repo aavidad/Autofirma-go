@@ -50,6 +50,42 @@ tail -f /tmp/autofirma-web-compat.log
 ./scripts/run_web_compat_server.sh stop
 ```
 
+## 6) Flujo E2E guiado (Valide + segunda sede)
+```bash
+cd /home/alberto/Trabajo/Autofirma-go
+./scripts/run_sede_e2e.sh start --clean-logs
+```
+
+Tras ejecutar manualmente la firma en las sedes:
+```bash
+./scripts/run_sede_e2e.sh check --since-minutes 240
+./scripts/run_sede_e2e.sh stop
+```
+
+## 7) Ajustes por sede (red inestable / servicios lentos)
+Variables de entorno disponibles para lote trifásico remoto:
+
+```bash
+# Timeout HTTP de prefirma/postfirma (elige una)
+export AUTOFIRMA_BATCH_HTTP_TIMEOUT_MS=30000
+# o
+export AUTOFIRMA_BATCH_HTTP_TIMEOUT_SEC=30
+
+# Reintentos HTTP transitorios (default 3, max 6)
+export AUTOFIRMA_BATCH_HTTP_MAX_ATTEMPTS=5
+
+# Circuit breaker por host remoto
+# Se abre tras N fallos consecutivos (default 3, max 10)
+export AUTOFIRMA_BATCH_BREAKER_THRESHOLD=4
+# Cooldown del breaker (default 20s, max 5m)
+export AUTOFIRMA_BATCH_BREAKER_COOLDOWN_SEC=45
+```
+
+Aplicar y ejecutar E2E:
+```bash
+./scripts/run_sede_e2e.sh start --clean-logs
+```
+
 ## Notas
 - Esta validación comprueba compatibilidad de canal (`wss://127.0.0.1:63117`) y protocolo básico.
 - El resultado final en web oficial depende también del flujo exacto de `afirma://...` que emita AutoScript en esa sesión.

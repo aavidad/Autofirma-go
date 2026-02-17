@@ -156,3 +156,52 @@ func TestBuildProtocolSignOptionsCanonicalizesCounterSignAndDigestKeys(t *testin
 		t.Fatalf("precalculatedHashAlgorithm inesperado: %#v", got)
 	}
 }
+
+func TestBuildProtocolSignOptionsPropagatesStoreHintsForSigner(t *testing.T) {
+	props := "filter=disableopeningexternalstores\n"
+	state := &ProtocolState{
+		Params: url.Values{
+			"properties":         []string{base64.StdEncoding.EncodeToString([]byte(props))},
+			"defaultKeyStore":    []string{"PKCS11"},
+			"defaultKeyStoreLib": []string{"/opt/lib/p11a.so;/opt/lib/p11b.so"},
+		},
+	}
+
+	opts := buildProtocolSignOptions(state, "cades")
+	if got := opts["_defaultKeyStore"]; got != "PKCS11" {
+		t.Fatalf("defaultKeyStore no propagado: %#v", got)
+	}
+	if got := opts["_defaultKeyStoreLib"]; got != "/opt/lib/p11a.so;/opt/lib/p11b.so" {
+		t.Fatalf("defaultKeyStoreLib no propagado: %#v", got)
+	}
+	if got, ok := opts["_disableOpeningExternalStores"].(bool); !ok || !got {
+		t.Fatalf("disableopeningexternalstores no propagado: %#v", opts["_disableOpeningExternalStores"])
+	}
+}
+
+func TestBuildProtocolSignOptionsReadsPropertiesCaseInsensitiveParam(t *testing.T) {
+	props := "signReason=DesdePropertiesMayus\n"
+	state := &ProtocolState{
+		Params: url.Values{
+			"Properties": []string{base64.StdEncoding.EncodeToString([]byte(props))},
+		},
+	}
+
+	opts := buildProtocolSignOptions(state, "cades")
+	if got := opts["reason"]; got != "DesdePropertiesMayus" {
+		t.Fatalf("properties case-insensitive no aplicado: %#v", got)
+	}
+}
+
+func TestBuildProtocolSignOptionsPropagatesPINForSigner(t *testing.T) {
+	state := &ProtocolState{
+		Params: url.Values{
+			"pin": []string{"1234"},
+		},
+	}
+
+	opts := buildProtocolSignOptions(state, "cades")
+	if got := opts["_pin"]; got != "1234" {
+		t.Fatalf("pin no propagado: %#v", got)
+	}
+}
