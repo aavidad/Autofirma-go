@@ -117,6 +117,7 @@ type UI struct {
 	BtnExpertSave       widget.Clickable
 
 	BtnAbout           widget.Clickable
+	BtnHelp            widget.Clickable
 	BtnCheckUpdates    widget.Clickable
 	BtnViewLogs        widget.Clickable
 	BtnHealthCheck     widget.Clickable
@@ -387,6 +388,46 @@ func (ui *UI) openFolder() {
 		ui.StatusMsg = "No se pudo abrir la carpeta del PDF firmado: " + err.Error()
 		ui.Window.Invalidate()
 	}
+}
+
+func (ui *UI) openHelpManual() {
+	manualPath, err := resolveHelpManualPath()
+	if err != nil {
+		ui.StatusMsg = "No se encontró el manual de ayuda: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	if err := openExternal(manualPath); err != nil {
+		ui.StatusMsg = "No se pudo abrir el manual de ayuda: " + err.Error()
+		ui.Window.Invalidate()
+	}
+}
+
+func resolveHelpManualPath() (string, error) {
+	const manualRel = "docs/GUI_AYUDA_EXHAUSTIVA.md"
+	candidates := make([]string, 0, 5)
+
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		candidates = append(candidates, filepath.Join(wd, manualRel))
+	}
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(exeDir, manualRel))
+		candidates = append(candidates, filepath.Join(exeDir, "GUI_AYUDA_EXHAUSTIVA.md"))
+		candidates = append(candidates, filepath.Join(exeDir, "..", manualRel))
+	}
+	candidates = append(candidates, filepath.Join("/opt/autofirma-dipgra", manualRel))
+
+	for _, candidate := range candidates {
+		p := filepath.Clean(strings.TrimSpace(candidate))
+		if p == "" {
+			continue
+		}
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("buscado en rutas estándar de desarrollo/instalación")
 }
 
 func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
@@ -1101,6 +1142,14 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													}
 													btn := material.Button(ui.Theme, &ui.BtnViewLogs, "Ver logs")
 													btn.Background = color.NRGBA{R: 70, G: 70, B: 70, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnHelp.Clicked(gtx) {
+														ui.openHelpManual()
+													}
+													btn := material.Button(ui.Theme, &ui.BtnHelp, "Ayuda")
+													btn.Background = color.NRGBA{R: 64, G: 104, B: 160, A: 255}
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
