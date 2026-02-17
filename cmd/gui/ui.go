@@ -22,6 +22,7 @@ import (
 	"image/png"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,6 +73,7 @@ type UI struct {
 	BtnCheckUpdates widget.Clickable
 	BtnViewLogs     widget.Clickable
 	BtnHealthCheck  widget.Clickable
+	BtnFindIssue    widget.Clickable
 	BtnCopyReport   widget.Clickable
 	BtnOpenSealWeb  widget.Clickable
 	ShowAbout       bool
@@ -100,6 +102,7 @@ type UI struct {
 	UpdateCheckRunning  bool
 	HealthStatus        string
 	HealthCheckRunning  bool
+	ProblemScanRunning  bool
 
 	DiagTransport      string
 	DiagAction         string
@@ -867,6 +870,18 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.BtnFindIssue.Clicked(gtx) && !ui.ProblemScanRunning {
+														go ui.runProblemFinder()
+													}
+													btnText := "Encontrar problema"
+													if ui.ProblemScanRunning {
+														btnText = "Analizando problema..."
+													}
+													btn := material.Button(ui.Theme, &ui.BtnFindIssue, btnText)
+													btn.Background = color.NRGBA{R: 140, G: 95, B: 40, A: 255}
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													if ui.BtnCopyReport.Clicked(gtx) {
 														ui.copyTechnicalReport()
 													}
@@ -1339,7 +1354,7 @@ func (ui *UI) signCurrentFile() {
 				return
 			}
 			if err != nil {
-				ui.StatusMsg = "Error al firmar: " + err.Error()
+				ui.StatusMsg = buildUserSignErrorMessage(err, effectiveFormat)
 				ui.Window.Invalidate()
 				return
 			}
@@ -1424,10 +1439,14 @@ func (ui *UI) signCurrentFile() {
 
 			if isLegacyUpload {
 				log.Println("[UI] Performing legacy HTTP upload...")
-				err := ui.Protocol.UploadSignature(signatureB64, certB64)
-				if err != nil {
+				if err := ui.Protocol.UploadSignature(signatureB64, certB64); err != nil {
 					log.Printf("[UI] Upload failed: %v", err)
+					ui.updateSessionDiagnostics("legacy-upload", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "upload_error_afirma")
+					ui.StatusMsg = buildAfirmaUploadErrorMessage(err, ui.Protocol.STServlet, ui.Protocol.RTServlet)
+					ui.Window.Invalidate()
+					return
 				} else {
+					ui.updateSessionDiagnostics("legacy-upload", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "upload_ok")
 					log.Println("[UI] Upload successful.")
 				}
 			} else {
@@ -1585,6 +1604,116 @@ func (ui *UI) runLocalHealthCheck() {
 	ui.HealthStatus = strings.Join(lines, " | ")
 }
 
+func (ui *UI) runProblemFinder() {
+	ui.ProblemScanRunning = true
+	ui.HealthStatus = "Analizando causa probable del problema..."
+	ui.Window.Invalidate()
+	defer func() {
+		ui.ProblemScanRunning = false
+		ui.Window.Invalidate()
+	}()
+
+	var lines []string
+	if _, err := exec.LookPath("openssl"); err != nil {
+		lines = append(lines, "Causa probable: falta OpenSSL en el sistema.")
+		lines = append(lines, "Acción: instala openssl y reintenta.")
+	}
+	if _, err := exec.LookPath("pk12util"); err != nil {
+		lines = append(lines, "Causa probable: falta pk12util (NSS tools).")
+		lines = append(lines, "Acción: instala libnss3-tools y reintenta.")
+	}
+
+	certs, err := certstore.GetSystemCertificates()
+	if err != nil {
+		lines = append(lines, "Causa probable: no se pudo leer el almacén de certificados.")
+		lines = append(lines, "Detalle: "+summarizeServerBody(err.Error()))
+	} else {
+		signable := 0
+		for _, c := range certs {
+			if c.CanSign {
+				signable++
+			}
+		}
+		if len(certs) == 0 {
+			lines = append(lines, "Causa probable: no hay certificados instalados.")
+		} else if signable == 0 {
+			lines = append(lines, "Causa probable: hay certificados, pero ninguno apto para firma (caducado/no válido/uso no permitido).")
+		}
+	}
+
+	if ui.Protocol != nil {
+		if host := describeAfirmaEndpoint(ui.Protocol.STServlet, ui.Protocol.RTServlet); host != "" {
+			if err := checkEndpointReachability(ui.Protocol.STServlet, ui.Protocol.RTServlet); err != nil {
+				lines = append(lines, "Causa probable externa: no se alcanza el servidor @firma ("+host+").")
+				lines = append(lines, "Detalle: "+summarizeServerBody(err.Error()))
+			}
+		}
+	}
+
+	errHints := collectRecentErrorHints(resolveCurrentLogFile())
+	lines = append(lines, errHints...)
+
+	if len(lines) == 0 {
+		lines = append(lines, "No se detectó un fallo local claro.")
+		lines = append(lines, "Si el error persiste, puede ser incidencia temporal del servidor @firma o de la sede.")
+	}
+	ui.HealthStatus = strings.Join(lines, " | ")
+}
+
+func checkEndpointReachability(stServlet string, rtServlet string) error {
+	raw := strings.TrimSpace(stServlet)
+	if raw == "" {
+		raw = strings.TrimSpace(rtServlet)
+	}
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	host := strings.TrimSpace(u.Host)
+	if host == "" {
+		return fmt.Errorf("host vacío en servlet")
+	}
+	if !strings.Contains(host, ":") {
+		if strings.EqualFold(u.Scheme, "https") {
+			host += ":443"
+		} else {
+			host += ":80"
+		}
+	}
+	conn, err := net.DialTimeout("tcp", host, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	_ = conn.Close()
+	return nil
+}
+
+func collectRecentErrorHints(logFile string) []string {
+	lines := readRecentSanitizedLogLines(logFile, 80)
+	var hints []string
+	joined := strings.ToLower(strings.Join(lines, " | "))
+	switch {
+	case strings.Contains(joined, "upload failed"):
+		hints = append(hints, "Se detectó fallo reciente al subir resultado a @firma (legacy upload).")
+	case strings.Contains(joined, "upload http error"):
+		hints = append(hints, "Se detectó rechazo HTTP reciente del servidor @firma.")
+	case strings.Contains(joined, "no such host"), strings.Contains(joined, "name or service not known"):
+		hints = append(hints, "Se detectó fallo DNS reciente hacia servidor de firma.")
+	case strings.Contains(joined, "connection refused"), strings.Contains(joined, "no route to host"):
+		hints = append(hints, "Se detectó fallo de conectividad de red reciente hacia servidor externo.")
+	case strings.Contains(joined, "pk12util"), strings.Contains(joined, "openssl"):
+		hints = append(hints, "Se detectó fallo criptográfico local reciente (openssl/pk12util).")
+	case strings.Contains(joined, "certificado no encontrado"):
+		hints = append(hints, "Se detectó selección de certificado no disponible.")
+	case strings.Contains(joined, "no permite exportar su clave privada"), strings.Contains(joined, "clave no exportable"):
+		hints = append(hints, "Se detectó uso de clave no exportable para el formato elegido.")
+	}
+	return hints
+}
+
 func (ui *UI) copyTechnicalReport() {
 	report := ui.buildTechnicalReport()
 	if err := copyToClipboard(report); err != nil {
@@ -1738,6 +1867,7 @@ func isDiagnosticLogLine(line string) bool {
 }
 
 var afirmaURIRegex = regexp.MustCompile(`afirma://\S+`)
+var uploadHTTPStatusRegex = regexp.MustCompile(`upload http error:\s*(\d+)`)
 
 func sanitizeReportLogLine(line string) string {
 	trimmed := strings.TrimSpace(line)
@@ -1749,6 +1879,87 @@ func sanitizeReportLogLine(line string) string {
 		return trimmed[:260] + "...(trunc)"
 	}
 	return trimmed
+}
+
+func buildAfirmaUploadErrorMessage(err error, stServlet string, rtServlet string) string {
+	if err == nil {
+		return "Error enviando la firma a @firma."
+	}
+	raw := strings.TrimSpace(err.Error())
+	if raw == "" {
+		return "Error enviando la firma a @firma."
+	}
+	lower := strings.ToLower(raw)
+	endpoint := describeAfirmaEndpoint(stServlet, rtServlet)
+	if endpoint == "" {
+		endpoint = "servidor de @firma"
+	}
+
+	if strings.Contains(lower, "no such host") || strings.Contains(lower, "name or service not known") {
+		return fmt.Sprintf("No se pudo resolver el DNS de %s. Revise red/VPN y la URL de @firma.", endpoint)
+	}
+	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
+		return fmt.Sprintf("El %s no respondió a tiempo. Puede ser una caída temporal del servicio @firma.", endpoint)
+	}
+	if strings.Contains(lower, "connection refused") || strings.Contains(lower, "no route to host") {
+		return fmt.Sprintf("No se pudo conectar con %s (conexión rechazada o sin ruta).", endpoint)
+	}
+	if strings.Contains(lower, "tls:") || strings.Contains(lower, "x509:") || strings.Contains(lower, "certificate") {
+		return fmt.Sprintf("Falló la conexión TLS con %s. Revise certificados de confianza/proxy.", endpoint)
+	}
+	if m := uploadHTTPStatusRegex.FindStringSubmatch(lower); len(m) == 2 {
+		switch m[1] {
+		case "400":
+			return fmt.Sprintf("%s devolvió HTTP 400 (petición inválida). Parámetros incompatibles o sesión expirada.", endpoint)
+		case "401", "403":
+			return fmt.Sprintf("%s rechazó la petición (HTTP %s). Falta autenticación o permisos en @firma.", endpoint, m[1])
+		case "404":
+			return fmt.Sprintf("El endpoint de %s no existe (HTTP 404). Revise STServlet/RTServlet.", endpoint)
+		case "409":
+			return fmt.Sprintf("%s devolvió conflicto de sesión (HTTP 409). Reintente la operación.", endpoint)
+		case "413":
+			return fmt.Sprintf("%s rechazó el tamaño de la firma (HTTP 413).", endpoint)
+		case "429":
+			return fmt.Sprintf("%s está limitando peticiones (HTTP 429). Espere y reintente.", endpoint)
+		}
+		if strings.HasPrefix(m[1], "5") {
+			return fmt.Sprintf("%s devolvió HTTP %s. Incidencia temporal en @firma.", endpoint, m[1])
+		}
+		return fmt.Sprintf("Error HTTP %s al enviar la firma a %s.", m[1], endpoint)
+	}
+	if strings.Contains(lower, "server upload returned non-ok body") {
+		return fmt.Sprintf("%s devolvió respuesta no válida al guardar la firma. Detalle: %s", endpoint, summarizeServerBody(raw))
+	}
+	return fmt.Sprintf("Error enviando la firma a %s. Detalle técnico: %s", endpoint, summarizeServerBody(raw))
+}
+
+func describeAfirmaEndpoint(stServlet string, rtServlet string) string {
+	raw := strings.TrimSpace(stServlet)
+	if raw == "" {
+		raw = strings.TrimSpace(rtServlet)
+	}
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || strings.TrimSpace(u.Host) == "" {
+		return "endpoint de @firma"
+	}
+	return u.Host
+}
+
+func summarizeServerBody(raw string) string {
+	if idx := strings.LastIndex(raw, ":"); idx >= 0 && idx < len(raw)-1 {
+		raw = raw[idx+1:]
+	}
+	raw = strings.TrimSpace(strings.ReplaceAll(raw, "\n", " "))
+	if len(raw) > 140 {
+		return raw[:140] + "...(trunc)"
+	}
+	if raw == "" {
+		return "sin detalle"
+	}
+	return raw
 }
 
 func copyToClipboard(text string) error {
@@ -1827,6 +2038,56 @@ func normalizeCheckIssue(err error) string {
 	default:
 		return msg
 	}
+}
+
+func buildUserSignErrorMessage(err error, format string) string {
+	if err == nil {
+		return "Error al firmar."
+	}
+	raw := strings.TrimSpace(err.Error())
+	if raw == "" {
+		return "Error al firmar."
+	}
+	lower := strings.ToLower(raw)
+	fmtLabel := strings.ToUpper(strings.TrimSpace(format))
+	if fmtLabel == "" {
+		fmtLabel = "AUTO"
+	}
+
+	if strings.Contains(lower, "certificado no encontrado") {
+		return "No se pudo usar el certificado seleccionado. Puede haberse retirado del almacén o token."
+	}
+	if strings.Contains(lower, "certificado caducado") {
+		return "El certificado está caducado y no puede usarse para firmar."
+	}
+	if strings.Contains(lower, "aun no valido") || strings.Contains(lower, "aún no válido") {
+		return "El certificado todavía no es válido (fecha/hora del sistema o vigencia del certificado)."
+	}
+	if strings.Contains(lower, "no permite exportar su clave privada") || strings.Contains(lower, "clave no exportable") {
+		if strings.EqualFold(format, "pades") {
+			return "El certificado no permite PAdES con este método (clave no exportable). Pruebe CAdES o certificado software."
+		}
+		return "El certificado no permite usar su clave privada para esta operación."
+	}
+	if strings.Contains(lower, "pin") || strings.Contains(lower, "pkcs11") || strings.Contains(lower, "smartcard") || strings.Contains(lower, "token") {
+		return "No se pudo autenticar el certificado en el dispositivo criptográfico (PIN/token/tarjeta)."
+	}
+	if strings.Contains(lower, "acceso denegado") || strings.Contains(lower, "permission denied") {
+		return "El sistema denegó el acceso a la clave privada o al almacén de certificados."
+	}
+	if strings.Contains(lower, "fallo al firmar en el almacen de windows") || strings.Contains(lower, "almacen de windows") {
+		return "Falló la firma en el almacén de Windows. Puede ser una restricción del proveedor criptográfico."
+	}
+	if strings.Contains(lower, "datos base64 inválidos") || strings.Contains(lower, "xml invalido") {
+		return "Los datos de entrada para firmar son inválidos o están corruptos."
+	}
+	if strings.Contains(lower, "openssl") || strings.Contains(lower, "pk12util") {
+		return "Falló una dependencia criptográfica local (OpenSSL/pk12util). Revise la instalación del entorno."
+	}
+	if strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") {
+		return "La operación de firma agotó el tiempo de espera."
+	}
+	return fmt.Sprintf("Error al firmar en formato %s. Detalle técnico: %s", fmtLabel, summarizeServerBody(raw))
 }
 
 func (ui *UI) checkUpdates(silent bool) {
