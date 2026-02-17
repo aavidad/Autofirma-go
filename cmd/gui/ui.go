@@ -11,6 +11,7 @@ import (
 	"autofirma-host/pkg/signer"
 	"autofirma-host/pkg/updater"
 	"autofirma-host/pkg/version"
+	"bufio"
 	"bytes"
 	_ "embed"
 	"encoding/base64"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync" // Added for WaitGroup
@@ -1586,9 +1588,17 @@ func (ui *UI) runLocalHealthCheck() {
 func (ui *UI) copyTechnicalReport() {
 	report := ui.buildTechnicalReport()
 	if err := copyToClipboard(report); err != nil {
-		ui.HealthStatus = "No se pudo copiar al portapapeles, reporte en logs: " + err.Error()
+		reportPath, saveErr := writeTechnicalReportFile(report)
+		if saveErr != nil {
+			ui.HealthStatus = "No se pudo copiar ni guardar el reporte: " + err.Error()
+			log.Printf("[Report] copy error: %v", err)
+			log.Printf("[Report] save fallback error: %v", saveErr)
+			ui.Window.Invalidate()
+			return
+		}
+		ui.HealthStatus = "No se pudo copiar al portapapeles. Reporte guardado en: " + reportPath
 		log.Printf("[Report] copy error: %v", err)
-		log.Printf("[Report] content: %s", report)
+		log.Printf("[Report] report saved: %s", reportPath)
 		ui.Window.Invalidate()
 		return
 	}
@@ -1597,6 +1607,7 @@ func (ui *UI) copyTechnicalReport() {
 }
 
 func (ui *UI) buildTechnicalReport() string {
+	logFile := resolveCurrentLogFile()
 	lines := []string{
 		"Autofirma Dipgra - Reporte técnico",
 		"timestamp=" + time.Now().Format(time.RFC3339),
@@ -1612,13 +1623,132 @@ func (ui *UI) buildTechnicalReport() string {
 		"update_status=" + strings.TrimSpace(ui.UpdateStatus),
 		"health_status=" + strings.TrimSpace(ui.HealthStatus),
 		"log_dir=" + resolveLogDirectory(),
+		"log_file=" + strings.TrimSpace(logFile),
 	}
 	if trustLines, err := localTLSTrustStatus(); err == nil {
 		for _, l := range trustLines {
 			lines = append(lines, "trust="+l)
 		}
 	}
+	for _, l := range readRecentSanitizedLogLines(logFile, 40) {
+		lines = append(lines, "log="+l)
+	}
 	return strings.Join(lines, "\n")
+}
+
+func writeTechnicalReportFile(report string) (string, error) {
+	reportDir := filepath.Join(os.TempDir(), "AutofirmaDipgra", "reports")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(reportDir, "technical-report-"+time.Now().Format("20060102-150405")+".txt")
+	if err := os.WriteFile(path, []byte(report), 0644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func resolveCurrentLogFile() string {
+	if p := strings.TrimSpace(applog.Path()); p != "" {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	logDir := resolveLogDirectory()
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return ""
+	}
+	var newestPath string
+	var newestTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".log") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if newestPath == "" || info.ModTime().After(newestTime) {
+			newestPath = filepath.Join(logDir, entry.Name())
+			newestTime = info.ModTime()
+		}
+	}
+	return newestPath
+}
+
+func readRecentSanitizedLogLines(path string, maxLines int) []string {
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return []string{"log_unavailable"}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return []string{"log_open_error=" + err.Error()}
+	}
+	defer f.Close()
+
+	const bufferSize = 300
+	scanner := bufio.NewScanner(f)
+	rawTail := make([]string, 0, bufferSize)
+	for scanner.Scan() {
+		rawTail = append(rawTail, scanner.Text())
+		if len(rawTail) > bufferSize {
+			rawTail = rawTail[1:]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return []string{"log_scan_error=" + err.Error()}
+	}
+	if len(rawTail) == 0 {
+		return []string{"log_empty"}
+	}
+
+	relevant := make([]string, 0, len(rawTail))
+	for _, line := range rawTail {
+		if isDiagnosticLogLine(line) {
+			relevant = append(relevant, line)
+		}
+	}
+	source := rawTail
+	if len(relevant) > 0 {
+		source = relevant
+	}
+	if len(source) > maxLines {
+		source = source[len(source)-maxLines:]
+	}
+
+	out := make([]string, 0, len(source))
+	for _, line := range source {
+		out = append(out, sanitizeReportLogLine(line))
+	}
+	return out
+}
+
+func isDiagnosticLogLine(line string) bool {
+	l := strings.ToLower(line)
+	return strings.Contains(l, "[ui-diag]") ||
+		strings.Contains(l, "[websocket]") ||
+		strings.Contains(l, "[protocol]") ||
+		strings.Contains(l, "[signer]") ||
+		strings.Contains(l, "[trust]")
+}
+
+var afirmaURIRegex = regexp.MustCompile(`afirma://\S+`)
+
+func sanitizeReportLogLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "-"
+	}
+	trimmed = afirmaURIRegex.ReplaceAllStringFunc(trimmed, applog.SanitizeURI)
+	if len(trimmed) > 260 {
+		return trimmed[:260] + "...(trunc)"
+	}
+	return trimmed
 }
 
 func copyToClipboard(text string) error {
