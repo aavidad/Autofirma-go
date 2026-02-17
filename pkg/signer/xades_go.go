@@ -6,6 +6,7 @@ package signer
 
 import (
 	"crypto"
+	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
@@ -172,11 +173,13 @@ func signatureMatchCandidates(sig *etree.Element) []string {
 	cands := []string{}
 	cert := extractSignatureCertificateFromElement(sig)
 	if cert != nil {
+		sha1fp := fmt.Sprintf("%x", sha1.Sum(cert.Raw))
 		cands = append(cands,
 			strings.ToLower(strings.TrimSpace(cert.Subject.CommonName)),
 			strings.ToLower(strings.TrimSpace(cert.Subject.String())),
 			strings.ToLower(strings.TrimSpace(cert.SerialNumber.String())),
 			strings.ToLower(strings.TrimSpace(strings.ToUpper(cert.SerialNumber.Text(16)))),
+			strings.ToLower(strings.TrimSpace(sha1fp)),
 			strings.ToLower(strings.TrimSpace(fmt.Sprintf("%x", cert.Raw))),
 		)
 	}

@@ -38,6 +38,8 @@ Evidencias objetivas:
   - `pkg/signer/xades_go.go`
   - `pkg/signer/operations_test.go`
   - `pkg/signer/xades_multisign_test.go`
+- Cierre tecnico incorporado en esta iteracion:
+  - matching de `signers` en XAdES countersign ampliado a `CN`, `DN`, serie decimal/hex y `SHA1` de certificado (alineado con criterios usados en CAdES).
 - Pendiente tecnico para cierre 100%:
   - validacion interoperable en receptor real de la estructura de contrafirma XAdES generada.
   - decidir criterio final para `countersign` en PAdES (comportamiento compatible exigido por sedes).

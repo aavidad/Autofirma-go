@@ -21,6 +21,9 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - en `XAdES` se distingue ya la operacion nativa:
     - `cosign`: anade firma enveloped adicional sobre el documento XML.
     - `countersign`: contrafirma firmas XML existentes (seleccion `tree/leafs/signers`) insertando firmas enveloped sobre nodos `Signature` objetivo.
+  - afinada seleccion de firmantes objetivo en `XAdES countersign` para interoperabilidad:
+    - matching por `CN`, `Subject DN`, serie decimal/hex y huella `SHA1` del certificado.
+    - tests unitarios de seleccion por `CN` y `SHA1`.
   - fallback a `sign` se reserva para formatos realmente no soportados.
   - se mantiene `cosign/countersign` CAdES nativo cuando aplica.
   - contrafirma CAdES: algoritmos no reconocidos ya no rompen el flujo; se aplica fallback seguro a `SHA256withRSA` para mejorar interoperabilidad.
