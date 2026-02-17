@@ -205,3 +205,41 @@ func TestBuildProtocolSignOptionsPropagatesPINForSigner(t *testing.T) {
 		t.Fatalf("pin no propagado: %#v", got)
 	}
 }
+
+func TestApplyStrictCompatDefaultsAddsConservativeDefaults(t *testing.T) {
+	opts := applyStrictCompatDefaults(nil, "pades")
+	if opts["algorithm"] != "SHA256withRSA" {
+		t.Fatalf("algorithm por defecto inesperado: %#v", opts["algorithm"])
+	}
+	if opts["mode"] != "implicit" {
+		t.Fatalf("mode por defecto inesperado: %#v", opts["mode"])
+	}
+	if opts["signatureSubFilter"] != "adbe.pkcs7.detached" {
+		t.Fatalf("signatureSubFilter por defecto inesperado: %#v", opts["signatureSubFilter"])
+	}
+}
+
+func TestApplyStrictCompatDefaultsDoesNotOverrideExistingValues(t *testing.T) {
+	input := map[string]interface{}{
+		"algorithm":        "SHA512withRSA",
+		"mode":             "explicit",
+		"signatureSubFilter": "ETSI.CAdES.detached",
+	}
+	opts := applyStrictCompatDefaults(input, "pades")
+	if opts["algorithm"] != "SHA512withRSA" {
+		t.Fatalf("algorithm no debe sobrescribirse: %#v", opts["algorithm"])
+	}
+	if opts["mode"] != "explicit" {
+		t.Fatalf("mode no debe sobrescribirse: %#v", opts["mode"])
+	}
+	if opts["signatureSubFilter"] != "ETSI.CAdES.detached" {
+		t.Fatalf("signatureSubFilter no debe sobrescribirse: %#v", opts["signatureSubFilter"])
+	}
+}
+
+func TestApplyStrictCompatDefaultsPadesOnlyAddsSubFilter(t *testing.T) {
+	opts := applyStrictCompatDefaults(nil, "xades")
+	if _, ok := opts["signatureSubFilter"]; ok {
+		t.Fatalf("signatureSubFilter no debe forzarse fuera de pades")
+	}
+}

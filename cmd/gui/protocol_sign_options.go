@@ -78,6 +78,33 @@ func mergeSignOptions(base, overlay map[string]interface{}) map[string]interface
 	return out
 }
 
+// applyStrictCompatDefaults injects conservative Java-compatible defaults only
+// when options are missing, so existing protocol-provided values always win.
+func applyStrictCompatDefaults(opts map[string]interface{}, format string) map[string]interface{} {
+	out := mergeSignOptions(opts, nil)
+	if out == nil {
+		out = map[string]interface{}{}
+	}
+
+	normalizedFormat := strings.ToLower(strings.TrimSpace(format))
+	if normalizedFormat == "auto" {
+		normalizedFormat = "pades"
+	}
+
+	if _, ok := out["algorithm"]; !ok {
+		out["algorithm"] = "SHA256withRSA"
+	}
+	if _, ok := out["mode"]; !ok {
+		out["mode"] = "implicit"
+	}
+	if normalizedFormat == "pades" {
+		if _, ok := out["signatureSubFilter"]; !ok {
+			out["signatureSubFilter"] = "adbe.pkcs7.detached"
+		}
+	}
+	return out
+}
+
 func applyProtocolSignOption(opts map[string]interface{}, rawKey, rawValue string) {
 	key := strings.TrimSpace(rawKey)
 	val := strings.TrimSpace(rawValue)

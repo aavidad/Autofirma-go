@@ -1318,9 +1318,7 @@ func (ui *UI) signCurrentFile() {
 			signOptions = buildProtocolSignOptions(ui.Protocol, effectiveFormat)
 		}
 		if ui.ChkStrictCompat.Value {
-			signOptions = mergeSignOptions(signOptions, map[string]interface{}{
-				"_compatStrict": true,
-			})
+			signOptions = applyStrictCompatDefaults(signOptions, effectiveFormat)
 		}
 		if strings.EqualFold(effectiveFormat, "pades") && ui.Protocol == nil {
 			signOptions = mergeSignOptions(signOptions, ui.buildPadesSignatureOptions())
