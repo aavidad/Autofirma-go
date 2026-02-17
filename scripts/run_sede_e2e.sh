@@ -10,17 +10,19 @@ LAUNCHER_LOG="/tmp/autofirma-launcher.log"
 WEB_LOG="/tmp/autofirma-web-compat.log"
 SINCE_MINUTES=180
 CLEAN_LOGS=0
+REQUIRE_XADES_COUNTERSIGN=0
 
 usage() {
   cat <<USAGE
 Uso:
   $0 start [--clean-logs]
-  $0 check [--launcher-log PATH] [--web-log PATH] [--since-minutes N]
+  $0 check [--launcher-log PATH] [--web-log PATH] [--since-minutes N] [--require-xades-countersign]
   $0 stop
 
 Comandos:
   start   Arranca servidor web compat y valida handshake WSS (echo=OK).
   check   Revisa logs recientes de sede y busca errores protocolarios.
+          Con --require-xades-countersign exige evidencias de contrafirma XAdES.
   stop    Para servidor web compat.
 USAGE
 }
@@ -152,6 +154,7 @@ cmd_check() {
 
   echo "[sede-e2e] 2/3 buscar errores protocolarios recientes"
   local err_found=0
+  local xades_countersign_seen=0
 
   if emit_recent_matches "${WEB_LOG}" 'SAF_03|ERR-[0-9]{2}' "web" "${SINCE_MINUTES}" | tee /tmp/sede-e2e-errors.tmp | grep -q .; then
     echo "FAIL: detectados SAF_03/ERR-* en log web (revisar lineas anteriores)" >&2
@@ -160,6 +163,20 @@ cmd_check() {
   if emit_recent_matches "${LAUNCHER_LOG}" 'SAF_03|ERR-[0-9]{2}' "launcher" "${SINCE_MINUTES}" | tee -a /tmp/sede-e2e-errors.tmp | grep -q .; then
     echo "FAIL: detectados SAF_03/ERR-* en launcher log (revisar lineas anteriores)" >&2
     err_found=1
+  fi
+
+  if [[ "${REQUIRE_XADES_COUNTERSIGN}" -eq 1 ]]; then
+    if emit_recent_matches "${LAUNCHER_LOG}" 'CounterSign compatible native multisign route for format=xades|CoSign native multisign route for format=xades|Sign success cert=.* format=xades' "launcher" "${SINCE_MINUTES}" >/tmp/sede-e2e-xades.tmp && grep -q . /tmp/sede-e2e-xades.tmp; then
+      xades_countersign_seen=1
+    else
+      echo "FAIL: no se detectan evidencias de flujo XAdES/contrafirma en launcher log" >&2
+      err_found=1
+    fi
+
+    if emit_recent_matches "${LAUNCHER_LOG}" 'firma XAdES fallida|CounterSign.*unsupported|ERROR_UNSUPPORTED_OPERATION|Operacion de lote no soportada' "launcher" "${SINCE_MINUTES}" | grep -q .; then
+      echo "FAIL: detectados errores en ruta XAdES/contrafirma" >&2
+      err_found=1
+    fi
   fi
 
   local ws_seen=0
@@ -179,6 +196,8 @@ cmd_check() {
     echo "web_log: ${WEB_LOG}"
     echo "since_minutes: ${SINCE_MINUTES}"
     echo "websocket_protocol_traffic_seen: ${ws_seen}"
+    echo "require_xades_countersign: ${REQUIRE_XADES_COUNTERSIGN}"
+    echo "xades_countersign_evidence_seen: ${xades_countersign_seen}"
     if [[ "${err_found}" -eq 0 ]]; then
       echo "result: PASS"
     else
@@ -194,6 +213,7 @@ cmd_check() {
   echo "[sede-e2e] report: ${report_file}"
 
   rm -f /tmp/sede-e2e-errors.tmp /tmp/sede-e2e-flow.tmp
+  rm -f /tmp/sede-e2e-xades.tmp
 
   if [[ "${err_found}" -ne 0 ]]; then
     exit 1
@@ -246,6 +266,10 @@ main() {
           --since-minutes)
             SINCE_MINUTES="${2:-}"
             shift 2
+            ;;
+          --require-xades-countersign)
+            REQUIRE_XADES_COUNTERSIGN=1
+            shift
             ;;
           *)
             echo "Argumento no reconocido para check: $1" >&2

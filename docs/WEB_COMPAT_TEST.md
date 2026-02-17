@@ -62,6 +62,15 @@ Tras ejecutar manualmente la firma en las sedes:
 ./scripts/run_sede_e2e.sh stop
 ```
 
+Validación específica de contrafirma XAdES (interoperabilidad real):
+```bash
+./scripts/run_sede_e2e.sh check --since-minutes 240 --require-xades-countersign
+```
+Esperado:
+- `result: PASS` en el reporte generado (`/tmp/autofirma-sede-e2e-report-*.txt`).
+- `xades_countersign_evidence_seen: 1`.
+- Sin `SAF_03`, `ERR-*` ni errores de ruta XAdES.
+
 ## 7) Ajustes por sede (red inestable / servicios lentos)
 Variables de entorno disponibles para lote trifásico remoto:
 

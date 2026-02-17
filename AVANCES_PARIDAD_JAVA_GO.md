@@ -47,6 +47,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - Validacion automatica mas robusta:
   - `scripts/test_active_go.sh` y `scripts/run_full_validation.sh` usan `GOFLAGS=-mod=readonly` por defecto para evitar falsos negativos por vendor.
   - `run_full_validation.sh` clasifica bloqueo de socket/sandbox de WSS como `ENV_BLOCKED` (no fallo funcional de producto).
+  - `scripts/run_sede_e2e.sh check` incorpora modo `--require-xades-countersign` para validar evidencia de contrafirma XAdES en logs reales de sede y fallar si detecta errores de ruta XAdES.
 - Suite de tests en verde para codigo principal:
   - `go test -mod=readonly ./cmd/gui/... ./pkg/...`.
   - Cobertura actual: `224` tests (`cmd/gui` + `pkg`).
@@ -65,6 +66,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - validacion en sedes reales (Valide + otra),
 - cierre trust TLS en navegadores objetivo,
 - cierre release Windows/Linux (Go/No-Go).
+- ejecutar `run_sede_e2e.sh check --require-xades-countersign` y adjuntar reporte en evidencias de cierre.
 
 ## Estado por bloques
 - P0 Estabilidad WebSocket y TLS local: **muy avanzado**, pendiente validacion final en entorno objetivo.

@@ -41,6 +41,7 @@ Evidencias objetivas:
 - Pendiente tecnico para cierre 100%:
   - validacion interoperable en receptor real de la estructura de contrafirma XAdES generada.
   - decidir criterio final para `countersign` en PAdES (comportamiento compatible exigido por sedes).
+  - ejecucion y archivo de evidencias con `scripts/run_sede_e2e.sh check --require-xades-countersign`.
 
 2. Completar estrategia PKCS#11 multi-plataforma (si alcance incluye Windows/macOS).
 - Estado actual:
