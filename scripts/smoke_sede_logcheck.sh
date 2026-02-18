@@ -10,12 +10,12 @@ SINCE_MINUTES=120
 
 usage() {
   cat <<USAGE
-Usage: $0 [--log-file PATH] [--since-minutes N]
+Uso: $0 [--log-file PATH] [--since-minutes N]
 
-Checks latest AutoFirma protocol run in launcher log:
-- legacy upload response body="OK" OR websocket protocol response without errors
-- no COD_103 / messageDigest errors
-- no runtime Node.js fallback traces
+Comprueba la última ejecución de protocolo AutoFirma en el log del lanzador:
+- respuesta de subida legacy body="OK" o respuesta websocket sin errores
+- sin errores COD_103 / messageDigest
+- sin trazas de fallback de ejecución Node.js
 USAGE
 }
 
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Unknown arg: $1" >&2
+      echo "Argumento no reconocido: $1" >&2
       usage >&2
       exit 1
       ;;
@@ -47,19 +47,19 @@ if [[ ! -f "$LOG_FILE" ]]; then
     "/tmp/AutofirmaDipgra/logs/autofirma-desktop-$(date +%F).log"; do
     if [[ -f "${candidate}" ]]; then
       LOG_FILE="${candidate}"
-      echo "INFO: auto-detected log file: ${LOG_FILE}"
+      echo "INFO: log auto-detectado: ${LOG_FILE}"
       break
     fi
   done
 fi
 
 if [[ ! -f "$LOG_FILE" ]]; then
-  echo "FAIL: log file not found: $LOG_FILE" >&2
+  echo "FALLO: no existe el archivo de log: $LOG_FILE" >&2
   exit 1
 fi
 
 if ! [[ "$SINCE_MINUTES" =~ ^[0-9]+$ ]]; then
-  echo "FAIL: --since-minutes must be integer" >&2
+  echo "FALLO: --since-minutes debe ser entero" >&2
   exit 1
 fi
 
@@ -87,12 +87,12 @@ function toepoch(s,  cmd, out) {
 ' "$LOG_FILE" > "$TMP_FILTERED"
 
 if [[ ! -s "$TMP_FILTERED" ]]; then
-  echo "FAIL: no log lines found in last ${SINCE_MINUTES} minutes" >&2
+  echo "FALLO: no hay líneas de log en los últimos ${SINCE_MINUTES} minutos" >&2
   exit 1
 fi
 
 if grep -Eiq 'COD_103|messageDigest|No se dispone del atributo firmado messageDigest' "$TMP_FILTERED"; then
-  echo "FAIL: found COD_103/messageDigest error in recent logs" >&2
+  echo "FALLO: se detectó error COD_103/messageDigest en logs recientes" >&2
   grep -Ein 'COD_103|messageDigest|No se dispone del atributo firmado messageDigest' "$TMP_FILTERED" || true
   exit 1
 fi
@@ -109,17 +109,17 @@ if grep -Eiq '\[WebSocket\] Sent result .*protocol_error=false' "$TMP_FILTERED";
 fi
 
 if [[ "$LEGACY_OK" -ne 1 && "$WS_OK" -ne 1 ]]; then
-  echo "FAIL: no successful legacy upload or websocket result found in recent logs" >&2
+  echo "FALLO: no hay subida legacy ni resultado websocket correcto en logs recientes" >&2
   exit 1
 fi
 
 if grep -Eiq 'Using Node binary|sign-cli\.js|binary-signer\.js|verify-cli\.js|node\.exe' "$TMP_FILTERED"; then
-  echo "FAIL: found Node.js runtime traces in recent logs" >&2
+  echo "FALLO: se detectaron trazas de ejecución Node.js en logs recientes" >&2
   grep -Ein 'Using Node binary|sign-cli\.js|binary-signer\.js|verify-cli\.js|node\.exe' "$TMP_FILTERED" || true
   exit 1
 fi
 
-echo "PASS: sede log check OK"
+echo "OK: comprobación de log de sede correcta"
 echo "  log_file=$LOG_FILE"
 echo "  since_minutes=$SINCE_MINUTES"
 if [[ "$WS_OK" -eq 1 ]]; then

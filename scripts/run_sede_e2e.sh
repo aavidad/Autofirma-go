@@ -30,7 +30,7 @@ USAGE
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
-    echo "ERROR: comando requerido no encontrado: $1" >&2
+    echo "ERROR: no se encontró el comando requerido: $1" >&2
     exit 1
   }
 }
@@ -184,7 +184,7 @@ cmd_check() {
   resolve_host_log || true
 
   if [[ ! -f "${WEB_LOG}" ]]; then
-    echo "FAIL: no existe log web: ${WEB_LOG}" >&2
+    echo "FALLO: no existe log web: ${WEB_LOG}" >&2
     exit 1
   fi
 
@@ -200,11 +200,11 @@ cmd_check() {
   local xades_countersign_seen=0
 
   if emit_recent_matches "${WEB_LOG}" 'SAF_03|ERR-[0-9]{2}' "web" "${SINCE_MINUTES}" | tee /tmp/sede-e2e-errors.tmp | grep -q .; then
-    echo "FAIL: detectados SAF_03/ERR-* en log web (revisar lineas anteriores)" >&2
+    echo "FALLO: detectados SAF_03/ERR-* en log web (revisa líneas anteriores)" >&2
     err_found=1
   fi
   if emit_recent_matches "${LAUNCHER_LOG}" 'SAF_03|ERR-[0-9]{2}' "launcher" "${SINCE_MINUTES}" | tee -a /tmp/sede-e2e-errors.tmp | grep -q .; then
-    echo "FAIL: detectados SAF_03/ERR-* en launcher log (revisar lineas anteriores)" >&2
+    echo "FALLO: detectados SAF_03/ERR-* en launcher log (revisa líneas anteriores)" >&2
     err_found=1
   fi
 
@@ -214,13 +214,13 @@ cmd_check() {
     elif emit_recent_matches "${HOST_LOG}" 'CounterSign compatible native multisign route for format=xades|CoSign native multisign route for format=xades|Sign success cert=.* format=xades' "host" "${SINCE_MINUTES}" >/tmp/sede-e2e-xades.tmp && grep -q . /tmp/sede-e2e-xades.tmp; then
       xades_countersign_seen=1
     else
-      echo "FAIL: no se detectan evidencias de flujo XAdES/contrafirma en launcher/host log" >&2
+      echo "FALLO: no se detectan evidencias de flujo XAdES/contrafirma en launcher/host log" >&2
       err_found=1
     fi
 
     if emit_recent_matches "${LAUNCHER_LOG}" 'firma XAdES fallida|CounterSign.*unsupported|ERROR_UNSUPPORTED_OPERATION|Operacion de lote no soportada' "launcher" "${SINCE_MINUTES}" | grep -q . ||
        emit_recent_matches "${HOST_LOG}" 'firma XAdES fallida|CounterSign.*unsupported|ERROR_UNSUPPORTED_OPERATION|Operacion de lote no soportada' "host" "${SINCE_MINUTES}" | grep -q .; then
-      echo "FAIL: detectados errores en ruta XAdES/contrafirma" >&2
+      echo "FALLO: detectados errores en ruta XAdES/contrafirma" >&2
       err_found=1
     fi
   fi
@@ -240,7 +240,7 @@ cmd_check() {
   fi
 
   if [[ "${ws_seen}" -eq 0 && "${legacy_seen}" -eq 0 ]]; then
-    echo "FAIL: no hay evidencias recientes de flujo sede (ni websocket ni legacy-upload)" >&2
+    echo "FALLO: no hay evidencias recientes de flujo sede (ni websocket ni legacy-upload)" >&2
     err_found=1
   fi
 
@@ -258,9 +258,9 @@ cmd_check() {
     echo "require_xades_countersign: ${REQUIRE_XADES_COUNTERSIGN}"
     echo "xades_countersign_evidence_seen: ${xades_countersign_seen}"
     if [[ "${err_found}" -eq 0 ]]; then
-      echo "result: PASS"
+      echo "result: OK"
     else
-      echo "result: FAIL"
+      echo "result: FALLO"
     fi
     echo
     echo "recent_web_log_excerpt:"
@@ -280,7 +280,7 @@ cmd_check() {
   if [[ "${err_found}" -ne 0 ]]; then
     exit 1
   fi
-  echo "[sede-e2e] PASS"
+  echo "[sede-e2e] OK"
 }
 
 cmd_stop() {
@@ -345,7 +345,7 @@ main() {
         esac
       done
       if ! [[ "${SINCE_MINUTES}" =~ ^[0-9]+$ ]]; then
-        echo "FAIL: --since-minutes debe ser entero" >&2
+        echo "FALLO: --since-minutes debe ser entero" >&2
         exit 1
       fi
       cmd_check

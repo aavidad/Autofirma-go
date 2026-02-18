@@ -12,7 +12,7 @@ LOG_FILE="${AUTOFIRMA_WS_LOG:-/tmp/autofirma-web-compat.log}"
 PID_FILE="${ROOT_DIR}/out/web_compat_server.pid"
 
 build() {
-  echo "[web-compat] building gui server binary..."
+  echo "[web-compat] compilando binario del servidor GUI..."
   if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
     GOFLAGS="${GOFLAGS:-} -mod=readonly"
   fi
@@ -24,22 +24,22 @@ start() {
     local pid
     pid="$(cat "${PID_FILE}")"
     if kill -0 "${pid}" 2>/dev/null; then
-      echo "[web-compat] already running pid=${pid}"
+      echo "[web-compat] ya está en ejecución pid=${pid}"
       return 0
     fi
     rm -f "${PID_FILE}"
   fi
   build
-  echo "[web-compat] starting server on ports: ${PORTS}"
-  echo "[web-compat] logs: ${LOG_FILE}"
+  echo "[web-compat] iniciando servidor en puertos: ${PORTS}"
+  echo "[web-compat] log: ${LOG_FILE}"
   AUTOFIRMA_WS_PORTS="${PORTS}" "${BIN}" --server >>"${LOG_FILE}" 2>&1 &
   PID=$!
   echo "[web-compat] pid=${PID}"
   echo "${PID}" > "${PID_FILE}"
   sleep 0.2
   if ! kill -0 "${PID}" 2>/dev/null; then
-    echo "[web-compat] ERROR: server exited during startup" >&2
-    echo "[web-compat] recent logs:" >&2
+    echo "[web-compat] ERROR: el servidor terminó durante el arranque" >&2
+    echo "[web-compat] últimas líneas de log:" >&2
     tail -n 40 "${LOG_FILE}" >&2 || true
     rm -f "${PID_FILE}"
     return 1
@@ -51,11 +51,11 @@ stop() {
     PID="$(cat "${PID_FILE}")"
     if kill -0 "${PID}" 2>/dev/null; then
       kill "${PID}"
-      echo "[web-compat] stopped pid=${PID}"
+      echo "[web-compat] detenido pid=${PID}"
     fi
     rm -f "${PID_FILE}"
   else
-    echo "[web-compat] no pid file"
+    echo "[web-compat] no existe archivo PID"
   fi
 }
 
@@ -63,12 +63,12 @@ status() {
   if [[ -f "${PID_FILE}" ]]; then
     PID="$(cat "${PID_FILE}")"
     if kill -0 "${PID}" 2>/dev/null; then
-      echo "[web-compat] running pid=${PID}"
+      echo "[web-compat] en ejecución pid=${PID}"
       exit 0
     fi
     rm -f "${PID_FILE}"
   fi
-  echo "[web-compat] not running"
+  echo "[web-compat] no está en ejecución"
   exit 1
 }
 
@@ -80,7 +80,7 @@ case "${1:-start}" in
   restart) stop; start ;;
   status) status ;;
   *)
-    echo "Usage: $0 [start|stop|restart|status]" >&2
+    echo "Uso: $0 [start|stop|restart|status]" >&2
     exit 1
     ;;
 esac

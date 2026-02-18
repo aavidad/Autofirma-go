@@ -84,10 +84,10 @@ resolve_sede_log_file() {
 
 on_error() {
   local rc=$?
-  append_report "result: FAIL"
+  append_report "result: FALLO"
   append_report "failed_step: ${CURRENT_STEP}"
   append_report "exit_code: ${rc}"
-  echo "[full-check] FAIL en paso: ${CURRENT_STEP}"
+  echo "[full-check] FALLO en paso: ${CURRENT_STEP}"
   echo "[full-check] report: ${REPORT_FILE}"
   exit "${rc}"
 }
@@ -151,7 +151,7 @@ append_report "GOFLAGS=${GOFLAGS:-<empty>}"
 CURRENT_STEP="1/7 tests de codigo activo"
 echo "[full-check] 1/7 tests de codigo activo"
 bash scripts/test_active_go.sh
-append_report "step_1: PASS"
+append_report "step_1: OK"
 
 CURRENT_STEP="2/7 smoke host nativo"
 echo "[full-check] 2/7 smoke host nativo"
@@ -160,22 +160,22 @@ if [[ "${STRICT_FORMATS}" -eq 1 ]]; then
 else
   bash scripts/smoke_native_host.sh
 fi
-append_report "step_2: PASS"
+append_report "step_2: OK"
 
 if [[ "${SKIP_TRUST}" -eq 0 ]]; then
   CURRENT_STEP="3/7 trust local"
   echo "[full-check] 3/7 trust local (certificados + estado)"
   if TRUST_OUTPUT="$(bash scripts/install_and_trust_linux.sh 2>&1)"; then
     printf '%s\n' "${TRUST_OUTPUT}"
-    append_report "step_3: PASS"
+    append_report "step_3: OK"
   else
     printf '%s\n' "${TRUST_OUTPUT}" >&2
     if printf '%s' "${TRUST_OUTPUT}" | grep -qiE "ENV_BLOCKED|Operation not permitted|Permission denied|no new privileges|sudo:.*no new privileges|cannot run as root|sandbox"; then
-      echo "[full-check] WARN: trust local bloqueado por entorno (sudo/sandbox), se marca como ENV_BLOCKED"
+      echo "[full-check] AVISO: trust local bloqueado por entorno (sudo/sandbox), se marca como ENV_BLOCKED"
       append_report "step_3: ENV_BLOCKED"
       append_report "step_3_detail: ${TRUST_OUTPUT//$'\n'/ | }"
     else
-      append_report "step_3: FAIL"
+      append_report "step_3: FALLO"
       append_report "step_3_detail: ${TRUST_OUTPUT//$'\n'/ | }"
       false
     fi
@@ -189,20 +189,20 @@ CURRENT_STEP="4/7 servidor web compat"
 echo "[full-check] 4/7 servidor web compat (start/status)"
 bash scripts/run_web_compat_server.sh start
 bash scripts/run_web_compat_server.sh status
-append_report "step_4: PASS"
+append_report "step_4: OK"
 
 CURRENT_STEP="5/7 handshake WSS"
 echo "[full-check] 5/7 handshake WSS (echo)"
 if WSS_OUTPUT="$(python3 scripts/ws_echo_client.py 2>&1)"; then
-  append_report "step_5: PASS"
+  append_report "step_5: OK"
 else
   echo "${WSS_OUTPUT}" >&2
   if printf '%s' "${WSS_OUTPUT}" | grep -qiE "ENV_BLOCKED|Operation not permitted|PermissionError|Errno 1|Errno 13"; then
-    echo "[full-check] WARN: handshake WSS bloqueado por entorno (permisos/sandbox), se marca como ENV_BLOCKED"
+    echo "[full-check] AVISO: handshake WSS bloqueado por entorno (permisos/sandbox), se marca como ENV_BLOCKED"
     append_report "step_5: ENV_BLOCKED"
     append_report "step_5_detail: ${WSS_OUTPUT//$'\n'/ | }"
   else
-    append_report "step_5: FAIL"
+    append_report "step_5: FALLO"
     append_report "step_5_detail: ${WSS_OUTPUT//$'\n'/ | }"
     false
   fi
@@ -211,7 +211,7 @@ fi
 CURRENT_STEP="6/7 log local web compat"
 echo "[full-check] 6/7 log local de web compat (ultimas lineas)"
 tail -n 80 /tmp/autofirma-web-compat.log || true
-append_report "step_6: PASS"
+append_report "step_6: OK"
 
 if [[ "${SKIP_SEDE_LOGCHECK}" -eq 0 ]]; then
   CURRENT_STEP="7/7 smoke log de sede"
@@ -219,9 +219,9 @@ if [[ "${SKIP_SEDE_LOGCHECK}" -eq 0 ]]; then
   resolve_sede_log_file || true
   if [[ -f "${SEDE_LOG_FILE}" ]]; then
     bash scripts/smoke_sede_logcheck.sh --log-file "${SEDE_LOG_FILE}" --since-minutes "${SEDE_SINCE_MINUTES}"
-    append_report "step_7: PASS"
+    append_report "step_7: OK"
   else
-    echo "[full-check] WARN: log de sede no encontrado (${SEDE_LOG_FILE}), se marca como SKIP"
+    echo "[full-check] AVISO: log de sede no encontrado (${SEDE_LOG_FILE}), se marca como SKIP"
     append_report "step_7: SKIP_NO_LOG"
   fi
 else
@@ -229,7 +229,7 @@ else
   append_report "step_7: SKIP"
 fi
 
-append_report "result: PASS"
+append_report "result: OK"
 echo "[full-check] OK"
 echo "[full-check] report: ${REPORT_FILE}"
 if [[ -x scripts/generate_parity_changelog.sh ]]; then
@@ -237,7 +237,7 @@ if [[ -x scripts/generate_parity_changelog.sh ]]; then
   if scripts/generate_parity_changelog.sh; then
     append_report "parity_changelog: UPDATED"
   else
-    echo "[full-check] WARN: no se pudo regenerar CHANGELOG_PARIDAD.md"
+    echo "[full-check] AVISO: no se pudo regenerar CHANGELOG_PARIDAD.md"
     append_report "parity_changelog: ERROR"
   fi
 else

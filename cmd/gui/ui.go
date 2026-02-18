@@ -97,6 +97,8 @@ type ScriptTestCase struct {
 	Descripcion string
 	Ayuda       string
 	Comando     []string
+	Estado      string
+	Resultado   string
 	Selected    widget.Bool
 	BtnRun      widget.Clickable
 	BtnHelp     widget.Clickable
@@ -991,56 +993,6 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											btn.Background = color.NRGBA{R: 72, G: 88, B: 122, A: 255}
 											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
 										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
-										}),
-										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-											if ui.BtnGenExportPass.Clicked(gtx) {
-												pass, err := generateStrongTempPassword(24)
-												if err != nil {
-													ui.StatusMsg = withSolution("No se pudo generar clave temporal: "+err.Error(), "Reintenta la generación de clave temporal.")
-												} else {
-													ui.ExportTempPass = pass
-													ui.StatusMsg = "Clave temporal fuerte generada para exportación PKCS#12."
-												}
-												ui.Window.Invalidate()
-											}
-											btn := material.Button(ui.Theme, &ui.BtnGenExportPass, "Generar clave temporal")
-											btn.Background = color.NRGBA{R: 85, G: 88, B: 70, A: 255}
-											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
-										}),
-									)
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
-										return layout.Dimensions{}
-									}
-									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-											if ui.BtnCopyExportPass.Clicked(gtx) {
-												pass := strings.TrimSpace(ui.ExportTempPass)
-												if pass == "" {
-													ui.StatusMsg = withSolution("No hay clave temporal generada.", "Pulsa 'Generar clave temporal' antes de copiar.")
-												} else if err := copyToClipboard(pass); err != nil {
-													ui.StatusMsg = withSolution("No se pudo copiar la clave temporal: "+err.Error(), "Copia manualmente la clave o revisa el portapapeles del sistema.")
-												} else {
-													ui.StatusMsg = "Clave temporal copiada al portapapeles."
-												}
-												ui.Window.Invalidate()
-											}
-											btn := material.Button(ui.Theme, &ui.BtnCopyExportPass, "Copiar clave temporal")
-											btn.Background = color.NRGBA{R: 64, G: 96, B: 78, A: 255}
-											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
-										}),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
-										}),
-										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-											txt := "Clave activa: " + maskPasswordPreview(ui.ExportTempPass)
-											lbl := material.Caption(ui.Theme, txt)
-											lbl.Color = color.NRGBA{R: 70, G: 76, B: 88, A: 255}
-											return layout.UniformInset(unit.Dp(10)).Layout(gtx, lbl.Layout)
-										}),
 									)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1074,6 +1026,56 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
 										}),
 									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnGenExportPass.Clicked(gtx) {
+												pass, err := generateStrongTempPassword(24)
+												if err != nil {
+													ui.StatusMsg = withSolution("No se pudo generar clave temporal: "+err.Error(), "Reintenta la generación de clave temporal.")
+												} else {
+													ui.ExportTempPass = pass
+													ui.StatusMsg = "Clave temporal fuerte generada para exportación PKCS#12."
+												}
+												ui.Window.Invalidate()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnGenExportPass, "Generar clave temporal para exportar")
+											btn.Background = color.NRGBA{R: 85, G: 88, B: 70, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnCopyExportPass.Clicked(gtx) {
+												pass := strings.TrimSpace(ui.ExportTempPass)
+												if pass == "" {
+													ui.StatusMsg = withSolution("No hay clave temporal generada.", "Pulsa 'Generar clave temporal para exportar' antes de copiar.")
+												} else if err := copyToClipboard(pass); err != nil {
+													ui.StatusMsg = withSolution("No se pudo copiar la clave temporal: "+err.Error(), "Copia manualmente la clave o revisa el portapapeles del sistema.")
+												} else {
+													ui.StatusMsg = "Clave temporal copiada al portapapeles."
+												}
+												ui.Window.Invalidate()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnCopyExportPass, "Copiar clave temporal")
+											btn.Background = color.NRGBA{R: 64, G: 96, B: 78, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									txt := "Uso exclusivo para exportación PKCS#12. Clave activa: " + maskPasswordPreview(ui.ExportTempPass)
+									lbl := material.Caption(ui.Theme, txt)
+									lbl.Color = color.NRGBA{R: 70, G: 76, B: 88, A: 255}
+									return layout.UniformInset(unit.Dp(10)).Layout(gtx, lbl.Layout)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
@@ -1720,6 +1722,9 @@ func (ui *UI) initScriptTests() {
 				Comando:     append(append([]string{}, ps...), "scripts/windows/install_and_trust_windows.ps1", "-SkipInstaller"),
 			},
 		}
+		for i := range ui.ScriptTests {
+			ui.ScriptTests[i].Estado = "PENDIENTE"
+		}
 		return
 	}
 
@@ -1775,6 +1780,9 @@ func (ui *UI) initScriptTests() {
 			Ayuda:       "Qué hace: ejecuta batería integral (tests, smoke, trust, web compat, logs y reporte).\nCuándo usarla: validación completa antes de entrega.\nResultado esperado: PASS general en el reporte.",
 			Comando:     []string{"bash", "scripts/run_full_validation.sh"},
 		},
+	}
+	for i := range ui.ScriptTests {
+		ui.ScriptTests[i].Estado = "PENDIENTE"
 	}
 }
 
@@ -1835,6 +1843,19 @@ func trimOutputForUI(raw string, maxChars int) string {
 	return s[:maxChars] + "\n...[salida recortada]..."
 }
 
+func scriptTestStatusColor(status string) color.NRGBA {
+	switch strings.TrimSpace(strings.ToUpper(status)) {
+	case "PASADO":
+		return color.NRGBA{R: 30, G: 120, B: 50, A: 255}
+	case "ERROR":
+		return color.NRGBA{R: 170, G: 35, B: 35, A: 255}
+	case "EN CURSO":
+		return color.NRGBA{R: 130, G: 90, B: 25, A: 255}
+	default:
+		return color.NRGBA{R: 75, G: 85, B: 100, A: 255}
+	}
+}
+
 func (ui *UI) runScriptTests(all bool) {
 	if ui.ScriptTestBusy {
 		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Ya hay una batería de pruebas en ejecución.", 12000)
@@ -1863,6 +1884,10 @@ func (ui *UI) runScriptTests(all bool) {
 
 	ui.ScriptTestBusy = true
 	ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, fmt.Sprintf("Iniciando batería de pruebas (%d script/s)...", len(indices)), 12000)
+	for _, idx := range indices {
+		ui.ScriptTests[idx].Estado = "PENDIENTE"
+		ui.ScriptTests[idx].Resultado = ""
+	}
 	ui.Window.Invalidate()
 
 	go func(testIndices []int, workDir string) {
@@ -1876,6 +1901,8 @@ func (ui *UI) runScriptTests(all bool) {
 		for _, idx := range testIndices {
 			tc := ui.ScriptTests[idx]
 			start := time.Now()
+			ui.ScriptTests[idx].Estado = "EN CURSO"
+			ui.ScriptTests[idx].Resultado = "Ejecutando..."
 
 			ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, fmt.Sprintf("▶ Ejecutando: %s", tc.Nombre), 12000)
 			ui.Window.Invalidate()
@@ -1905,6 +1932,8 @@ func (ui *UI) runScriptTests(all bool) {
 			outText := trimOutputForUI(string(output), 1400)
 			if runErr != nil {
 				failCount++
+				ui.ScriptTests[idx].Estado = "ERROR"
+				ui.ScriptTests[idx].Resultado = summarizeServerBody(runErr.Error())
 				ui.HealthStatus = appendMultilineStatus(
 					ui.HealthStatus,
 					fmt.Sprintf("✖ %s (%s): %v\n%s", tc.Nombre, elapsed, runErr, outText),
@@ -1912,6 +1941,8 @@ func (ui *UI) runScriptTests(all bool) {
 				)
 			} else {
 				okCount++
+				ui.ScriptTests[idx].Estado = "PASADO"
+				ui.ScriptTests[idx].Resultado = "Completado en " + elapsed.String()
 				ui.HealthStatus = appendMultilineStatus(
 					ui.HealthStatus,
 					fmt.Sprintf("✔ %s (%s)\n%s", tc.Nombre, elapsed, outText),
@@ -2040,6 +2071,15 @@ func (ui *UI) layoutScriptTestsPanel(gtx layout.Context) layout.Dimensions {
 													return material.CheckBox(ui.Theme, &tc.Selected, tc.Nombre).Layout(gtx)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													status := strings.TrimSpace(tc.Estado)
+													if status == "" {
+														status = "PENDIENTE"
+													}
+													lbl := material.Caption(ui.Theme, status)
+													lbl.Color = scriptTestStatusColor(status)
+													return layout.UniformInset(unit.Dp(4)).Layout(gtx, lbl.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													if tc.BtnHelp.Clicked(gtx) {
 														ui.ShowScriptHelp = true
 														ui.ScriptHelpName = strings.TrimSpace(tc.Nombre)
@@ -2063,6 +2103,14 @@ func (ui *UI) layoutScriptTestsPanel(gtx layout.Context) layout.Dimensions {
 											cap := material.Caption(ui.Theme, tc.Descripcion)
 											cap.Color = color.NRGBA{R: 88, G: 96, B: 110, A: 255}
 											return cap.Layout(gtx)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if strings.TrimSpace(tc.Resultado) == "" {
+												return layout.Dimensions{}
+											}
+											res := material.Caption(ui.Theme, "Resultado: "+strings.TrimSpace(tc.Resultado))
+											res.Color = color.NRGBA{R: 78, G: 84, B: 98, A: 255}
+											return res.Layout(gtx)
 										}),
 									)
 								})

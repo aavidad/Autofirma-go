@@ -13,14 +13,14 @@ for arg in "$@"; do
   case "$arg" in
     --strict-formats) STRICT_FORMATS=1 ;;
     *)
-      echo "Usage: $0 [--strict-formats]" >&2
+      echo "Uso: $0 [--strict-formats]" >&2
       exit 1
       ;;
   esac
 done
 
 if ! command -v jq >/dev/null 2>&1; then
-  echo "ERROR: 'jq' is required" >&2
+  echo "ERROR: se requiere 'jq'" >&2
   exit 1
 fi
 
@@ -29,7 +29,7 @@ if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
 fi
 
 build_bin() {
-  echo "[smoke] building host binary..."
+  echo "[smoke] compilando binario del host..."
   GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_PATH}" ./cmd/autofirma-host
 }
 
@@ -77,7 +77,7 @@ run_ping() {
 run_get_certs() {
   local resp
   resp="$(send_req '{"requestId":"2","action":"getCertificates"}')"
-  echo "[smoke] getCertificates => success=$(printf '%s' "${resp}" | jq -r '.success') count=$(printf '%s' "${resp}" | jq '.certificates | length')" >&2
+  echo "[smoke] getCertificates => exito=$(printf '%s' "${resp}" | jq -r '.success') total=$(printf '%s' "${resp}" | jq '.certificates | length')" >&2
   [[ "$(printf '%s' "${resp}" | jq -r '.success')" == "true" ]]
   printf '%s' "${resp}" | jq -r '.certificates[0].id // empty'
 }
@@ -93,7 +93,7 @@ run_sign_verify() {
 
   sig="$(printf '%s' "${sign_resp}" | jq -r '.signature // empty')"
   if [[ -z "${sig}" ]]; then
-    echo "ERROR: sign response missing signature" >&2
+    echo "ERROR: la respuesta de firma no incluye firma" >&2
     exit 1
   fi
 
@@ -110,7 +110,7 @@ run_sign_verify_pades() {
   local data_file sig_file
   pdf_file="${ROOT_DIR}/testdata/original.pdf"
   if [[ ! -f "${pdf_file}" ]]; then
-    echo "[smoke] pades => SKIP (missing ${pdf_file})"
+    echo "[smoke] pades => OMITIDO (falta ${pdf_file})"
     return 0
   fi
 
@@ -125,20 +125,20 @@ run_sign_verify_pades() {
 
   if [[ "$(printf '%s' "${sign_resp}" | jq -r '.success')" != "true" ]]; then
     if [[ "${STRICT_FORMATS}" -eq 1 ]]; then
-      echo "ERROR: pades sign failed in strict mode" >&2
+      echo "ERROR: la firma PAdES falló en modo estricto" >&2
       return 1
     fi
-    echo "[smoke] pades => WARN (non-strict mode)"
+    echo "[smoke] pades => AVISO (modo no estricto)"
     return 0
   fi
 
   signed_pdf_b64="$(printf '%s' "${sign_resp}" | jq -r '.signature // empty')"
   if [[ -z "${signed_pdf_b64}" ]]; then
     if [[ "${STRICT_FORMATS}" -eq 1 ]]; then
-      echo "ERROR: pades sign returned empty signature in strict mode" >&2
+      echo "ERROR: la firma PAdES devolvió firma vacía en modo estricto" >&2
       return 1
     fi
-    echo "[smoke] pades => WARN (empty signature, non-strict mode)"
+    echo "[smoke] pades => AVISO (firma vacía en modo no estricto)"
     return 0
   fi
 
@@ -166,10 +166,10 @@ run_sign_verify_xades() {
 
   if [[ "$(printf '%s' "${sign_resp}" | jq -r '.success')" != "true" ]]; then
     if [[ "${STRICT_FORMATS}" -eq 1 ]]; then
-      echo "ERROR: xades sign failed in strict mode" >&2
+      echo "ERROR: la firma XAdES falló en modo estricto" >&2
       return 1
     fi
-    echo "[smoke] xades => WARN (non-strict mode)"
+    echo "[smoke] xades => AVISO (modo no estricto)"
     return 0
   fi
 
@@ -193,15 +193,15 @@ main() {
   local cert_id
   cert_id="$(run_get_certs)"
   if [[ -z "${cert_id}" ]]; then
-    echo "[smoke] WARN: no certificates available; skipping sign/verify"
-    echo "[smoke] PASS (partial)"
+    echo "[smoke] AVISO: no hay certificados disponibles; se omite firma/verificación"
+    echo "[smoke] OK (parcial)"
     exit 0
   fi
 
   run_sign_verify "${cert_id}"
   run_sign_verify_pades "${cert_id}"
   run_sign_verify_xades "${cert_id}"
-  echo "[smoke] PASS"
+  echo "[smoke] OK"
 }
 
 main "$@"
