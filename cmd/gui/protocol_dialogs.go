@@ -226,9 +226,10 @@ func protocolLoadDialog(initialPath string, exts string, multi bool) ([]string, 
 }
 
 func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, error) {
-	args := []string{"--list", "--title=Seleccionar certificado", "--column=IDX", "--column=Certificado"}
+	labels := buildCertificateDialogLabels(certs)
+	args := []string{"--list", "--title=Seleccionar certificado", "--column=IDX", "--column=Certificado", "--hide-column=1", "--print-column=1"}
 	for i := range certs {
-		args = append(args, strconv.Itoa(i), certificateDisplayLabel(certs[i]))
+		args = append(args, strconv.Itoa(i), labels[i])
 	}
 	cmd := exec.Command("zenity", args...)
 	configureGUICommand(cmd)
@@ -238,11 +239,15 @@ func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, err
 		if v == "" {
 			return -1, true, nil
 		}
-		idx, convErr := strconv.Atoi(v)
-		if convErr != nil {
-			return -1, false, convErr
+		if idx, convErr := strconv.Atoi(v); convErr == nil {
+			return idx, false, nil
 		}
-		return idx, false, nil
+		for i, lbl := range labels {
+			if lbl == v {
+				return i, false, nil
+			}
+		}
+		return -1, false, fmt.Errorf("selección no reconocida: %s", v)
 	}
 	if isDialogCancelErr(err) {
 		return -1, true, nil
@@ -250,7 +255,7 @@ func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, err
 
 	kargs := []string{"--menu", "Seleccionar certificado"}
 	for i := range certs {
-		kargs = append(kargs, strconv.Itoa(i), certificateDisplayLabel(certs[i]))
+		kargs = append(kargs, strconv.Itoa(i), labels[i])
 	}
 	cmd = exec.Command("kdialog", kargs...)
 	configureGUICommand(cmd)
@@ -273,9 +278,10 @@ func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, err
 }
 
 func protocolSelectCertDialogMac(certs []protocol.Certificate) (int, bool, error) {
+	labels := buildCertificateDialogLabels(certs)
 	items := make([]string, 0, len(certs))
-	for i := range certs {
-		items = append(items, "\""+osaQuote(fmt.Sprintf("%d|%s", i, certificateDisplayLabel(certs[i])))+"\"")
+	for i := range labels {
+		items = append(items, "\""+osaQuote(labels[i])+"\"")
 	}
 	script := "choose from list {" + strings.Join(items, ",") + "} with prompt \"Seleccionar certificado\""
 	cmd := exec.Command("osascript", "-e", script)
@@ -291,18 +297,19 @@ func protocolSelectCertDialogMac(certs []protocol.Certificate) (int, bool, error
 	if v == "" || strings.EqualFold(v, "false") {
 		return -1, true, nil
 	}
-	parts := strings.SplitN(v, "|", 2)
-	idx, convErr := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if convErr != nil {
-		return -1, false, convErr
+	for i, lbl := range labels {
+		if lbl == v {
+			return i, false, nil
+		}
 	}
-	return idx, false, nil
+	return -1, false, fmt.Errorf("selección no reconocida: %s", v)
 }
 
 func protocolSelectCertDialogWindows(certs []protocol.Certificate) (int, bool, error) {
+	labels := buildCertificateDialogLabels(certs)
 	entries := make([]string, 0, len(certs))
-	for i := range certs {
-		entries = append(entries, psQuote(fmt.Sprintf("%d|%s", i, certificateDisplayLabel(certs[i]))))
+	for i := range labels {
+		entries = append(entries, psQuote(labels[i]))
 	}
 	ps := "$ErrorActionPreference='Stop'; " +
 		"Add-Type -AssemblyName System.Windows.Forms; " +
@@ -314,7 +321,7 @@ func protocolSelectCertDialogWindows(certs []protocol.Certificate) (int, bool, e
 		"$items = @('" + strings.Join(entries, "','") + "'); " +
 		"foreach ($it in $items) { [void]$list.Items.Add($it) }; " +
 		"$list.SelectedIndex = 0; " +
-		"$ok.Add_Click({ if ($list.SelectedItem -ne $null) { Write-Output $list.SelectedItem; $form.Close() } }); " +
+		"$ok.Add_Click({ if ($list.SelectedIndex -ge 0) { Write-Output $list.SelectedIndex; $form.Close() } }); " +
 		"$cancel.Add_Click({ $form.Close() }); " +
 		"$form.Controls.Add($list); $form.Controls.Add($ok); $form.Controls.Add($cancel); " +
 		"[void]$form.ShowDialog()"
@@ -328,12 +335,30 @@ func protocolSelectCertDialogWindows(certs []protocol.Certificate) (int, bool, e
 	if v == "" {
 		return -1, true, nil
 	}
-	parts := strings.SplitN(v, "|", 2)
-	idx, convErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	idx, convErr := strconv.Atoi(v)
 	if convErr != nil {
 		return -1, false, convErr
 	}
 	return idx, false, nil
+}
+
+func buildCertificateDialogLabels(certs []protocol.Certificate) []string {
+	labels := make([]string, len(certs))
+	seen := make(map[string]int, len(certs))
+	for i := range certs {
+		base := strings.TrimSpace(certificateDisplayLabel(certs[i]))
+		if base == "" {
+			base = fmt.Sprintf("Certificado %d", i+1)
+		}
+		count := seen[base]
+		seen[base] = count + 1
+		if count > 0 {
+			labels[i] = fmt.Sprintf("%s (%d)", base, count+1)
+		} else {
+			labels[i] = base
+		}
+	}
+	return labels
 }
 
 func buildWindowsFileDialogFilter(exts string) string {

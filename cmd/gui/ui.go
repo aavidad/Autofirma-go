@@ -2897,23 +2897,7 @@ func (ui *UI) runExpertSelectCertDialog() {
 		ui.Window.Invalidate()
 		return
 	}
-	filtered := make([]protocol.Certificate, 0, len(ui.Certs))
-	indices := make([]int, 0, len(ui.Certs))
-	for idx, cert := range ui.Certs {
-		if !cert.CanSign {
-			continue
-		}
-		filtered = append(filtered, cert)
-		indices = append(indices, idx)
-	}
-	if len(filtered) == 0 {
-		hint := "Revisa vigencia/uso del certificado o selecciona otro almacén."
-		ui.setLastError("ERR_SELECTCERT_NO_SIGNABLE", "filtrado", "selectcert", fmt.Errorf("no hay certificados aptos"), hint)
-		ui.StatusMsg = withSolution("No hay certificados aptos para firma.", hint)
-		ui.Window.Invalidate()
-		return
-	}
-	chosen, canceled, err := protocolSelectCertDialog(filtered)
+	chosen, canceled, err := protocolSelectCertDialog(ui.Certs)
 	if canceled {
 		ui.StatusMsg = "Selección de certificado cancelada."
 		ui.Window.Invalidate()
@@ -2926,16 +2910,21 @@ func (ui *UI) runExpertSelectCertDialog() {
 		ui.Window.Invalidate()
 		return
 	}
-	if chosen < 0 || chosen >= len(indices) {
+	if chosen < 0 || chosen >= len(ui.Certs) {
 		hint := "Repite la selección de certificado."
 		ui.setLastError("ERR_SELECTCERT_INVALID", "validacion", "selectcert", fmt.Errorf("selección inválida"), hint)
 		ui.StatusMsg = withSolution("Selección de certificado inválida.", hint)
 		ui.Window.Invalidate()
 		return
 	}
-	ui.SelectedCert = indices[chosen]
+	ui.SelectedCert = chosen
 	ui.clearLastError()
-	ui.StatusMsg = "Certificado seleccionado mediante selector avanzado."
+	if ui.Certs[ui.SelectedCert].CanSign {
+		ui.StatusMsg = "Certificado seleccionado mediante selector avanzado."
+	} else {
+		hint := "Este certificado no es apto para firma. Selecciona uno marcado como apto para firmar."
+		ui.StatusMsg = withSolution("Certificado seleccionado (no apto para firma).", hint)
+	}
 	ui.appendOperationHistory("selectcert", "-", "ok", "-", "selección avanzada completada")
 	ui.Window.Invalidate()
 }
