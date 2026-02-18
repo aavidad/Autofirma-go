@@ -39,6 +39,39 @@ func TestParseDefaultGatewayFromProcRoute(t *testing.T) {
 	}
 }
 
+func TestParseDefaultGatewayFromWindowsRoutePrint(t *testing.T) {
+	raw := `
+===========================================================================
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.55     25
+    192.168.1.0    255.255.255.0         On-link     192.168.1.55    281
+===========================================================================
+`
+	got := parseDefaultGatewayFromWindowsRoutePrint(raw)
+	want := "192.168.1.1"
+	if got != want {
+		t.Fatalf("gateway de windows inesperado: got=%q want=%q", got, want)
+	}
+}
+
+func TestParseDefaultGatewayFromDarwinRouteGet(t *testing.T) {
+	raw := `
+   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.0.1
+  interface: en0
+`
+	got := parseDefaultGatewayFromDarwinRouteGet(raw)
+	want := "192.168.0.1"
+	if got != want {
+		t.Fatalf("gateway de darwin inesperado: got=%q want=%q", got, want)
+	}
+}
+
 func TestWithSolutionNoDuplica(t *testing.T) {
 	msg := "Error base\nPosible solución: prueba X"
 	got := withSolution(msg, "otra cosa")
@@ -134,6 +167,13 @@ func TestProxyFirewallSolutionByOSLinux(t *testing.T) {
 	}
 }
 
+func TestProxyFirewallSolutionByOSDarwin(t *testing.T) {
+	got := proxyFirewallSolutionByOS("darwin", "tcp_blocked")
+	if !strings.Contains(strings.ToLower(got), "macos") {
+		t.Fatalf("se esperaba mensaje específico de macOS, obtenido=%q", got)
+	}
+}
+
 func TestAntivirusSolutionByOSWindows(t *testing.T) {
 	got := antivirusSolutionByOS("windows", "av_intercept")
 	if !strings.Contains(strings.ToLower(got), "windows") {
@@ -145,5 +185,12 @@ func TestAntivirusSolutionByOSLinux(t *testing.T) {
 	got := antivirusSolutionByOS("linux", "tls_error")
 	if !strings.Contains(strings.ToLower(got), "linux") {
 		t.Fatalf("se esperaba mensaje específico de Linux, obtenido=%q", got)
+	}
+}
+
+func TestAntivirusSolutionByOSDarwin(t *testing.T) {
+	got := antivirusSolutionByOS("darwin", "tls_error")
+	if !strings.Contains(strings.ToLower(got), "macos") {
+		t.Fatalf("se esperaba mensaje específico de macOS, obtenido=%q", got)
 	}
 }

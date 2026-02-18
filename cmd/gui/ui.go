@@ -3577,7 +3577,7 @@ func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
 		}
 	}
 
-	if gw := defaultGatewayIPv4(); gw != "" {
+	if gw, gwErr := defaultGatewayIPv4(); gw != "" {
 		lines = append(lines, "gateway="+gw)
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort(gw, "53"), 1200*time.Millisecond)
 		if err != nil {
@@ -3589,7 +3589,11 @@ func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
 		}
 	} else {
 		lines = append(lines, "gateway=desconocido")
-		if runtime.GOOS == "linux" {
+		if strings.TrimSpace(gwErr) != "" {
+			lines = append(lines, "gateway_detalle="+summarizeServerBody(gwErr))
+		}
+		switch runtime.GOOS {
+		case "linux", "windows", "darwin":
 			raise(diagLevelWarn, "No se pudo detectar gateway por defecto.")
 		}
 	}
@@ -3646,15 +3650,56 @@ func technicianNetworkChecklist(state *ProtocolState) (string, string, int) {
 	return strings.Join(lines, " | "), action, level
 }
 
-func defaultGatewayIPv4() string {
-	if runtime.GOOS != "linux" {
-		return ""
+func defaultGatewayIPv4() (string, string) {
+	switch runtime.GOOS {
+	case "linux":
+		data, err := os.ReadFile("/proc/net/route")
+		if err != nil {
+			return "", "error leyendo /proc/net/route: " + err.Error()
+		}
+		if gw := parseDefaultGatewayFromProcRoute(string(data)); gw != "" {
+			return gw, ""
+		}
+		return "", "sin ruta por defecto en /proc/net/route"
+	case "windows":
+		out, err := commandCombinedOutput(1500*time.Millisecond, "route", "print", "-4")
+		if err != nil {
+			return "", "error ejecutando 'route print -4': " + err.Error()
+		}
+		if gw := parseDefaultGatewayFromWindowsRoutePrint(out); gw != "" {
+			return gw, ""
+		}
+		return "", "no se encontró gateway en 'route print -4'"
+	case "darwin":
+		out, err := commandCombinedOutput(1500*time.Millisecond, "route", "-n", "get", "default")
+		if err != nil {
+			return "", "error ejecutando 'route -n get default': " + err.Error()
+		}
+		if gw := parseDefaultGatewayFromDarwinRouteGet(out); gw != "" {
+			return gw, ""
+		}
+		return "", "no se encontró gateway en 'route -n get default'"
+	default:
+		return "", "sistema operativo no soportado para detección de gateway"
 	}
-	data, err := os.ReadFile("/proc/net/route")
+}
+
+func commandCombinedOutput(timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	raw, err := cmd.CombinedOutput()
+	out := strings.TrimSpace(string(raw))
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("timeout")
+	}
 	if err != nil {
-		return ""
+		if out == "" {
+			return "", err
+		}
+		return out, fmt.Errorf("%v: %s", err, out)
 	}
-	return parseDefaultGatewayFromProcRoute(string(data))
+	return out, nil
 }
 
 func parseDefaultGatewayFromProcRoute(raw string) string {
@@ -3671,6 +3716,43 @@ func parseDefaultGatewayFromProcRoute(raw string) string {
 		}
 		if ip := littleEndianHexIPv4(gatewayHex); ip != "" {
 			return ip
+		}
+	}
+	return ""
+}
+
+func parseDefaultGatewayFromWindowsRoutePrint(raw string) string {
+	lines := strings.Split(raw, "\n")
+	for _, line := range lines {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 4 {
+			continue
+		}
+		if fields[0] != "0.0.0.0" || fields[1] != "0.0.0.0" {
+			continue
+		}
+		gw := strings.TrimSpace(fields[2])
+		if ip := net.ParseIP(gw); ip != nil && ip.To4() != nil {
+			return gw
+		}
+	}
+	return ""
+}
+
+func parseDefaultGatewayFromDarwinRouteGet(raw string) string {
+	lines := strings.Split(raw, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(trimmed), "gateway:") {
+			continue
+		}
+		parts := strings.SplitN(trimmed, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		gw := strings.TrimSpace(parts[1])
+		if ip := net.ParseIP(gw); ip != nil && ip.To4() != nil {
+			return gw
 		}
 	}
 	return ""
@@ -3834,7 +3916,18 @@ func proxyFirewallSolutionByOS(goos, reason string) string {
 		default:
 			return "Revisa configuración de red/proxy/firewall en Windows."
 		}
-	default:
+	case "darwin":
+		switch reason {
+		case "proxy_unreachable":
+			return "El proxy configurado en macOS no responde. Revisa ajustes de Red (Proxy) y variables HTTP(S)_PROXY/NO_PROXY."
+		case "proxy_detect_error":
+			return "No se pudo leer la configuración de proxy en macOS. Revisa ajustes de Red (Proxy), variables de entorno y perfil corporativo."
+		case "tcp_blocked":
+			return "Posible bloqueo de firewall/proxy en macOS. Revisa salida HTTPS, proxy corporativo y reglas de red hacia @firma."
+		default:
+			return "Revisa configuración de red/proxy/firewall en macOS."
+		}
+	case "linux":
 		switch reason {
 		case "proxy_unreachable":
 			return "El proxy configurado en Linux no responde. Revisa variables HTTP(S)_PROXY/NO_PROXY y la configuración de red corporativa."
@@ -3845,6 +3938,8 @@ func proxyFirewallSolutionByOS(goos, reason string) string {
 		default:
 			return "Revisa configuración de red/proxy/firewall en Linux."
 		}
+	default:
+		return "Revisa configuración de red/proxy/firewall del sistema."
 	}
 }
 
@@ -3904,7 +3999,18 @@ func antivirusSolutionByOS(goos, reason string) string {
 		default:
 			return "Revisa antivirus/proxy corporativo en Windows."
 		}
-	default:
+	case "darwin":
+		switch reason {
+		case "tls_error", "handshake_error", "hostname_mismatch":
+			return "Revisa antivirus, filtros HTTPS y proxy en macOS. Añade excepción para autofirma.dipgra.es si aplica."
+		case "no_peer_cert":
+			return "No se recibió cadena TLS válida. Revisa proxy/firewall y seguridad en macOS."
+		case "av_intercept":
+			return "Se detecta posible inspección HTTPS en macOS. Añade excepción para autofirma.dipgra.es en antivirus/proxy."
+		default:
+			return "Revisa antivirus/proxy corporativo en macOS."
+		}
+	case "linux":
 		switch reason {
 		case "tls_error", "handshake_error", "hostname_mismatch":
 			return "Revisa software de seguridad, proxy e inspección HTTPS en Linux. Añade excepción para autofirma.dipgra.es si aplica."
@@ -3915,6 +4021,8 @@ func antivirusSolutionByOS(goos, reason string) string {
 		default:
 			return "Revisa software de seguridad/proxy en Linux."
 		}
+	default:
+		return "Revisa software de seguridad/proxy del sistema."
 	}
 }
 
