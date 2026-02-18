@@ -134,7 +134,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		applog.SecretMeta("dataB64", dataB64),
 	)
 
-	// Decode base64 data
+	// Decodificar datos base64
 	data, err := base64.StdEncoding.DecodeString(dataB64)
 	if err != nil {
 		log.Printf("[Signer] Error decodificando firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
@@ -146,25 +146,25 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	}
 	format = resolvedFormat
 
-	// Get certificate by ID
+	// Obtener certificado por ID
 	cert, nickname, err := getCertificateByID(certificateID, options)
 	if err != nil {
 		log.Printf("[Signer] Falló búsqueda de certificado para firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
 	}
 
-	// Enrich PAdES visual/options defaults with signer identity when absent.
+	// Enriquecer opciones visuales de PAdES con identidad del firmante cuando falte.
 	if strings.EqualFold(format, "pades") {
 		options = enrichPadesOptions(options, cert)
 	}
 
-	// Generate random password for temporary P12
+	// Generar contraseña aleatoria para P12 temporal
 	tempPassword := fmt.Sprintf("auto-%d-%d", time.Now().UnixNano(), os.Getpid())
 	var windowsStoreErr error
 	var windowsPadesStoreErr error
-	// Windows-first strategy for CAdES:
-	// 1) sign directly from certificate store (no private key export)
-	// 2) fallback to PFX export path only if native signing fails
+	// Estrategia prioritaria en Windows para CAdES:
+	// 1) firmar directamente desde el almacén de certificados (sin exportar clave privada)
+	// 2) usar respaldo por ruta PFX solo si falla la firma nativa
 	if runtime.GOOS == "windows" && strings.EqualFold(format, "cades") {
 		sigDER, storeErr := signCadesWithWindowsStore(data, nickname, options)
 		if storeErr == nil {
@@ -174,12 +174,12 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 			return sig, nil
 		}
 		windowsStoreErr = storeErr
-		log.Printf("[Signer] Falló firma CAdES en almacén Windows, aplicando fallback a ruta PFX: %v", storeErr)
+		log.Printf("[Signer] Falló firma CAdES en almacén Windows, aplicando respaldo a ruta PFX: %v", storeErr)
 	}
 
-	// Windows-first strategy for PAdES:
-	// 1) sign PDF using Windows certificate store without exporting private key
-	// 2) fallback to PFX export path only if store-native PAdES fails
+	// Estrategia prioritaria en Windows para PAdES:
+	// 1) firmar PDF usando almacén de certificados de Windows sin exportar clave privada
+	// 2) usar respaldo por ruta PFX solo si falla PAdES nativo del almacén
 	if runtime.GOOS == "windows" && strings.EqualFold(format, "pades") {
 		inputFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-input-%d", time.Now().UnixNano()))
 		defer os.Remove(inputFile)
@@ -194,23 +194,23 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 			return sig, nil
 		}
 		windowsPadesStoreErr = storeErr
-		log.Printf("[Signer] Falló firma PAdES en almacén Windows, aplicando fallback a ruta PFX: %v", storeErr)
+		log.Printf("[Signer] Falló firma PAdES en almacén Windows, aplicando respaldo a ruta PFX: %v", storeErr)
 	}
 
-	// Export certificate and private key to temporary PKCS#12
+	// Exportar certificado y clave privada a PKCS#12 temporal
 	p12Path, err := exportCertificateToP12(nickname, tempPassword)
 	if err != nil {
 		if windowsStoreErr != nil && runtime.GOOS == "windows" && strings.EqualFold(format, "cades") {
 			if isNonExportableKeyError(err) {
 				return "", fmt.Errorf("fallo al firmar en el almacen de Windows: %v", windowsStoreErr)
 			}
-			return "", fmt.Errorf("fallo al firmar en el almacen de Windows: %v (fallback por exportacion tambien fallo: %v)", windowsStoreErr, err)
+			return "", fmt.Errorf("fallo al firmar en el almacen de Windows: %v (el respaldo por exportación también falló: %v)", windowsStoreErr, err)
 		}
 		if windowsPadesStoreErr != nil && runtime.GOOS == "windows" && strings.EqualFold(format, "pades") {
 			if isNonExportableKeyError(err) {
 				return "", fmt.Errorf("fallo al firmar PAdES en el almacen de Windows: %v", windowsPadesStoreErr)
 			}
-			return "", fmt.Errorf("fallo al firmar PAdES en el almacen de Windows: %v (fallback por exportacion tambien fallo: %v)", windowsPadesStoreErr, err)
+			return "", fmt.Errorf("fallo al firmar PAdES en el almacen de Windows: %v (el respaldo por exportación también falló: %v)", windowsPadesStoreErr, err)
 		}
 		if runtime.GOOS == "windows" && isNonExportableKeyError(err) {
 			return "", fmt.Errorf("el certificado seleccionado no permite exportar su clave privada")
@@ -219,18 +219,18 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	}
 	defer os.Remove(p12Path)
 
-	// Create temporary files for input/output
+	// Crear archivos temporales de entrada/salida
 	inputFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-input-%d", time.Now().UnixNano()))
 	outputFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-output-%d", time.Now().UnixNano()))
 	defer os.Remove(inputFile)
 	defer os.Remove(outputFile)
 
-	// Write input data
+	// Escribir datos de entrada
 	if err := os.WriteFile(inputFile, data, 0600); err != nil {
 		return "", fmt.Errorf("fallo al escribir archivo de entrada: %v", err)
 	}
 
-	// CAdES detached path without Node.js (OpenSSL backend).
+	// Ruta CAdES detached sin Node.js (backend OpenSSL).
 	if strings.EqualFold(format, "cades") {
 		signedData, err := signCadesDetachedOpenSSL(inputFile, p12Path, tempPassword, options)
 		if err != nil {
@@ -242,7 +242,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		return sig, nil
 	}
 
-	// PAdES path without Node.js.
+	// Ruta PAdES sin Node.js.
 	if strings.EqualFold(format, "pades") {
 		signedData, err := signPadesWithGo(inputFile, p12Path, tempPassword, options)
 		if err != nil {
@@ -254,7 +254,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		return sig, nil
 	}
 
-	// XAdES path without Node.js.
+	// Ruta XAdES sin Node.js.
 	if strings.EqualFold(format, "xades") {
 		signedData, err := signXadesWithGo(inputFile, p12Path, tempPassword, options)
 		if err != nil {
@@ -297,7 +297,7 @@ func psSingleQuote(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
-// signCadesWithWindowsStore signs detached CMS using CurrentUser\\My without exporting private key.
+// signCadesWithWindowsStore firma CMS detached usando CurrentUser\\My sin exportar clave privada.
 func signCadesWithWindowsStore(data []byte, thumbprint string, options map[string]interface{}) ([]byte, error) {
 	inFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-win-in-%d.bin", time.Now().UnixNano()))
 	outFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-win-out-%d.p7s", time.Now().UnixNano()))
@@ -310,10 +310,10 @@ func signCadesWithWindowsStore(data []byte, thumbprint string, options map[strin
 
 	thumb := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(thumbprint), " ", ""))
 	if thumb == "" {
-		return nil, fmt.Errorf("thumbprint vacio")
+		return nil, fmt.Errorf("thumbprint vacío")
 	}
 
-	// Use .NET SignedCms (detached) with store key.
+	// Usar .NET SignedCms (detached) con clave del almacén.
 	digestOID := resolveDigestOID(options, "2.16.840.1.101.3.4.2.1")
 	ps := "$ErrorActionPreference='Stop'; " +
 		"try { Add-Type -AssemblyName 'System.Security.Cryptography.Pkcs' -ErrorAction Stop } catch {}; " +
@@ -351,15 +351,14 @@ func signCadesWithWindowsStore(data []byte, thumbprint string, options map[strin
 		return nil, fmt.Errorf("no se pudo leer firma CMS generada: %v", err)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("firma CMS vacia")
+		return nil, fmt.Errorf("firma CMS vacía")
 	}
 	return out, nil
 }
 
-// VerificationResult holds the result of a signature verification
-// (Deleted, using protocol.VerifyResult)
+// VerificationResult eliminado; se usa protocol.VerifyResult.
 
-// VerifyData verifies a signature.
+// VerifyData verifica una firma.
 func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.VerifyResult, error) {
 	format = normalizeSignFormat(format)
 	log.Printf("[Signer] Inicio de verificación format=%s %s %s",
@@ -368,14 +367,14 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		applog.SecretMeta("signatureDataB64", signatureDataB64),
 	)
 
-	// Decode base64 original data
+	// Decodificar datos originales en base64
 	originalData, err := base64.StdEncoding.DecodeString(originalDataB64)
 	if err != nil {
 		log.Printf("[Signer] Error decodificando datos originales en verificación format=%s err=%v", format, err)
 		return nil, fmt.Errorf("datos originales base64 inválidos: %v", err)
 	}
 
-	// Helper to create temp file
+	// Función auxiliar para crear archivo temporal
 	createTemp := func(data []byte) (string, error) {
 		f, err := os.CreateTemp("", "autofirma-verify-*")
 		if err != nil {
@@ -389,7 +388,7 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		return f.Name(), nil
 	}
 
-	// Create temporary file for original input
+	// Crear archivo temporal para datos originales
 	originalFile, err := createTemp(originalData)
 	if err != nil {
 		return nil, fmt.Errorf("fallo al escribir archivo temporal de datos originales: %v", err)
@@ -398,14 +397,14 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 
 	var signatureFile string
 	if signatureDataB64 != "" {
-		// Decode base64 signature data
+		// Decodificar datos de firma en base64
 		signatureData, err := base64.StdEncoding.DecodeString(signatureDataB64)
 		if err != nil {
 			log.Printf("[Signer] Error decodificando firma en verificación format=%s err=%v", format, err)
 			return nil, fmt.Errorf("datos de firma base64 inválidos: %v", err)
 		}
 
-		// Create temporary file for signature input
+		// Crear archivo temporal para firma
 		signatureFile, err = createTemp(signatureData)
 		if err != nil {
 			return nil, fmt.Errorf("fallo al escribir archivo temporal de firma: %v", err)
@@ -413,7 +412,7 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		defer os.Remove(signatureFile)
 	}
 
-	// CAdES detached verification without Node.js (OpenSSL backend).
+	// Verificación CAdES detached sin Node.js (backend OpenSSL).
 	if strings.EqualFold(format, "cades") {
 		if signatureFile == "" {
 			return nil, fmt.Errorf("verificación CAdES requiere signatureData")
@@ -427,7 +426,7 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		return result, nil
 	}
 
-	// PAdES verification path without Node.js.
+	// Ruta de verificación PAdES sin Node.js.
 	if strings.EqualFold(format, "pades") {
 		target := originalFile
 		if signatureFile != "" {
@@ -442,7 +441,7 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		return result, nil
 	}
 
-	// XAdES verification path without Node.js.
+	// Ruta de verificación XAdES sin Node.js.
 	if strings.EqualFold(format, "xades") {
 		target := originalFile
 		if signatureFile != "" {
@@ -458,17 +457,17 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 	}
 
 	log.Printf("[Signer] Formato de verificación no soportado format=%s", format)
-	return nil, fmt.Errorf("formato de verificacion no soportado: %s", format)
+	return nil, fmt.Errorf("formato de verificación no soportado: %s", format)
 }
 
-// getCertificateByID finds certificate by fingerprint ID
+// getCertificateByID busca certificado por ID de huella.
 func getCertificateByID(certificateID string, options map[string]interface{}) (*protocol.Certificate, string, error) {
 	certs, err := getCertificatesForSignOptions(options)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// Find certificate with matching ID
+	// Buscar certificado que coincida por ID
 	for i := range certs {
 		cert := certs[i]
 		if cert.ID != certificateID {
@@ -477,9 +476,9 @@ func getCertificateByID(certificateID string, options map[string]interface{}) (*
 		if cert.Nickname != "" {
 			return &cert, cert.Nickname, nil
 		}
-		// Best-effort: when selected cert came from a source without nickname
-		// (e.g. raw PKCS#11 scan), retry against default lookup to find an
-		// equivalent certificate with export nickname.
+		// Mejor esfuerzo: si el certificado seleccionado viene de una fuente sin nickname
+		// (por ejemplo escaneo PKCS#11 crudo), reintentar lookup por defecto para localizar
+		// un certificado equivalente con nickname exportable.
 		if fallback, ok := findCertificateWithNickname(certs[i]); ok {
 			return &fallback, fallback.Nickname, nil
 		}
@@ -505,7 +504,7 @@ func getCertificatesForSignOptions(options map[string]interface{}) ([]protocol.C
 			}
 			return certs, nil
 		}
-		log.Printf("[Signer] Falló el cargador de certificados con opciones, aplicando fallback por defecto: %v", err)
+		log.Printf("[Signer] Falló el cargador de certificados con opciones, aplicando respaldo por defecto: %v", err)
 	}
 	return getSystemCertificatesFunc()
 }
@@ -703,7 +702,7 @@ func enrichPadesOptions(opts map[string]interface{}, cert *protocol.Certificate)
 		}
 	}
 	if _, ok := opts["signerDNI"]; !ok {
-		// Best-effort: use subject serialNumber if available, fallback to cert serial.
+		// Mejor esfuerzo: usar serialNumber del subject si existe; en su defecto, el serial del certificado.
 		if sn := strings.TrimSpace(cert.Subject["SERIALNUMBER"]); sn != "" {
 			opts["signerDNI"] = sn
 		} else if serial := strings.TrimSpace(cert.SerialNumber); serial != "" {

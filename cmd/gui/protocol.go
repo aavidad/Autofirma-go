@@ -6,7 +6,7 @@ package main
 
 import (
 	"autofirma-host/pkg/version"
-	// Added for padding
+	// Necesario para padding
 	"crypto/des"
 	"encoding/base64"
 	"encoding/xml"
@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-// XML structures for Manifest Parsing
+// Estructuras XML para análisis de manifiesto.
 type xmlEntry struct {
 	Key   string `xml:"k,attr"`
 	Value string `xml:"v,attr"`
@@ -36,14 +36,14 @@ type xmlRoot struct {
 type ProtocolState struct {
 	IsActive             bool
 	RTServlet            string
-	STServlet            string // Dedicated Storage URL
+	STServlet            string // URL dedicada de almacenamiento
 	FileID               string
-	RequestID            string // Original URI fileid (used by WAIT loop)
+	RequestID            string // fileid original de la URI (usado en el bucle WAIT)
 	Key                  string
 	Action               string // "sign"
 	SourceURL            string
-	Params               url.Values // Store all params
-	SignFormat           string     // Format from XML: "CAdES", "PAdES", "XAdES"
+	Params               url.Values // Conserva todos los parámetros
+	SignFormat           string     // Formato del XML: "CAdES", "PAdES", "XAdES"
 	MinimumClientVersion string
 	JavaScriptVersion    int
 	ActiveWaiting        bool
@@ -53,9 +53,9 @@ type ProtocolState struct {
 var errMinimumClientVersionNotSatisfied = errors.New("versión mínima de cliente no satisfecha")
 var errUnsupportedProcedureVersion = errors.New("versión de procedimiento no soportada")
 
-// ParseProtocolURI parses "afirma://..." URI
+// ParseProtocolURI analiza una URI "afirma://...".
 func ParseProtocolURI(uriString string) (*ProtocolState, error) {
-	// Remove "afirma://" prefix to parse as URL if needed, or just use url.Parse
+	// Elimina "afirma://" para parsear como URL si aplica.
 	u, err := url.Parse(uriString)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 		IsActive:          true,
 		SourceURL:         uriString,
 		Action:            normalizeProtocolAction(extractProtocolAction(u)),
-		Params:            q, // Keep all params
+		Params:            q, // Conserva todos los parámetros
 		JavaScriptVersion: 1,
 		ProtocolVersion:   1,
 	}
@@ -114,10 +114,10 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 	state.SignFormat = getQueryParam(q, "format", "signFormat")
 	state.ActiveWaiting = parseBoolParam(getQueryParam(q, "aw"))
 
-	// Java protocol in WebSocket mode allows sign/cosign/countersign without
-	// servlet/id (servicesRequired=false) and resolves data through other flows.
-	// Also allows local interactive ops (save/load/selectcert/signandsave/batch).
-	// Keep strictness when absolutely no useful routing/session params are present.
+	// En modo WebSocket, el protocolo Java permite sign/cosign/countersign sin
+	// servlet/id (servicesRequired=false) y resuelve datos por otros caminos.
+	// También permite operaciones locales interactivas (save/load/selectcert/signandsave/batch).
+	// Se mantiene validación estricta cuando no existe ningún parámetro útil de sesión/ruta.
 	if state.RTServlet == "" && state.STServlet == "" && state.FileID == "" {
 		switch normalizeProtocolAction(state.Action) {
 		case "sign", "cosign", "countersign":
@@ -125,7 +125,7 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 				return nil, fmt.Errorf("parámetros insuficientes en la solicitud (falta id, rtservlet o stservlet)")
 			}
 		case "save", "load", "selectcert", "signandsave", "batch":
-			// Allowed in WebSocket/local mode.
+			// Permitido en modo WebSocket/local.
 		default:
 			return nil, fmt.Errorf("parámetros insuficientes en la solicitud (falta id, rtservlet o stservlet)")
 		}
@@ -315,46 +315,46 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// Helper to attempt download
+	// Función auxiliar para intentar descarga.
 	attempt := func(method string) (string, []byte, error) {
 		reqURL, err := url.Parse(p.RTServlet)
 		if err != nil {
 			return "", nil, err
 		}
 
-		// Prepare params: Strictly standard ones (like Java client)
+		// Preparar parámetros estrictamente estándar (como cliente Java).
 		data := url.Values{}
 
-		// Enforce/Overwrite critical ops
+		// Forzar/sobrescribir operaciones críticas.
 		data.Set("op", "get")
 		data.Set("v", "1_0")
 		data.Set("id", p.FileID)
 
-		// NOTE: Java client (IntermediateServerUtil) does NOT send 'key' or extra params
-		// in the retrieveData request. It only sends op, v, and id.
-		// The key is used locally for decryption only.
+		// NOTA: el cliente Java (IntermediateServerUtil) NO envía 'key' ni extras
+		// en retrieveData. Solo envía op, v e id.
+		// La clave se usa solo localmente para descifrar.
 
 		var req *http.Request
 		if method == "GET" {
-			reqURL.RawQuery = data.Encode() // Replaces any existing query
+			reqURL.RawQuery = data.Encode() // Reemplaza cualquier query existente
 			req, err = http.NewRequest("GET", reqURL.String(), nil)
-			log.Printf("[Protocol] URL GET: %s", reqURL.String()) // Log full URL
+			log.Printf("[Protocol] URL GET: %s", reqURL.String()) // Registrar URL completa
 		} else {
-			// POST (Fallback if GET fails/not allowed)
-			// For POST, Java client strips query from URL and puts it in Body.
+			// POST (respaldo si GET falla/no está permitido)
+			// En POST, el cliente Java quita query de la URL y la pone en el body.
 			reqURL.RawQuery = ""
 			encodedData := data.Encode()
 			req, err = http.NewRequest("POST", reqURL.String(), strings.NewReader(encodedData))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			log.Printf("[Protocol] Datos POST: %s", encodedData) // Log body
+			log.Printf("[Protocol] Datos POST: %s", encodedData) // Registrar body
 		}
 
 		if err != nil {
 			return "", nil, err
 		}
 
-		// Headers mimicking AutoFirma
-		req.Header.Set("User-Agent", "AutoFirma/1.6.5") // Use a standard version
+		// Cabeceras similares a AutoFirma
+		req.Header.Set("User-Agent", "AutoFirma/1.6.5") // Usar versión estándar
 		req.Header.Set("Accept", "*/*")
 
 		log.Printf("[Protocol] Intentando %s %s", method, p.RTServlet)
@@ -379,15 +379,15 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 		return "", body, nil
 	}
 
-	// Try GET
+	// Intentar GET
 	_, body, err := attempt("GET")
 
-	// Check if valid (size > 100 etc or not starting with ERR-)
+	// Comprobar si es válido (tamaño > 100, etc., o que no empiece por ERR-)
 	if err == nil && len(body) > 100 { // Reduced threshold slightly
 		if strings.HasPrefix(strings.ToLower(string(body)), "err-") {
 			log.Printf("[Protocol] El servidor devolvió contenido de error: %s", string(body))
 		} else {
-			// Success with GET
+			// Éxito con GET
 			return saveTemp(body, p.FileID, p.Key)
 		}
 	}
@@ -396,14 +396,14 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 		log.Printf("[Protocol] Respuesta GET demasiado pequeña: %s", string(body))
 	}
 
-	// Try POST as fallback
+	// Intentar POST como respaldo
 	log.Println("[Protocol] GET falló o devolvió contenido pequeño. Probando POST...")
 	_, bodyPost, errPost := attempt("POST")
 	if errPost == nil && len(bodyPost) > 200 {
 		return saveTemp(bodyPost, p.FileID, p.Key)
 	}
 
-	// Failed
+	// Fallo final
 	if len(bodyPost) < 500 {
 		log.Printf("[Protocol] Respuesta POST: %s", string(bodyPost))
 		return "", fmt.Errorf("descarga fallida. El servidor devolvió: %s", string(bodyPost))
@@ -413,34 +413,34 @@ func (p *ProtocolState) DownloadFile() (string, error) {
 }
 
 func saveTemp(data []byte, fileID string, key string) (string, error) {
-	// Use sanitized fileID for name
+	// Usar fileID saneado para el nombre
 	safeID := filepath.Base(fileID)
 	if safeID == "" || safeID == "." {
 		safeID = "autofirma_doc"
 	}
 
-	// AutoFirma encrypts data in format: PADDING.ENCRYPTED_BASE64
-	// First, try to decrypt if we have a key
+	// AutoFirma cifra datos con formato: PADDING.ENCRYPTED_BASE64
+	// Primero, intentar descifrar si hay clave
 	if key != "" {
 		dataStr := string(data)
 
-		// Check if it has the PADDING.DATA format
+		// Comprobar si tiene formato PADDING.DATA
 		if strings.Contains(dataStr, ".") {
 			parts := strings.SplitN(dataStr, ".", 2)
 			if len(parts) == 2 {
 				padding, err := strconv.Atoi(parts[0])
 				if err == nil {
-					// Convert URL-safe Base64 to standard
+					// Convertir URL-safe Base64 a estándar
 					b64Data := strings.ReplaceAll(parts[1], "-", "+")
 					b64Data = strings.ReplaceAll(b64Data, "_", "/")
 
-					// Decode Base64
+					// Decodificar Base64
 					encrypted, err := base64.StdEncoding.DecodeString(b64Data)
 					if err == nil {
-						// Decrypt with DES
+						// Descifrar con DES
 						decrypted, err := decryptDES(encrypted, []byte(key))
 						if err == nil {
-							// Remove padding
+							// Quitar padding
 							if padding > 0 && padding < len(decrypted) {
 								decrypted = decrypted[:len(decrypted)-padding]
 							}
@@ -455,11 +455,11 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 		}
 	}
 
-	// Try Base64 Decoding (Robust)
+	// Intentar decodificación Base64 (robusta)
 	decoded := false
 	inputs := []string{string(data)}
 
-	// If it contains a dot, it might be [VERSION].[DATA]
+	// Si contiene un punto, puede ser [VERSION].[DATA]
 	if strings.Contains(string(data), ".") {
 		parts := strings.SplitN(string(data), ".", 2)
 		if len(parts) == 2 {
@@ -471,10 +471,10 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 		if decoded {
 			break
 		}
-		// Clean whitespace
+		// Limpiar espacios
 		input = strings.TrimSpace(input)
 
-		// Try various decoders
+		// Probar varios decodificadores
 		decoders := []*base64.Encoding{
 			base64.StdEncoding,
 			base64.URLEncoding,
@@ -485,7 +485,7 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 		for _, enc := range decoders {
 			decodedBytes, err := enc.DecodeString(input)
 			if err == nil && len(decodedBytes) > 0 {
-				// Check header
+				// Comprobar cabecera
 				strDecoded := string(decodedBytes)
 				isPDF := len(decodedBytes) > 4 && string(decodedBytes[:4]) == "%PDF"
 				isXML := strings.Contains(strDecoded, "<?xml") || strings.Contains(strDecoded, "<afirma") || strings.Contains(strDecoded, "<request")
@@ -504,11 +504,11 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 		}
 	}
 
-	// Detect extension
-	ext := ".pdf" // Default
+	// Detectar extensión
+	ext := ".pdf" // Por defecto
 	strData := string(data)
 
-	// Debug: Log first 50 bytes to see what we really got
+	// Depuración: registrar primeros 50 bytes para verificar contenido
 	debugLen := 50
 	if len(data) < 50 {
 		debugLen = len(data)
@@ -520,10 +520,10 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 	} else if strings.Contains(strData, "<?") || strings.Contains(strData, "<request") || strings.Contains(strData, "<afirma") {
 		ext = ".xml"
 	} else if len(data) > 1000 {
-		// If it's big and not a PDF, assume XML in this context
+		// Si es grande y no es PDF, asumir XML en este contexto
 		ext = ".xml"
 	} else {
-		// Fallback for unknown small text/binary
+		// Respaldo para texto/binario pequeño desconocido
 		ext = ".txt"
 	}
 
@@ -534,11 +534,11 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 	return tmpFile, nil
 }
 
-// decryptDES decrypts data using DES algorithm
+// decryptDES descifra datos con algoritmo DES.
 func decryptDES(ciphertext []byte, key []byte) ([]byte, error) {
-	// DES key must be 8 bytes
+	// La clave DES debe ser de 8 bytes.
 	if len(key) < 8 {
-		// Pad key if too short
+		// Rellenar clave si es demasiado corta
 		paddedKey := make([]byte, 8)
 		copy(paddedKey, key)
 		key = paddedKey
@@ -555,7 +555,7 @@ func decryptDES(ciphertext []byte, key []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ciphertext is not a multiple of the block size")
 	}
 
-	// Use ECB mode (decrypt each block independently)
+	// Usar modo ECB (descifrar cada bloque de forma independiente)
 	plaintext := make([]byte, len(ciphertext))
 	for i := 0; i < len(ciphertext); i += block.BlockSize() {
 		block.Decrypt(plaintext[i:i+block.BlockSize()], ciphertext[i:i+block.BlockSize()])
@@ -564,9 +564,9 @@ func decryptDES(ciphertext []byte, key []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// UploadSignature uploads the signed data back
+// UploadSignature sube los datos firmados al servidor.
 func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) error {
-	// Construct upload URL
+	// Construir URL de subida
 	// Typically: ?op=put&id=FILEID&dat=SIGNATURE_B64
 	// Sometimes requires 'cert' param too.
 
@@ -574,7 +574,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 
 	uploadServlet := p.STServlet
 	if uploadServlet == "" {
-		// Fallback only for legacy flows where stservlet is not provided.
+		// Respaldo solo para flujos legacy donde no se proporciona stservlet.
 		uploadServlet = p.RTServlet
 		log.Printf("[Protocol] Falta STServlet, usando RTServlet como respaldo para subida: %s", uploadServlet)
 	} else {
@@ -585,23 +585,23 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		return err
 	}
 
-	// Use POST for large data
+	// Usar POST para datos grandes
 	// Java Client (UrlHttpManagerImpl) logic:
-	// 1. Takes the full URL with params (constructed in IntermediateServerUtil)
-	// 2. Splits URL at '?'
-	// 3. Base URL is used as request URL
+	// 1. Toma la URL completa con parámetros (construida en IntermediateServerUtil)
+	// 2. Divide la URL en '?'
+	// 3. Usa la URL base como URL de petición
 	// 4. Query string is used as Body
 	//
-	// IntermediateServerUtil sends ONLY: op, v, id, dat
+	// IntermediateServerUtil envía SOLO: op, v, id, dat
 
 	op := "put"
 	version := "1_0"
 
-	// Format payload: CERT_B64 | SIGNATURE_B64
+	// Formato payload: CERT_B64 | SIGNATURE_B64
 	// If p.Key is present, both parts must be Encrypted (then Base64 encoded)
 	// Separator is "|"
 
-	// Decode inputs to bytes for uniform processing
+	// Decodificar entradas a bytes para procesado uniforme
 	certBytes, err := base64.StdEncoding.DecodeString(certB64)
 	if err != nil {
 		return fmt.Errorf("certificado base64 inválido: %v", err)
@@ -613,13 +613,13 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 
 	var payload string
 	if p.Key != "" {
-		// Encryption required with specific AutoFirma format:
+		// Cifrado requerido con formato específico de AutoFirma:
 		// [PaddingCount].[UrlSafeBase64(EncryptedData)]
-		// Padding is ZeroPadding (0x00)
+		// El padding es ZeroPadding (0x00)
 
 		keyBytes := []byte(p.Key)
 
-		// 2. Encrypt both
+		// 2. Cifrar ambos
 		encCertVal, err := AutoFirmaEncryptAndFormat(certBytes, keyBytes)
 		if err != nil {
 			return fmt.Errorf("falló el cifrado del certificado: %v", err)
@@ -632,7 +632,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		payload = encCertVal + "|" + encSigVal
 		log.Printf("[Protocol] Subiendo carga cifrada (Cert|Firma): %s", payload)
 	} else {
-		// Plain: Cert|Sig (AutoFirma usually uses URL Safe Base64 even without encryption)
+		// Plano: Cert|Sig (AutoFirma suele usar URL Safe Base64 incluso sin cifrado)
 		payload = base64.URLEncoding.EncodeToString(certBytes) + "|" + base64.URLEncoding.EncodeToString(sigBytes)
 		log.Printf("[Protocol] Subiendo carga en claro (Cert|Firma)")
 	}
@@ -710,7 +710,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		return false, lastBody, nil
 	}
 
-	// Attempt 1: Java-style body (raw query-string body, without URL-encoding dat).
+	// Intento 1: cuerpo estilo Java (query-string en bruto, sin URL-encoding de dat).
 	bodyA := "op=" + op + "&v=" + version + "&id=" + p.FileID + "&dat=" + payload
 	ok, bodyText, err := sendWithRetry("java-style", bodyA, false)
 	if err != nil {
@@ -720,7 +720,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		return nil
 	}
 
-	// Fallback attempts for servers with non-standard expectations.
+	// Intentos de respaldo para servidores con expectativas no estándar.
 	legacy := url.Values{}
 	for k, v := range p.Params {
 		for _, vv := range v {
@@ -745,7 +745,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		return nil
 	}
 
-	// Last fallback: same legacy style but with original request id.
+	// Último respaldo: mismo estilo legacy pero con request id original.
 	if p.RequestID != "" && p.RequestID != p.FileID {
 		legacy.Set("id", p.RequestID)
 		ok, bodyText, err = sendWithRetry("legacy-style-requestid", legacy.Encode(), true)
@@ -760,16 +760,16 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	return fmt.Errorf("la subida al servidor devolvió cuerpo no-OK: %s", bodyText)
 }
 
-// SendWaitSignal sends Java-compatible active wait marker to storage servlet.
+// SendWaitSignal envía marcador WAIT compatible con Java al storage servlet.
 func (p *ProtocolState) SendWaitSignal() error {
 	if p == nil {
 		return fmt.Errorf("estado de protocolo nulo")
 	}
 	if p.STServlet == "" {
-		return fmt.Errorf("storage servlet vacío")
+		return fmt.Errorf("servlet de almacenamiento vacío")
 	}
 	if p.RequestID == "" {
-		return fmt.Errorf("request id vacío")
+		return fmt.Errorf("identificador de solicitud vacío")
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -807,7 +807,7 @@ func (p *ProtocolState) SendWaitSignal() error {
 	return nil
 }
 
-// HandleProtocolInit initiates the flow from UI
+// HandleProtocolInit inicia el flujo desde la UI.
 func (ui *UI) HandleProtocolInit(uriString string) {
 	ui.StatusMsg = "Iniciando modo protocolo web..."
 	ui.Window.Invalidate()
@@ -833,11 +833,11 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 		}
 
 		if path != "" {
-			// Check if the downloaded file is an AutoFirma XML request
+			// Comprobar si el archivo descargado es una solicitud XML de AutoFirma
 			content, err := os.ReadFile(path)
 			if err == nil && strings.HasPrefix(string(content), "<sign>") {
 				log.Printf("[Protocol] Solicitud XML de AutoFirma detectada, analizando...")
-				// Parse XML to extract actual data AND update Protocol State (stservlet)
+				// Parsear XML para extraer datos reales y actualizar estado de protocolo (stservlet)
 				actualData, format, err := parseAutoFirmaXML(content, ui.Protocol)
 				if err != nil {
 					log.Printf("[Protocol] Falló el análisis de XML: %v", err)
@@ -847,10 +847,10 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 				}
 				log.Printf("[Protocol] XML analizado correctamente, formato=%s, tamaño de datos=%d", format, len(actualData))
 
-				// Store the format in protocol state
+				// Guardar formato en estado de protocolo
 				ui.Protocol.SignFormat = format
 
-				// Save the actual data to a new file
+				// Guardar datos reales en un archivo nuevo
 				ext := ".bin"
 				if format == "PAdES" {
 					ext = ".pdf"
@@ -872,24 +872,24 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 			ui.StatusMsg = "Documento descargado. Seleccione certificado y firme."
 			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "file_ready")
 		} else {
-			// No file downloaded (local file flow)
+			// No se descargó archivo (flujo local)
 			log.Println("[Protocol] No se descargó documento. Esperando selección manual.")
 			ui.StatusMsg = "Iniciado modo firma local web. Seleccione archivo y certificado."
 			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "local_waiting_file")
 		}
 
-		ui.Mode = 0 // Ensure Sign mode
+		ui.Mode = 0 // Asegurar modo Firma
 		ui.Window.Invalidate()
 	}()
 }
 
-// parseAutoFirmaXML extracts the actual data to sign and updates ProtocolState with params from XML
+// parseAutoFirmaXML extrae datos reales a firmar y actualiza ProtocolState con parámetros del XML.
 func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error) {
 	var root xmlRoot
-	// Handle XML decoding
+	// Gestionar decodificación XML
 	if err := xml.Unmarshal(xmlData, &root); err != nil {
-		// Fallback for non-strict XML or if Unmarshal fails?
-		// Try manual parsing if needed, but XML should be standard.
+		// Respaldo para XML no estricto o si falla Unmarshal.
+		// Si hiciera falta, se intentaría parseo manual, pero debería ser XML estándar.
 		return nil, "", fmt.Errorf("falló XML Unmarshal: %v", err)
 	}
 
@@ -903,41 +903,41 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 		}
 		params[e.Key] = val
 
-		// Update Protocol Params map
+		// Actualizar mapa de parámetros del protocolo
 		p.Params.Set(e.Key, val)
 	}
 
-	// Critical: Update STServlet if present
+	// Crítico: actualizar STServlet si está presente
 	if st := params["stservlet"]; st != "" {
 		p.STServlet = st
 		log.Printf("[Protocol] STServlet actualizado desde XML: %s", st)
 	}
 
-	// Storage id for upload comes from XML session id when present.
+	// El id de subida viene del id de sesión XML cuando está presente.
 	if id := params["id"]; id != "" {
 		p.FileID = id
 		log.Printf("[Protocol] Id de sesión actualizado desde XML (id de subida): %s", id)
 	}
 
-	// Critical: Update Key if present
+	// Crítico: actualizar Key si está presente
 	if k := params["key"]; k != "" {
 		p.Key = k
 	}
 
-	// Extract Data ('dat')
+	// Extraer datos ('dat')
 	datB64, ok := params["dat"]
 	if !ok {
 		return nil, "", fmt.Errorf("no se encontró parámetro 'dat' en el manifiesto XML")
 	}
 
-	// Clean Base64 (Standard Java behavior handling)
+	// Limpiar Base64 (comportamiento estándar Java)
 	datB64 = strings.TrimSpace(datB64)
 
-	// Decode Base64
-	// Try standard first, then URL-safe
+	// Decodificar Base64
+	// Probar primero estándar y luego URL-safe
 	data, err := base64.StdEncoding.DecodeString(datB64)
 	if err != nil {
-		// Try URL encoding
+		// Probar codificación URL
 		data, err = base64.URLEncoding.DecodeString(datB64)
 		if err != nil {
 			return nil, "", fmt.Errorf("falló la decodificación de 'dat' (Base64): %v", err)
@@ -946,15 +946,15 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 
 	format := params["format"]
 	if format == "" {
-		format = "CAdES" // Default
+		format = "CAdES" // Por defecto
 	}
 
 	return data, format, nil
 }
 
-// encryptDES encrypts data using DES (ECB mode). Input should be already padded.
+// encryptDES cifra datos con DES (modo ECB). La entrada debe venir ya padded.
 func encryptDES(plaintext []byte, key []byte) ([]byte, error) {
-	// DES key must be 8 bytes
+	// La clave DES debe ser de 8 bytes
 	if len(key) < 8 {
 		paddedKey := make([]byte, 8)
 		copy(paddedKey, key)
@@ -968,13 +968,13 @@ func encryptDES(plaintext []byte, key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Assuming plaintext is already padded to BlockSize
+	// Se asume que plaintext ya viene padded al tamaño de bloque
 	if len(plaintext)%block.BlockSize() != 0 {
 		return nil, fmt.Errorf("plaintext is not a multiple of the block size")
 	}
 
 	ciphertext := make([]byte, len(plaintext))
-	// ECB Mode
+	// Modo ECB
 	bs := block.BlockSize()
 	for i := 0; i < len(plaintext); i += bs {
 		block.Encrypt(ciphertext[i:i+bs], plaintext[i:i+bs])
@@ -983,10 +983,10 @@ func encryptDES(plaintext []byte, key []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-// AutoFirmaEncryptAndFormat encrypts and formats data following the Java AutoFirma pattern: [PaddingCount].[UrlSafeBase64(EncryptedData)]
+// AutoFirmaEncryptAndFormat cifra y formatea datos según patrón Java de AutoFirma: [PaddingCount].[UrlSafeBase64(EncryptedData)].
 func AutoFirmaEncryptAndFormat(data []byte, keyBytes []byte) (string, error) {
 	padLen := (8 - (len(data) % 8)) % 8
-	// Pad with Zeros (standard AutoFirma Java behavior for DES ECB)
+	// Rellenar con ceros (comportamiento estándar AutoFirma Java para DES ECB)
 	if padLen > 0 {
 		padding := make([]byte, padLen)
 		data = append(data, padding...)
@@ -997,7 +997,7 @@ func AutoFirmaEncryptAndFormat(data []byte, keyBytes []byte) (string, error) {
 		return "", err
 	}
 
-	// Use URL Safe Base64 WITH PADDING (AutoFirma Java pattern)
+	// Usar URL Safe Base64 CON PADDING (patrón Java de AutoFirma)
 	b64 := base64.URLEncoding.EncodeToString(encBytes)
 	return fmt.Sprintf("%d.%s", padLen, b64), nil
 }
