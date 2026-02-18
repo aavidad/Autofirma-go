@@ -126,7 +126,7 @@ func truncateForLog(s string, max int) string {
 // SignData signs data using the specified certificate.
 func SignData(dataB64 string, certificateID string, pin string, format string, options map[string]interface{}) (string, error) {
 	format = normalizeSignFormat(format)
-	log.Printf("[Signer] Sign start cert=%s format=%s pin_set=%t opts=%s %s",
+	log.Printf("[Signer] Inicio de firma cert=%s format=%s pin_set=%t opts=%s %s",
 		applog.MaskID(certificateID),
 		format,
 		strings.TrimSpace(pin) != "",
@@ -137,19 +137,19 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	// Decode base64 data
 	data, err := base64.StdEncoding.DecodeString(dataB64)
 	if err != nil {
-		log.Printf("[Signer] Sign decode error cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
+		log.Printf("[Signer] Error decodificando firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 		return "", fmt.Errorf("datos base64 inválidos: %v", err)
 	}
 	resolvedFormat := resolveSignFormat(format, data)
 	if resolvedFormat != format {
-		log.Printf("[Signer] Sign format resolved input=%s resolved=%s", format, resolvedFormat)
+		log.Printf("[Signer] Formato de firma resuelto input=%s resolved=%s", format, resolvedFormat)
 	}
 	format = resolvedFormat
 
 	// Get certificate by ID
 	cert, nickname, err := getCertificateByID(certificateID, options)
 	if err != nil {
-		log.Printf("[Signer] Sign cert lookup failed cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
+		log.Printf("[Signer] Falló búsqueda de certificado para firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
 	}
 
@@ -168,13 +168,13 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	if runtime.GOOS == "windows" && strings.EqualFold(format, "cades") {
 		sigDER, storeErr := signCadesWithWindowsStore(data, nickname, options)
 		if storeErr == nil {
-			log.Printf("[Signer] Windows store CAdES signing succeeded (store-first mode)")
+			log.Printf("[Signer] Firma CAdES en almacén Windows completada (modo store-first)")
 			sig := base64.StdEncoding.EncodeToString(sigDER)
-			log.Printf("[Signer] Sign success cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+			log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
 			return sig, nil
 		}
 		windowsStoreErr = storeErr
-		log.Printf("[Signer] Windows store CAdES signing failed, falling back to PFX path: %v", storeErr)
+		log.Printf("[Signer] Falló firma CAdES en almacén Windows, aplicando fallback a ruta PFX: %v", storeErr)
 	}
 
 	// Windows-first strategy for PAdES:
@@ -188,13 +188,13 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		}
 		signedData, storeErr := signPadesWithWindowsStoreGo(inputFile, cert, nickname, options)
 		if storeErr == nil {
-			log.Printf("[Signer] Windows store PAdES signing succeeded (store-first mode)")
+			log.Printf("[Signer] Firma PAdES en almacén Windows completada (modo store-first)")
 			sig := base64.StdEncoding.EncodeToString(signedData)
-			log.Printf("[Signer] Sign success cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+			log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
 			return sig, nil
 		}
 		windowsPadesStoreErr = storeErr
-		log.Printf("[Signer] Windows store PAdES signing failed, falling back to PFX path: %v", storeErr)
+		log.Printf("[Signer] Falló firma PAdES en almacén Windows, aplicando fallback a ruta PFX: %v", storeErr)
 	}
 
 	// Export certificate and private key to temporary PKCS#12
@@ -234,11 +234,11 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	if strings.EqualFold(format, "cades") {
 		signedData, err := signCadesDetachedOpenSSL(inputFile, p12Path, tempPassword, options)
 		if err != nil {
-			log.Printf("[Signer] Sign failure cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
+			log.Printf("[Signer] Error en firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 			return "", fmt.Errorf("firma CAdES fallida (openssl): %v", err)
 		}
 		sig := base64.StdEncoding.EncodeToString(signedData)
-		log.Printf("[Signer] Sign success cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+		log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
 		return sig, nil
 	}
 
@@ -246,11 +246,11 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	if strings.EqualFold(format, "pades") {
 		signedData, err := signPadesWithGo(inputFile, p12Path, tempPassword, options)
 		if err != nil {
-			log.Printf("[Signer] Sign failure cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
+			log.Printf("[Signer] Error en firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 			return "", fmt.Errorf("firma PAdES fallida (go): %v", err)
 		}
 		sig := base64.StdEncoding.EncodeToString(signedData)
-		log.Printf("[Signer] Sign success cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+		log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
 		return sig, nil
 	}
 
@@ -258,15 +258,15 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	if strings.EqualFold(format, "xades") {
 		signedData, err := signXadesWithGo(inputFile, p12Path, tempPassword, options)
 		if err != nil {
-			log.Printf("[Signer] Sign failure cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
+			log.Printf("[Signer] Error en firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 			return "", fmt.Errorf("firma XAdES fallida (go): %v", err)
 		}
 		sig := base64.StdEncoding.EncodeToString(signedData)
-		log.Printf("[Signer] Sign success cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+		log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
 		return sig, nil
 	}
 
-	log.Printf("[Signer] Sign unsupported format cert=%s format=%s", applog.MaskID(certificateID), format)
+	log.Printf("[Signer] Formato de firma no soportado cert=%s format=%s", applog.MaskID(certificateID), format)
 	return "", fmt.Errorf("formato de firma no soportado: %s", format)
 }
 
@@ -362,7 +362,7 @@ func signCadesWithWindowsStore(data []byte, thumbprint string, options map[strin
 // VerifyData verifies a signature.
 func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.VerifyResult, error) {
 	format = normalizeSignFormat(format)
-	log.Printf("[Signer] Verify start format=%s %s %s",
+	log.Printf("[Signer] Inicio de verificación format=%s %s %s",
 		format,
 		applog.SecretMeta("originalDataB64", originalDataB64),
 		applog.SecretMeta("signatureDataB64", signatureDataB64),
@@ -371,7 +371,7 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 	// Decode base64 original data
 	originalData, err := base64.StdEncoding.DecodeString(originalDataB64)
 	if err != nil {
-		log.Printf("[Signer] Verify decode original error format=%s err=%v", format, err)
+		log.Printf("[Signer] Error decodificando datos originales en verificación format=%s err=%v", format, err)
 		return nil, fmt.Errorf("datos originales base64 inválidos: %v", err)
 	}
 
@@ -401,7 +401,7 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		// Decode base64 signature data
 		signatureData, err := base64.StdEncoding.DecodeString(signatureDataB64)
 		if err != nil {
-			log.Printf("[Signer] Verify decode signature error format=%s err=%v", format, err)
+			log.Printf("[Signer] Error decodificando firma en verificación format=%s err=%v", format, err)
 			return nil, fmt.Errorf("datos de firma base64 inválidos: %v", err)
 		}
 
@@ -420,10 +420,10 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		}
 		result, err := verifyCadesDetachedOpenSSL(originalFile, signatureFile)
 		if err != nil {
-			log.Printf("[Signer] Verify failure format=%s err=%v", format, err)
+			log.Printf("[Signer] Error en verificación format=%s err=%v", format, err)
 			return nil, fmt.Errorf("verificación CAdES fallida (openssl): %v", err)
 		}
-		log.Printf("[Signer] Verify success format=%s valid=%t signer=%q", format, result.Valid, result.SignerName)
+		log.Printf("[Signer] Verificación correcta format=%s valid=%t signer=%q", format, result.Valid, result.SignerName)
 		return result, nil
 	}
 
@@ -435,10 +435,10 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		}
 		result, err := verifyPadesWithGo(target)
 		if err != nil {
-			log.Printf("[Signer] Verify failure format=%s err=%v", format, err)
+			log.Printf("[Signer] Error en verificación format=%s err=%v", format, err)
 			return nil, fmt.Errorf("verificación PAdES fallida (go): %v", err)
 		}
-		log.Printf("[Signer] Verify success format=%s valid=%t signer=%q", format, result.Valid, result.SignerName)
+		log.Printf("[Signer] Verificación correcta format=%s valid=%t signer=%q", format, result.Valid, result.SignerName)
 		return result, nil
 	}
 
@@ -450,14 +450,14 @@ func VerifyData(originalDataB64, signatureDataB64, format string) (*protocol.Ver
 		}
 		result, err := verifyXadesWithGo(target)
 		if err != nil {
-			log.Printf("[Signer] Verify failure format=%s err=%v", format, err)
+			log.Printf("[Signer] Error en verificación format=%s err=%v", format, err)
 			return nil, fmt.Errorf("verificación XAdES fallida (go): %v", err)
 		}
-		log.Printf("[Signer] Verify success format=%s valid=%t signer=%q", format, result.Valid, result.SignerName)
+		log.Printf("[Signer] Verificación correcta format=%s valid=%t signer=%q", format, result.Valid, result.SignerName)
 		return result, nil
 	}
 
-	log.Printf("[Signer] Verify unsupported format=%s", format)
+	log.Printf("[Signer] Formato de verificación no soportado format=%s", format)
 	return nil, fmt.Errorf("formato de verificacion no soportado: %s", format)
 }
 
@@ -492,7 +492,7 @@ func getCertificateByID(certificateID string, options map[string]interface{}) (*
 func getCertificatesForSignOptions(options map[string]interface{}) ([]protocol.Certificate, error) {
 	storePref, hints, includePKCS11, hasHintsOrOverride := resolveCertstoreOptions(options)
 	if hasHintsOrOverride {
-		log.Printf("[Signer] loading certificates with store options store=%s include_pkcs11=%t hints=%d",
+		log.Printf("[Signer] Cargando certificados con opciones de almacén store=%s include_pkcs11=%t hints=%d",
 			storePref, includePKCS11, len(hints))
 		certs, err := getSystemCertificatesWithOptionsFunc(certstore.Options{
 			PKCS11ModulePaths: hints,
@@ -500,12 +500,12 @@ func getCertificatesForSignOptions(options map[string]interface{}) ([]protocol.C
 		})
 		if err == nil {
 			if len(hints) > 0 && storePref == "PKCS11" && !hasPKCS11Certificates(certs) {
-				log.Printf("[Signer] PKCS11 hints yielded no token certificates, retrying default PKCS11 discovery")
+				log.Printf("[Signer] Los hints PKCS11 no devolvieron certificados de token, reintentando descubrimiento PKCS11 por defecto")
 				return getSystemCertificatesFunc()
 			}
 			return certs, nil
 		}
-		log.Printf("[Signer] options certificate loader failed, fallback to default: %v", err)
+		log.Printf("[Signer] Falló el cargador de certificados con opciones, aplicando fallback por defecto: %v", err)
 	}
 	return getSystemCertificatesFunc()
 }
@@ -674,10 +674,10 @@ func logWindowsCertificateDiagnostics(thumb string) {
 		"WinCertDiagnostics",
 	)
 	if err != nil {
-		log.Printf("[Signer] Win cert diagnostics failed thumb=%s: %v", maskThumbprint(thumb), err)
+		log.Printf("[Signer] Falló diagnóstico de certificado Windows thumb=%s: %v", maskThumbprint(thumb), err)
 		return
 	}
-	log.Printf("[Signer] Win cert diagnostics thumb=%s data=%s", maskThumbprint(thumb), truncateForLog(string(output), 2000))
+	log.Printf("[Signer] Diagnóstico de certificado Windows thumb=%s datos=%s", maskThumbprint(thumb), truncateForLog(string(output), 2000))
 }
 
 func enrichPadesOptions(opts map[string]interface{}, cert *protocol.Certificate) map[string]interface{} {

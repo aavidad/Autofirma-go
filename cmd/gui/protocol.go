@@ -82,7 +82,7 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 		}
 	}
 	if state.JavaScriptVersion < 1 {
-		log.Printf("[Protocol] JavaScript version code below secure minimum (jvc=%d required>=1)", state.JavaScriptVersion)
+		log.Printf("[Protocol] Código de versión JavaScript por debajo del mínimo seguro (jvc=%d requerido>=1)", state.JavaScriptVersion)
 	}
 	if state.MinimumClientVersion != "" {
 		requestedIsGreater, cmpErr := isRequestedVersionGreater(state.MinimumClientVersion, version.CurrentVersion)
@@ -132,7 +132,7 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 	}
 
 	if state.RTServlet == "" {
-		log.Printf("[Protocol] 'rtservlet' not provided. This might be a local file sign or session-based flow.")
+		log.Printf("[Protocol] No se proporcionó 'rtservlet'. Puede ser una firma de archivo local o un flujo basado en sesión.")
 	}
 
 	return state, nil
@@ -604,11 +604,11 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	// Decode inputs to bytes for uniform processing
 	certBytes, err := base64.StdEncoding.DecodeString(certB64)
 	if err != nil {
-		return fmt.Errorf("invalid cert base64: %v", err)
+		return fmt.Errorf("certificado base64 inválido: %v", err)
 	}
 	sigBytes, err := base64.StdEncoding.DecodeString(signatureB64)
 	if err != nil {
-		return fmt.Errorf("invalid sig base64: %v", err)
+		return fmt.Errorf("firma base64 inválida: %v", err)
 	}
 
 	var payload string
@@ -658,7 +658,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 
 		respBody, _ := io.ReadAll(resp.Body)
 		bodyText := strings.TrimSpace(string(respBody))
-		log.Printf("[Protocol] %s upload response status=%d body=%q", label, resp.StatusCode, bodyText)
+		log.Printf("[Protocol] %s respuesta de subida estado=%d cuerpo=%q", label, resp.StatusCode, bodyText)
 
 		if resp.StatusCode != 200 {
 			return false, bodyText, resp.StatusCode, nil
@@ -796,13 +796,13 @@ func (p *ProtocolState) SendWaitSignal() error {
 
 	body, _ := io.ReadAll(resp.Body)
 	bodyText := strings.TrimSpace(string(body))
-	log.Printf("[Protocol] WAIT response status=%d body=%q", resp.StatusCode, bodyText)
+	log.Printf("[Protocol] Respuesta WAIT estado=%d cuerpo=%q", resp.StatusCode, bodyText)
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("falló WAIT: %d %s", resp.StatusCode, bodyText)
 	}
 	if !strings.EqualFold(bodyText, "OK") && !strings.Contains(strings.ToUpper(bodyText), "OK") {
-		return fmt.Errorf("wait non-OK body: %s", bodyText)
+		return fmt.Errorf("WAIT devolvió cuerpo no OK: %s", bodyText)
 	}
 	return nil
 }
@@ -866,7 +866,7 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 				}
 
 				path = actualPath
-				log.Printf("[Protocol] Extracted %s data from XML request (%d bytes)", format, len(actualData))
+				log.Printf("[Protocol] Datos %s extraídos de solicitud XML (%d bytes)", format, len(actualData))
 			}
 			ui.InputFile.SetText(path)
 			ui.StatusMsg = "Documento descargado. Seleccione certificado y firme."

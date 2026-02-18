@@ -29,24 +29,24 @@ func main() {
 		log.Printf("Logging inicializado en: %s", logPath)
 	}
 
-	log.Println("=== AutoFirma Native Host Started ===")
+	log.Println("=== AutoFirma Native Host Iniciado ===")
 
 	for {
 		payload, err := readNativeMessage(os.Stdin)
 		if err != nil {
 			if err == io.EOF {
-				log.Println("EOF received, exiting")
+				log.Println("EOF recibido, saliendo")
 				break
 			}
-			log.Printf("Error reading native message: %v", err)
+			log.Printf("Error leyendo mensaje nativo: %v", err)
 			break
 		}
-		log.Printf("[Host] Native message received: %s", applog.BytesMeta("payload", payload))
+		log.Printf("[Host] Mensaje nativo recibido: %s", applog.BytesMeta("payload", payload))
 
 		responses := handleMessage(payload)
 		for _, resp := range responses {
 			if err := writeNativeMessage(os.Stdout, resp); err != nil {
-				log.Printf("Error writing native response: %v", err)
+				log.Printf("Error escribiendo respuesta nativa: %v", err)
 				return
 			}
 			// Reduce risk of buffering issues in browser pipe on very large responses.
@@ -54,7 +54,7 @@ func main() {
 		}
 	}
 
-	log.Println("=== AutoFirma Native Host Stopped ===")
+	log.Println("=== AutoFirma Native Host Detenido ===")
 }
 
 func readNativeMessage(r io.Reader) ([]byte, error) {
@@ -108,8 +108,8 @@ func errorResponse(reqID, msg string) protocol.Response {
 func handleMessage(data []byte) [][]byte {
 	var req protocol.Request
 	if err := json.Unmarshal(data, &req); err != nil {
-		log.Printf("[Host] Invalid JSON request: %s err=%v", applog.BytesMeta("payload", data), err)
-		resp := errorResponse("", "Invalid request format")
+		log.Printf("[Host] Solicitud JSON inválida: %s err=%v", applog.BytesMeta("payload", data), err)
+		resp := errorResponse("", "Formato de solicitud inválido")
 		encoded, _ := json.Marshal(resp)
 		return [][]byte{encoded}
 	}
@@ -146,7 +146,7 @@ func handleMessage(data []byte) [][]byte {
 
 	case "sign":
 		if req.Data == "" || req.CertificateID == "" {
-			resp = errorResponse(reqID, "Missing data or certificateId")
+			resp = errorResponse(reqID, "Faltan datos o certificateId")
 			break
 		}
 		signature, err := signer.SignData(req.Data, req.CertificateID, req.PIN, req.Format, req.SignatureOptions)
@@ -168,7 +168,7 @@ func handleMessage(data []byte) [][]byte {
 		resp.Result = result
 
 	default:
-		resp = errorResponse(reqID, "Unknown action: "+req.Action)
+		resp = errorResponse(reqID, "Acción desconocida: "+req.Action)
 	}
 
 	if len(resp.Signature) <= signatureChunkSize {

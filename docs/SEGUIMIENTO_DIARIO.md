@@ -277,3 +277,19 @@
 
 ### Siguiente paso inmediato
 - Ejecutar checklist E2E real (Valide + otra sede), regenerar reporte y cerrar bloque con etiqueta de release candidata.
+
+## 2026-02-18 01:12 +0100
+### Hecho hoy
+- Castelanización adicional de mensajes y logs en backend/protocolo:
+  - `cmd/autofirma-host/main.go`: arranque/parada, lectura/escritura de mensajes nativos y errores de acción/entrada.
+  - `cmd/gui/protocol.go`: avisos de protocolo (`rtservlet`), validaciones base64 de cert/firma, logs de subida, WAIT y extracción XML.
+  - `pkg/signer/signer.go`: trazas principales de inicio/éxito/error en firma/verificación, fallback Windows, carga de certificados con opciones y diagnóstico de certificado Windows.
+- Verificación ejecutada:
+  - `go test -mod=readonly ./cmd/gui ./pkg/signer ./pkg/protocol ./cmd/autofirma-host` en verde.
+
+### Pendiente
+- Pasada final de castellanización en comentarios técnicos y documentación interna opcional (no bloqueante funcionalmente).
+- Validación E2E final en sedes reales tras la última tanda de cambios de UX/diagnóstico.
+
+### Siguiente paso inmediato
+- Probar flujo real de sede con el binario actualizado y revisar log para confirmar mensajes castellanizados en ejecución real.
