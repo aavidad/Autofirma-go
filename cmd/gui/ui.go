@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	_ "embed"
 	"encoding/base64"
@@ -90,6 +91,15 @@ type UIPreferences struct {
 	UpdatedAt       string `json:"updated_at"`
 }
 
+type ScriptTestCase struct {
+	ID          string
+	Nombre      string
+	Descripcion string
+	Comando     []string
+	Selected    widget.Bool
+	BtnRun      widget.Clickable
+}
+
 type UI struct {
 	Theme  *material.Theme
 	Window *app.Window
@@ -131,6 +141,13 @@ type UI struct {
 	BtnCopyFullDiag    widget.Clickable
 	BtnRunFullCheck    widget.Clickable
 	BtnOpenSealWeb     widget.Clickable
+	BtnRunSelectedTest widget.Clickable
+	BtnRunAllTests     widget.Clickable
+	BtnSelectAllTests  widget.Clickable
+	BtnClearAllTests   widget.Clickable
+	BtnOpenCertManager widget.Clickable
+	BtnGenExportPass   widget.Clickable
+	BtnCopyExportPass  widget.Clickable
 	ShowAbout          bool
 	ChkVisibleSeal     widget.Bool
 	ChkStrictCompat    widget.Bool
@@ -188,6 +205,10 @@ type UI struct {
 	PadesSealPage  uint32
 	MainScrollList widget.List
 	MessageList    widget.List
+	TestList       widget.List
+	ScriptTests    []ScriptTestCase
+	ScriptTestBusy bool
+	ExportTempPass string
 
 	PDFPageWidthPt  float64
 	PDFPageHeightPt float64
@@ -235,6 +256,8 @@ func NewUI(w *app.Window) *UI {
 	ui.InputFile.Submit = true
 	ui.MainScrollList.Axis = layout.Vertical
 	ui.MessageList.Axis = layout.Vertical
+	ui.TestList.Axis = layout.Vertical
+	ui.initScriptTests()
 	if len(embeddedHeaderLogo) > 0 {
 		if img, err := png.Decode(bytes.NewReader(embeddedHeaderLogo)); err == nil {
 			ui.HeaderLogo = img
@@ -945,6 +968,76 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
 										return layout.Dimensions{}
 									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnOpenCertManager.Clicked(gtx) {
+												if err := openSystemCertificateManager(); err != nil {
+													ui.StatusMsg = withSolution("No se pudo abrir el gestor de certificados: "+err.Error(), "Abre manualmente el gestor de certificados del sistema.")
+												} else {
+													ui.StatusMsg = "Gestor de certificados del sistema abierto."
+												}
+												ui.Window.Invalidate()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnOpenCertManager, "Gestor de certificados")
+											btn.Background = color.NRGBA{R: 72, G: 88, B: 122, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnGenExportPass.Clicked(gtx) {
+												pass, err := generateStrongTempPassword(24)
+												if err != nil {
+													ui.StatusMsg = withSolution("No se pudo generar clave temporal: "+err.Error(), "Reintenta la generación de clave temporal.")
+												} else {
+													ui.ExportTempPass = pass
+													ui.StatusMsg = "Clave temporal fuerte generada para exportación PKCS#12."
+												}
+												ui.Window.Invalidate()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnGenExportPass, "Generar clave temporal")
+											btn.Background = color.NRGBA{R: 85, G: 88, B: 70, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnCopyExportPass.Clicked(gtx) {
+												pass := strings.TrimSpace(ui.ExportTempPass)
+												if pass == "" {
+													ui.StatusMsg = withSolution("No hay clave temporal generada.", "Pulsa 'Generar clave temporal' antes de copiar.")
+												} else if err := copyToClipboard(pass); err != nil {
+													ui.StatusMsg = withSolution("No se pudo copiar la clave temporal: "+err.Error(), "Copia manualmente la clave o revisa el portapapeles del sistema.")
+												} else {
+													ui.StatusMsg = "Clave temporal copiada al portapapeles."
+												}
+												ui.Window.Invalidate()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnCopyExportPass, "Copiar clave temporal")
+											btn.Background = color.NRGBA{R: 64, G: 96, B: 78, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											txt := "Clave activa: " + maskPasswordPreview(ui.ExportTempPass)
+											lbl := material.Caption(ui.Theme, txt)
+											lbl.Color = color.NRGBA{R: 70, G: 76, B: 88, A: 255}
+											return layout.UniformInset(unit.Dp(10)).Layout(gtx, lbl.Layout)
+										}),
+									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
 									return material.Caption(ui.Theme, "Herramientas avanzadas").Layout(gtx)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1285,6 +1378,14 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													})
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if !ui.ChkExpertMode.Value {
+														msg := material.Caption(ui.Theme, "Activa modo experto para usar el panel de pruebas integradas.")
+														msg.Color = color.NRGBA{R: 95, G: 95, B: 95, A: 255}
+														return layout.UniformInset(unit.Dp(8)).Layout(gtx, msg.Layout)
+													}
+													return ui.layoutScriptTestsPanel(gtx)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													msg := strings.TrimSpace(ui.UpdateStatus)
 													if msg == "" {
 														return layout.Dimensions{}
@@ -1542,6 +1643,338 @@ func (ui *UI) layoutMessagePanel(gtx layout.Context, title string, minHeight uni
 			})
 		}),
 	)
+}
+
+func (ui *UI) initScriptTests() {
+	ui.ScriptTests = []ScriptTestCase{
+		{
+			ID:          "test_active_go",
+			Nombre:      "Tests Go activos",
+			Descripcion: "Ejecuta pruebas de paquetes cmd/ y pkg/.",
+			Comando:     []string{"bash", "scripts/test_active_go.sh"},
+			Selected:    widget.Bool{Value: true},
+		},
+		{
+			ID:          "smoke_native",
+			Nombre:      "Smoke host nativo",
+			Descripcion: "Ping + certificados + firma/verificación base.",
+			Comando:     []string{"bash", "scripts/smoke_native_host.sh"},
+			Selected:    widget.Bool{Value: true},
+		},
+		{
+			ID:          "smoke_native_strict",
+			Nombre:      "Smoke host nativo estricto",
+			Descripcion: "Incluye validación estricta PAdES/XAdES.",
+			Comando:     []string{"bash", "scripts/smoke_native_host.sh", "--strict-formats"},
+		},
+		{
+			ID:          "e2e_ping",
+			Nombre:      "E2E ping host",
+			Descripcion: "Envía solicitud ping por framing nativo.",
+			Comando:     []string{"bash", "scripts/e2e_native_request.sh", "ping"},
+		},
+		{
+			ID:          "e2e_getcerts",
+			Nombre:      "E2E certificados",
+			Descripcion: "Consulta certificados disponibles en host.",
+			Comando:     []string{"bash", "scripts/e2e_native_request.sh", "getCertificates"},
+		},
+		{
+			ID:          "e2e_sign_cades",
+			Nombre:      "E2E firma CAdES",
+			Descripcion: "Realiza firma CAdES mínima con certificado activo.",
+			Comando:     []string{"bash", "scripts/e2e_native_request.sh", "sign-cades"},
+		},
+		{
+			ID:          "full_validation",
+			Nombre:      "Validación completa",
+			Descripcion: "Pipeline completo local con reporte (puede tardar).",
+			Comando:     []string{"bash", "scripts/run_full_validation.sh"},
+		},
+	}
+}
+
+func resolveScriptsRootDir() (string, error) {
+	candidates := make([]string, 0, 5)
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		candidates = append(candidates, wd)
+	}
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, exeDir)
+		candidates = append(candidates, filepath.Join(exeDir, ".."))
+		candidates = append(candidates, filepath.Join(exeDir, "..", ".."))
+	}
+	candidates = append(candidates, "/opt/autofirma-dipgra")
+
+	for _, c := range candidates {
+		root := filepath.Clean(strings.TrimSpace(c))
+		if root == "" {
+			continue
+		}
+		marker := filepath.Join(root, "scripts", "test_active_go.sh")
+		if st, err := os.Stat(marker); err == nil && !st.IsDir() {
+			return root, nil
+		}
+	}
+	return "", fmt.Errorf("no se encontró directorio de scripts de prueba")
+}
+
+func appendMultilineStatus(base, extra string, maxChars int) string {
+	base = strings.TrimSpace(base)
+	extra = strings.TrimSpace(extra)
+	if extra == "" {
+		return base
+	}
+	joined := extra
+	if base != "" {
+		joined = base + "\n" + extra
+	}
+	if maxChars > 0 && len(joined) > maxChars {
+		return joined[len(joined)-maxChars:]
+	}
+	return joined
+}
+
+func trimOutputForUI(raw string, maxChars int) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "(sin salida)"
+	}
+	if maxChars <= 0 || len(s) <= maxChars {
+		return s
+	}
+	return s[:maxChars] + "\n...[salida recortada]..."
+}
+
+func (ui *UI) runScriptTests(all bool) {
+	if ui.ScriptTestBusy {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Ya hay una batería de pruebas en ejecución.", 12000)
+		ui.Window.Invalidate()
+		return
+	}
+
+	indices := make([]int, 0, len(ui.ScriptTests))
+	for i := range ui.ScriptTests {
+		if all || ui.ScriptTests[i].Selected.Value {
+			indices = append(indices, i)
+		}
+	}
+	if len(indices) == 0 {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "No hay pruebas seleccionadas.", 12000)
+		ui.Window.Invalidate()
+		return
+	}
+
+	rootDir, err := resolveScriptsRootDir()
+	if err != nil {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "No se pudieron localizar scripts de prueba: "+err.Error(), 12000)
+		ui.Window.Invalidate()
+		return
+	}
+
+	ui.ScriptTestBusy = true
+	ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, fmt.Sprintf("Iniciando batería de pruebas (%d script/s)...", len(indices)), 12000)
+	ui.Window.Invalidate()
+
+	go func(testIndices []int, workDir string) {
+		defer func() {
+			ui.ScriptTestBusy = false
+			ui.Window.Invalidate()
+		}()
+
+		okCount := 0
+		failCount := 0
+		for _, idx := range testIndices {
+			tc := ui.ScriptTests[idx]
+			start := time.Now()
+
+			ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, fmt.Sprintf("▶ Ejecutando: %s", tc.Nombre), 12000)
+			ui.Window.Invalidate()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			cmd := exec.CommandContext(ctx, tc.Comando[0], tc.Comando[1:]...)
+			cmd.Dir = workDir
+			env := os.Environ()
+			goFlags := strings.TrimSpace(os.Getenv("GOFLAGS"))
+			if !strings.Contains(" "+goFlags+" ", " -mod=") {
+				if goFlags == "" {
+					goFlags = "-mod=readonly"
+				} else {
+					goFlags = goFlags + " -mod=readonly"
+				}
+			}
+			env = append(env, "GOFLAGS="+goFlags)
+			if os.Getenv("GOCACHE") == "" {
+				env = append(env, "GOCACHE=/tmp/go-build")
+			}
+			cmd.Env = env
+			configureGUICommand(cmd)
+			output, runErr := cmd.CombinedOutput()
+			cancel()
+
+			elapsed := time.Since(start).Round(time.Millisecond)
+			outText := trimOutputForUI(string(output), 1400)
+			if runErr != nil {
+				failCount++
+				ui.HealthStatus = appendMultilineStatus(
+					ui.HealthStatus,
+					fmt.Sprintf("✖ %s (%s): %v\n%s", tc.Nombre, elapsed, runErr, outText),
+					20000,
+				)
+			} else {
+				okCount++
+				ui.HealthStatus = appendMultilineStatus(
+					ui.HealthStatus,
+					fmt.Sprintf("✔ %s (%s)\n%s", tc.Nombre, elapsed, outText),
+					20000,
+				)
+			}
+			ui.Window.Invalidate()
+		}
+
+		ui.HealthStatus = appendMultilineStatus(
+			ui.HealthStatus,
+			fmt.Sprintf("Batería finalizada. OK=%d ERROR=%d", okCount, failCount),
+			22000,
+		)
+		ui.Window.Invalidate()
+	}(indices, rootDir)
+}
+
+func (ui *UI) runSingleScriptTest(index int) {
+	if index < 0 || index >= len(ui.ScriptTests) {
+		return
+	}
+	if ui.ScriptTestBusy {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Hay una batería en curso. Espera a que termine.", 12000)
+		ui.Window.Invalidate()
+		return
+	}
+	for i := range ui.ScriptTests {
+		ui.ScriptTests[i].Selected.Value = i == index
+	}
+	ui.runScriptTests(false)
+}
+
+func (ui *UI) layoutScriptTestsPanel(gtx layout.Context) layout.Dimensions {
+	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.H6(ui.Theme, "Panel de pruebas")
+				lbl.Color = color.NRGBA{R: 40, G: 62, B: 95, A: 255}
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				cap := material.Caption(ui.Theme, "Selecciona una o varias pruebas y ejecútalas desde aquí.")
+				cap.Color = color.NRGBA{R: 80, G: 88, B: 100, A: 255}
+				return cap.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if ui.BtnSelectAllTests.Clicked(gtx) {
+							for i := range ui.ScriptTests {
+								ui.ScriptTests[i].Selected.Value = true
+							}
+						}
+						btn := material.Button(ui.Theme, &ui.BtnSelectAllTests, "Seleccionar todas")
+						btn.Background = color.NRGBA{R: 80, G: 96, B: 110, A: 255}
+						return layout.UniformInset(unit.Dp(3)).Layout(gtx, btn.Layout)
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if ui.BtnClearAllTests.Clicked(gtx) {
+							for i := range ui.ScriptTests {
+								ui.ScriptTests[i].Selected.Value = false
+							}
+						}
+						btn := material.Button(ui.Theme, &ui.BtnClearAllTests, "Limpiar selección")
+						btn.Background = color.NRGBA{R: 96, G: 96, B: 96, A: 255}
+						return layout.UniformInset(unit.Dp(3)).Layout(gtx, btn.Layout)
+					}),
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if ui.BtnRunSelectedTest.Clicked(gtx) && !ui.ScriptTestBusy {
+							ui.runScriptTests(false)
+						}
+						txt := "Ejecutar seleccionadas"
+						if ui.ScriptTestBusy {
+							txt = "Pruebas en curso..."
+						}
+						btn := material.Button(ui.Theme, &ui.BtnRunSelectedTest, txt)
+						btn.Background = color.NRGBA{R: 42, G: 110, B: 74, A: 255}
+						return layout.UniformInset(unit.Dp(3)).Layout(gtx, btn.Layout)
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if ui.BtnRunAllTests.Clicked(gtx) && !ui.ScriptTestBusy {
+							ui.runScriptTests(true)
+						}
+						btn := material.Button(ui.Theme, &ui.BtnRunAllTests, "Ejecutar todas")
+						btn.Background = color.NRGBA{R: 45, G: 84, B: 135, A: 255}
+						return layout.UniformInset(unit.Dp(3)).Layout(gtx, btn.Layout)
+					}),
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				maxH := gtx.Dp(unit.Dp(260))
+				if maxH < 180 {
+					maxH = 180
+				}
+				gtx.Constraints.Min.Y = maxH
+				gtx.Constraints.Max.Y = maxH
+				return material.List(ui.Theme, &ui.TestList).Layout(gtx, len(ui.ScriptTests), func(gtx layout.Context, index int) layout.Dimensions {
+					tc := &ui.ScriptTests[index]
+					return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Stack{}.Layout(gtx,
+							layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+								paint.FillShape(
+									gtx.Ops,
+									color.NRGBA{R: 250, G: 251, B: 253, A: 255},
+									clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Min.Y+56)}.Op(),
+								)
+								return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Min.Y+56)}
+							}),
+							layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+								return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+												layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+													return material.CheckBox(ui.Theme, &tc.Selected, tc.Nombre).Layout(gtx)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if tc.BtnRun.Clicked(gtx) {
+														ui.runSingleScriptTest(index)
+													}
+													btn := material.Button(ui.Theme, &tc.BtnRun, "Ejecutar")
+													btn.Background = color.NRGBA{R: 75, G: 90, B: 120, A: 255}
+													return btn.Layout(gtx)
+												}),
+											)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											cap := material.Caption(ui.Theme, tc.Descripcion)
+											cap.Color = color.NRGBA{R: 88, G: 96, B: 110, A: 255}
+											return cap.Layout(gtx)
+										}),
+									)
+								})
+							}),
+						)
+					})
+				})
+			}),
+		)
+	})
 }
 
 func opensslInstallHint() string {
@@ -2177,13 +2610,6 @@ func (ui *UI) exportSelectedCertificateExpert() {
 		return
 	}
 	cert := ui.Certs[ui.SelectedCert]
-	if len(cert.Content) == 0 {
-		hint := "Selecciona otro certificado con contenido exportable."
-		ui.setLastError("ERR_EXPORT_NO_CONTENT", "precondiciones", "export_cert", fmt.Errorf("certificado sin contenido exportable"), hint)
-		ui.StatusMsg = withSolution("El certificado seleccionado no tiene contenido exportable.", hint)
-		ui.Window.Invalidate()
-		return
-	}
 
 	safeID := strings.ToLower(strings.TrimSpace(cert.ID))
 	safeID = strings.ReplaceAll(safeID, ":", "")
@@ -2191,10 +2617,10 @@ func (ui *UI) exportSelectedCertificateExpert() {
 	if safeID == "" || safeID == "-" {
 		safeID = "certificado"
 	}
-	fileName := "certificado_" + safeID[:uiMinInt(len(safeID), 12)] + ".b64"
+	fileName := "certificado_" + safeID[:uiMinInt(len(safeID), 12)] + ".p12"
 	home, _ := os.UserHomeDir()
 	defaultPath := filepath.Join(home, "Descargas", fileName)
-	selectedPath, canceled, err := protocolSaveDialog(defaultPath, "b64,txt")
+	selectedPath, canceled, err := protocolSaveDialog(defaultPath, "p12,pfx")
 	if canceled {
 		ui.StatusMsg = "Exportación de certificado cancelada."
 		ui.Window.Invalidate()
@@ -2213,9 +2639,47 @@ func (ui *UI) exportSelectedCertificateExpert() {
 		return
 	}
 
-	// Compatible with selectcert response format when no 'key' is provided.
-	out := base64.URLEncoding.EncodeToString(cert.Content)
-	if writeErr := os.WriteFile(strings.TrimSpace(selectedPath), []byte(out), 0644); writeErr != nil {
+	pass := strings.TrimSpace(ui.ExportTempPass)
+	if pass == "" {
+		generated, genErr := generateStrongTempPassword(24)
+		if genErr != nil {
+			hint := "Reintenta la operación y comprueba la aleatoriedad segura del sistema."
+			ui.setLastError("ERR_EXPORT_PASS_GEN", "preparacion", "export_cert", genErr, hint)
+			ui.StatusMsg = withSolution("No se pudo generar clave temporal de exportación: "+genErr.Error(), hint)
+			ui.Window.Invalidate()
+			return
+		}
+		ui.ExportTempPass = generated
+		pass = generated
+	}
+	if !isStrongPassword(pass) {
+		hint := "Pulsa 'Generar clave temporal' y usa esa clave para exportar."
+		ui.setLastError("ERR_EXPORT_PASS_WEAK", "preparacion", "export_cert", fmt.Errorf("clave temporal débil"), hint)
+		ui.StatusMsg = withSolution("La clave temporal no cumple requisitos de seguridad alta.", hint)
+		ui.Window.Invalidate()
+		return
+	}
+
+	p12Path, exportErr := signer.ExportCertificateP12ByID(cert.ID, pass, nil)
+	if exportErr != nil {
+		hint := "Comprueba si el certificado permite exportación PKCS#12 y vuelve a intentarlo."
+		ui.setLastError("ERR_EXPORT_P12", "exportacion", "export_cert", exportErr, hint)
+		ui.StatusMsg = withSolution("No se pudo exportar el certificado a PKCS#12: "+exportErr.Error(), hint)
+		ui.Window.Invalidate()
+		return
+	}
+	defer os.Remove(p12Path)
+
+	p12Data, readErr := os.ReadFile(p12Path)
+	if readErr != nil {
+		hint := "Reintenta la exportación; no se pudo leer el fichero temporal."
+		ui.setLastError("ERR_EXPORT_P12_READ", "exportacion", "export_cert", readErr, hint)
+		ui.StatusMsg = withSolution("No se pudo leer el fichero PKCS#12 generado: "+readErr.Error(), hint)
+		ui.Window.Invalidate()
+		return
+	}
+
+	if writeErr := os.WriteFile(strings.TrimSpace(selectedPath), p12Data, 0600); writeErr != nil {
 		hint := "Comprueba permisos de escritura en la ruta seleccionada."
 		ui.setLastError("ERR_EXPORT_WRITE", "guardado", "export_cert", writeErr, hint)
 		ui.StatusMsg = withSolution("No se pudo guardar el certificado exportado: "+writeErr.Error(), hint)
@@ -2223,8 +2687,8 @@ func (ui *UI) exportSelectedCertificateExpert() {
 		return
 	}
 	ui.clearLastError()
-	ui.StatusMsg = "Certificado exportado en formato Base64 URL en: " + strings.TrimSpace(selectedPath)
-	ui.appendOperationHistory("export_cert", "b64url", "ok", strings.TrimSpace(selectedPath), "certificado exportado")
+	ui.StatusMsg = "Certificado exportado en formato PKCS#12 en: " + strings.TrimSpace(selectedPath) + "\nClave temporal: usa 'Copiar clave temporal'."
+	ui.appendOperationHistory("export_cert", "pkcs12", "ok", strings.TrimSpace(selectedPath), "certificado exportado con clave temporal fuerte")
 	ui.Window.Invalidate()
 }
 
@@ -3909,6 +4373,99 @@ func copyToClipboard(text string) error {
 		cmd.Stdin = strings.NewReader(text)
 		configureGUICommand(cmd)
 		return cmd.Run()
+	}
+}
+
+func generateStrongTempPassword(length int) (string, error) {
+	if length < 24 {
+		length = 24
+	}
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*-_=+?"
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	out := make([]byte, length)
+	for i := range buf {
+		out[i] = alphabet[int(buf[i])%len(alphabet)]
+	}
+	pass := string(out)
+	if !isStrongPassword(pass) {
+		// Segundo intento para garantizar requisitos mínimos.
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for i := range buf {
+			out[i] = alphabet[int(buf[i])%len(alphabet)]
+		}
+		pass = string(out)
+	}
+	if !isStrongPassword(pass) {
+		return "", fmt.Errorf("no se pudo generar contraseña fuerte")
+	}
+	return pass, nil
+}
+
+func isStrongPassword(pass string) bool {
+	if len(pass) < 20 {
+		return false
+	}
+	hasUpper := false
+	hasLower := false
+	hasDigit := false
+	hasSymbol := false
+	for _, r := range pass {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		default:
+			hasSymbol = true
+		}
+	}
+	return hasUpper && hasLower && hasDigit && hasSymbol
+}
+
+func maskPasswordPreview(pass string) string {
+	pass = strings.TrimSpace(pass)
+	if pass == "" {
+		return "(sin generar)"
+	}
+	if len(pass) <= 6 {
+		return strings.Repeat("*", len(pass))
+	}
+	return pass[:2] + strings.Repeat("*", len(pass)-4) + pass[len(pass)-2:]
+}
+
+func openSystemCertificateManager() error {
+	switch runtime.GOOS {
+	case "windows":
+		cmd := exec.Command("cmd", "/c", "start", "", "certmgr.msc")
+		configureGUICommand(cmd)
+		return cmd.Run()
+	case "darwin":
+		cmd := exec.Command("open", "-a", "Keychain Access")
+		configureGUICommand(cmd)
+		return cmd.Run()
+	default:
+		if _, err := exec.LookPath("seahorse"); err == nil {
+			cmd := exec.Command("seahorse")
+			configureGUICommand(cmd)
+			return cmd.Run()
+		}
+		if _, err := exec.LookPath("kleopatra"); err == nil {
+			cmd := exec.Command("kleopatra")
+			configureGUICommand(cmd)
+			return cmd.Run()
+		}
+		home, _ := os.UserHomeDir()
+		if strings.TrimSpace(home) != "" {
+			return openExternal(filepath.Join(home, ".pki", "nssdb"))
+		}
+		return fmt.Errorf("no hay gestor gráfico de certificados disponible")
 	}
 }
 

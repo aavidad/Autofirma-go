@@ -53,6 +53,7 @@ Expone herramientas avanzadas:
 - Lote local por JSON/XML.
 - Diagnóstico completo y autoprueba guiada.
 - Opciones de compatibilidad estricta.
+- Gestión de certificados del sistema y exportación segura PKCS#12.
 
 ## 4. Flujos de firma y “vueltas”
 En esta guía, “vueltas” significa intercambio de ida y vuelta entre cliente y sede/servicio.
@@ -175,6 +176,7 @@ Causas habituales:
 Acciones:
 - Revisar almacén/certificado seleccionado.
 - Reintentar con modo experto para inspección detallada.
+- Abrir el gestor de certificados del sistema desde el botón de la app.
 
 ### 8.2 Error de red con @firma/sede
 Causas habituales:
@@ -206,6 +208,12 @@ Acciones:
 - Probar compatibilidad estricta.
 - Verificar límites y disponibilidad del servidor.
 
+### 8.5 Exportación de certificado PKCS#12
+Criterios de la app:
+- La exportación se realiza en formato PKCS#12 (`.p12/.pfx`).
+- Se usa una clave temporal con requisitos de seguridad alta.
+- La clave temporal se puede generar y copiar al portapapeles desde la UI.
+
 ## 9. Logs y evidencias
 Rutas habituales Linux:
 - `~/.local/state/autofirma-dipgra/logs/`
@@ -232,3 +240,12 @@ Buenas prácticas:
 - Prueba de canal WSS: scripts de web compat.
 - Prueba real de sede: `run_sede_e2e.sh` + revisión de logs.
 
+## 13. Panel de pruebas en la GUI (modo experto)
+La aplicación incluye un panel de pruebas integrado para ejecutar scripts desde la interfaz:
+- Selección individual o múltiple de pruebas.
+- Botón de ejecución por prueba.
+- Ejecución de pruebas seleccionadas o de todas.
+- Resultado y salida visibles en el panel de mensajes con scroll.
+
+Referencia de scripts y uso detallado:
+- `docs/SCRIPTS_PRUEBAS.md`

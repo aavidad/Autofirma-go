@@ -16,8 +16,12 @@ mkdir -p "${BUILD_DIR}" "${OUT_DIR}"
 
 cd "${ROOT_DIR}"
 
+if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
+  GOFLAGS="${GOFLAGS:-} -mod=readonly"
+fi
+
 echo "[package] building host binary"
-GOCACHE=/tmp/go-build go build -o "${BUILD_DIR}/autofirma-host" ./cmd/autofirma-host
+GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BUILD_DIR}/autofirma-host" ./cmd/autofirma-host
 
 # Optional smoke test data
 if [[ -d "${ROOT_DIR}/testdata" ]]; then

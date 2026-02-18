@@ -6,6 +6,7 @@ Directorio de trabajo:
 ## 0) Guía funcional completa
 Antes de pruebas/manuales, revisar:
 - `docs/GUI_AYUDA_EXHAUSTIVA.md`
+- `docs/SCRIPTS_PRUEBAS.md`
 
 ## 1) Validación rápida de compatibilidad
 ```bash

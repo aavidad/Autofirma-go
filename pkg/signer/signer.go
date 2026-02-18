@@ -645,6 +645,27 @@ func exportCertificateToP12(nickname, password string) (string, error) {
 	return tmpFile, nil
 }
 
+// ExportCertificateP12ByID exporta un certificado a PKCS#12 a partir de su ID.
+// Devuelve la ruta del fichero temporal .p12 generado.
+func ExportCertificateP12ByID(certificateID, password string, options map[string]interface{}) (string, error) {
+	certificateID = strings.TrimSpace(certificateID)
+	password = strings.TrimSpace(password)
+	if certificateID == "" {
+		return "", fmt.Errorf("identificador de certificado vacío")
+	}
+	if password == "" {
+		return "", fmt.Errorf("la contraseña de exportación no puede estar vacía")
+	}
+	cert, nickname, err := getCertificateByID(certificateID, options)
+	if err != nil {
+		return "", fmt.Errorf("certificado no encontrado: %v", err)
+	}
+	if cert == nil || strings.TrimSpace(nickname) == "" {
+		return "", fmt.Errorf("el certificado seleccionado no tiene nickname exportable")
+	}
+	return exportCertificateToP12(nickname, password)
+}
+
 func maskThumbprint(thumb string) string {
 	thumb = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(thumb), " ", ""))
 	if len(thumb) <= 12 {

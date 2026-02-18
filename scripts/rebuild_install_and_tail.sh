@@ -12,12 +12,16 @@ if [[ "${1:-}" == "--no-tail" ]]; then
   TAIL_LOG=0
 fi
 
+if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
+  GOFLAGS="${GOFLAGS:-} -mod=readonly"
+fi
+
 echo "[1/4] Parando procesos anteriores..."
 pkill -f '/opt/autofirma-dipgra/autofirma-desktop|autofirma-web-compat|/cmd/gui' || true
 
 echo "[2/4] Compilando binario..."
 cd "${ROOT_DIR}"
-GOCACHE=/tmp/go-build go build -o "${BIN_TMP}" ./cmd/gui
+GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_TMP}" ./cmd/gui
 
 echo "[3/4] Instalando en ${BIN_DST}..."
 sudo install -m 0755 "${BIN_TMP}" "${BIN_DST}"

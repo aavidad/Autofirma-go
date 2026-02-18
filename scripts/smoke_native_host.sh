@@ -24,9 +24,13 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
+  GOFLAGS="${GOFLAGS:-} -mod=readonly"
+fi
+
 build_bin() {
   echo "[smoke] building host binary..."
-  GOCACHE=/tmp/go-build go build -o "${BIN_PATH}" ./cmd/autofirma-host
+  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_PATH}" ./cmd/autofirma-host
 }
 
 send_req() {
