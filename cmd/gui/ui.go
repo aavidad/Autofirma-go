@@ -187,6 +187,7 @@ type UI struct {
 	PadesSealH     float64
 	PadesSealPage  uint32
 	MainScrollList widget.List
+	MessageList    widget.List
 
 	PDFPageWidthPt  float64
 	PDFPageHeightPt float64
@@ -233,6 +234,7 @@ func NewUI(w *app.Window) *UI {
 	ui.InputFile.SingleLine = true
 	ui.InputFile.Submit = true
 	ui.MainScrollList.Axis = layout.Vertical
+	ui.MessageList.Axis = layout.Vertical
 	if len(embeddedHeaderLogo) > 0 {
 		if img, err := png.Decode(bytes.NewReader(embeddedHeaderLogo)); err == nil {
 			ui.HeaderLogo = img
@@ -579,17 +581,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 							return btn.Layout(gtx)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if ui.StatusMsg != "" {
-								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									msg := material.Body2(ui.Theme, ui.StatusMsg)
-									// Make it clear if it's an error
-									if strings.Contains(strings.ToLower(ui.StatusMsg), "error") {
-										msg.Color = color.NRGBA{R: 200, G: 0, B: 0, A: 255}
-									}
-									return msg.Layout(gtx)
-								})
-							}
-							return layout.Dimensions{}
+							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return ui.layoutMessagePanel(gtx, "Mensajes", unit.Dp(130))
+							})
 						}),
 					)
 				})
@@ -894,14 +888,11 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						})
 					}),
 
-					// Status
+					// Panel de mensajes (estado + diagnóstico) con scroll.
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if ui.StatusMsg != "" {
-							return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return material.Body2(ui.Theme, ui.StatusMsg).Layout(gtx)
-							})
-						}
-						return layout.Dimensions{}
+						return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return ui.layoutMessagePanel(gtx, "Mensajes de la aplicación", unit.Dp(165))
+						})
 					}),
 
 					// Session diagnostics
@@ -954,23 +945,33 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
 										return layout.Dimensions{}
 									}
-									if ui.BtnBatchLocal.Clicked(gtx) {
-										go ui.runLocalBatchFromInput()
-									}
-									btn := material.Button(ui.Theme, &ui.BtnBatchLocal, "Procesar lote local (JSON/XML)")
-									btn.Background = color.NRGBA{R: 70, G: 95, B: 130, A: 255}
-									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+									return material.Caption(ui.Theme, "Herramientas avanzadas").Layout(gtx)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
 										return layout.Dimensions{}
 									}
-									if ui.BtnExportCert.Clicked(gtx) {
-										go ui.exportSelectedCertificateExpert()
-									}
-									btn := material.Button(ui.Theme, &ui.BtnExportCert, "Exportar certificado seleccionado")
-									btn.Background = color.NRGBA{R: 95, G: 80, B: 125, A: 255}
-									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnBatchLocal.Clicked(gtx) {
+												go ui.runLocalBatchFromInput()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnBatchLocal, "Procesar lote local (JSON/XML)")
+											btn.Background = color.NRGBA{R: 70, G: 95, B: 130, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnExportCert.Clicked(gtx) {
+												go ui.exportSelectedCertificateExpert()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnExportCert, "Exportar certificado seleccionado")
+											btn.Background = color.NRGBA{R: 95, G: 80, B: 125, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+									)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
@@ -985,6 +986,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											btn.Background = color.NRGBA{R: 85, G: 80, B: 80, A: 255}
 											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
 										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+										}),
 										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 											if ui.BtnExpertLoad.Clicked(gtx) {
 												go ui.runExpertLoadDialog()
@@ -993,6 +997,13 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											btn.Background = color.NRGBA{R: 85, G: 80, B: 80, A: 255}
 											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
 										}),
+									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 											if ui.BtnExpertSave.Clicked(gtx) {
 												go ui.runExpertSaveCopy()
@@ -1000,6 +1011,12 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											btn := material.Button(ui.Theme, &ui.BtnExpertSave, "Guardado manual (SAVE)")
 											btn.Background = color.NRGBA{R: 85, G: 80, B: 80, A: 255}
 											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											return layout.Dimensions{}
 										}),
 									)
 								}),
@@ -1279,14 +1296,6 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 													return lbl.Layout(gtx)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													msg := strings.TrimSpace(ui.HealthStatus)
-													if msg == "" {
-														return layout.Dimensions{}
-													}
-													lbl := material.Body2(ui.Theme, msg)
-													return lbl.Layout(gtx)
-												}),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													if len(ui.OperationHistory) == 0 {
 														return layout.Dimensions{}
 													}
@@ -1458,6 +1467,81 @@ func withSolution(message string, hint string) string {
 		return message
 	}
 	return message + "\nPosible solución: " + hint
+}
+
+func (ui *UI) composeMessageLines() []string {
+	blocks := make([]string, 0, 2)
+	status := strings.TrimSpace(ui.StatusMsg)
+	health := strings.TrimSpace(ui.HealthStatus)
+	if status != "" {
+		blocks = append(blocks, "Estado:\n"+status)
+	}
+	if health != "" {
+		blocks = append(blocks, "Diagnóstico:\n"+health)
+	}
+	if len(blocks) == 0 {
+		return []string{"Sin mensajes por el momento.", "Las operaciones y pruebas mostrarán aquí su resultado."}
+	}
+	full := strings.Join(blocks, "\n\n")
+	return strings.Split(full, "\n")
+}
+
+func (ui *UI) layoutMessagePanel(gtx layout.Context, title string, minHeight unit.Dp) layout.Dimensions {
+	lines := ui.composeMessageLines()
+	panelH := gtx.Dp(minHeight)
+	if panelH < 120 {
+		panelH = 120
+	}
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.Y = panelH
+			gtx.Constraints.Max.Y = panelH
+			paint.FillShape(
+				gtx.Ops,
+				color.NRGBA{R: 247, G: 250, B: 255, A: 255},
+				clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, panelH)}.Op(),
+			)
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 175, G: 190, B: 210, A: 255}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, 1)}.Op())
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 175, G: 190, B: 210, A: 255}, clip.Rect{Min: image.Pt(0, panelH-1), Max: image.Pt(gtx.Constraints.Max.X, panelH)}.Op())
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 175, G: 190, B: 210, A: 255}, clip.Rect{Max: image.Pt(1, panelH)}.Op())
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 175, G: 190, B: 210, A: 255}, clip.Rect{Min: image.Pt(gtx.Constraints.Max.X-1, 0), Max: image.Pt(gtx.Constraints.Max.X, panelH)}.Op())
+			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, panelH)}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.Y = panelH
+			gtx.Constraints.Max.Y = panelH
+			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						lbl := material.Body1(ui.Theme, strings.TrimSpace(title))
+						lbl.Color = color.NRGBA{R: 35, G: 55, B: 90, A: 255}
+						return lbl.Layout(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx)
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return material.List(ui.Theme, &ui.MessageList).Layout(gtx, len(lines), func(gtx layout.Context, index int) layout.Dimensions {
+							line := lines[index]
+							if strings.TrimSpace(line) == "" {
+								return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx)
+							}
+							lbl := material.Body2(ui.Theme, line)
+							lower := strings.ToLower(strings.TrimSpace(line))
+							if strings.HasPrefix(lower, "estado:") || strings.HasPrefix(lower, "diagnóstico:") {
+								lbl.Color = color.NRGBA{R: 20, G: 60, B: 110, A: 255}
+							} else if strings.Contains(lower, "error") || strings.Contains(lower, "inválido") {
+								lbl.Color = color.NRGBA{R: 160, G: 30, B: 30, A: 255}
+							} else {
+								lbl.Color = color.NRGBA{R: 45, G: 52, B: 65, A: 255}
+							}
+							return lbl.Layout(gtx)
+						})
+					}),
+				)
+			})
+		}),
+	)
 }
 
 func opensslInstallHint() string {
