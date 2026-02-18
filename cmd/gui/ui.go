@@ -3280,83 +3280,121 @@ func (ui *UI) runLocalHealthCheck() {
 
 func (ui *UI) runProblemFinder() {
 	ui.ProblemScanRunning = true
-	ui.HealthStatus = "Analizando causa probable del problema..."
+	ui.HealthStatus = "Iniciando asistente guiado de diagnóstico de firma..."
 	ui.Window.Invalidate()
 	defer func() {
 		ui.ProblemScanRunning = false
 		ui.Window.Invalidate()
 	}()
 
-	var lines []string
+	lines := []string{"Asistente guiado de firma"}
+	step := 0
+	failed := false
+	failStep := ""
+	appendStep := func(ok bool, title, detail, action string) {
+		step++
+		state := "PASADO"
+		if !ok {
+			state = "ERROR"
+		}
+		line := fmt.Sprintf("%d. [%s] %s: %s", step, state, strings.TrimSpace(title), strings.TrimSpace(detail))
+		if strings.TrimSpace(action) != "" {
+			line += " | Posible solución: " + strings.TrimSpace(action)
+		}
+		lines = append(lines, line)
+		if !ok && !failed {
+			failed = true
+			failStep = strings.TrimSpace(title)
+		}
+	}
+
 	if _, err := exec.LookPath("openssl"); err != nil {
-		lines = append(lines, "Causa probable: falta OpenSSL en el sistema.")
-		lines = append(lines, "Acción: "+opensslInstallHint())
+		appendStep(false, "Dependencia OpenSSL", "No se detecta 'openssl' en PATH.", opensslInstallHint())
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
 	}
+	appendStep(true, "Dependencia OpenSSL", "OpenSSL disponible en el sistema.", "")
+
 	if _, err := exec.LookPath("pk12util"); err != nil {
-		lines = append(lines, "Causa probable: falta pk12util (NSS tools).")
-		lines = append(lines, "Acción: "+pk12utilInstallHint())
+		appendStep(false, "Dependencia NSS tools", "No se detecta 'pk12util' en PATH.", pk12utilInstallHint())
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
 	}
+	appendStep(true, "Dependencia NSS tools", "pk12util disponible en el sistema.", "")
 
 	certs, err := certstore.GetSystemCertificates()
 	if err != nil {
-		lines = append(lines, "Causa probable: no se pudo leer el almacén de certificados.")
-		lines = append(lines, "Detalle: "+summarizeServerBody(err.Error()))
-	} else {
-		signable := 0
-		for _, c := range certs {
-			if c.CanSign {
-				signable++
-			}
-		}
-		if len(certs) == 0 {
-			lines = append(lines, "Causa probable: no hay certificados instalados.")
-		} else if signable == 0 {
-			lines = append(lines, "Causa probable: hay certificados, pero ninguno apto para firma (caducado/no válido/uso no permitido).")
+		appendStep(false, "Almacén de certificados", "No se pudo leer el almacén de certificados: "+summarizeServerBody(err.Error()), "Comprueba NSS/almacén del sistema y reinicia la aplicación.")
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
+	}
+	signable := 0
+	for _, c := range certs {
+		if c.CanSign {
+			signable++
 		}
 	}
+	if len(certs) == 0 {
+		appendStep(false, "Certificados de usuario", "No hay certificados instalados en el sistema.", "Instala/importa un certificado de firma y recarga la aplicación.")
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
+	}
+	if signable == 0 {
+		appendStep(false, "Certificados de usuario", fmt.Sprintf("Se detectaron %d certificados, pero ninguno apto para firma.", len(certs)), "Selecciona otro certificado o revisa validez/uso de clave.")
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
+	}
+	appendStep(true, "Certificados de usuario", fmt.Sprintf("Certificados detectados: %d (aptos para firma: %d).", len(certs), signable), "")
 
 	if ui.Protocol != nil {
 		if host := describeAfirmaEndpoint(ui.Protocol.STServlet, ui.Protocol.RTServlet); host != "" {
-			diagLines := endpointNetworkDiagnostics(ui.Protocol.STServlet, ui.Protocol.RTServlet)
-			if len(diagLines) > 0 {
-				lines = append(lines, "Diagnóstico de red @firma: "+strings.Join(diagLines, " | "))
-			}
 			if err := checkEndpointReachability(ui.Protocol.STServlet, ui.Protocol.RTServlet); err != nil {
-				lines = append(lines, "Causa probable externa: no se alcanza el servidor @firma ("+host+").")
-				lines = append(lines, "Detalle: "+summarizeServerBody(err.Error()))
+				detail := "No se alcanza el servidor @firma (" + host + "). " + summarizeServerBody(err.Error())
+				appendStep(false, "Conectividad con @firma", detail, "Revisa red/proxy/DNS o reintenta más tarde.")
+				ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+				return
 			}
+			appendStep(true, "Conectividad con @firma", "El endpoint remoto responde por red.", "")
 		}
 	}
-	updateDetail, updateAction, updateLevel := checkUpdateRepositoryReachability()
-	lines = append(lines, "Comprobación repo actualizaciones: "+updateDetail)
-	if updateLevel != diagLevelOK && strings.TrimSpace(updateAction) != "" {
-		lines = append(lines, "Acción repo actualizaciones: "+updateAction)
-	}
+
 	proxyDetail, proxyAction, proxyLevel := proxyFirewallDiagnostics(ui.Protocol)
-	lines = append(lines, "Comprobación proxy/firewall: "+proxyDetail)
-	if proxyLevel != diagLevelOK && strings.TrimSpace(proxyAction) != "" {
-		lines = append(lines, "Acción proxy/firewall: "+proxyAction)
+	if proxyLevel == diagLevelError {
+		appendStep(false, "Proxy / Firewall", proxyDetail, proxyAction)
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
 	}
+	appendStep(true, "Proxy / Firewall", proxyDetail, proxyAction)
+
 	avDetail, avAction, avLevel := antivirusInterferenceDiagnostics()
-	lines = append(lines, "Comprobación antivirus/TLS: "+avDetail)
-	if avLevel != diagLevelOK && strings.TrimSpace(avAction) != "" {
-		lines = append(lines, "Acción antivirus/TLS: "+avAction)
+	if avLevel == diagLevelError {
+		appendStep(false, "Antivirus / Intercepción TLS", avDetail, avAction)
+		ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+		return
+	}
+	appendStep(true, "Antivirus / Intercepción TLS", avDetail, avAction)
+
+	if ui.IsSigning {
+		appendStep(true, "Prueba local de firma", "Omitida porque hay una firma/verificación en curso.", "")
+	} else {
+		probeLines := ui.runSelectedCertProbe()
+		probe := strings.ToLower(strings.Join(probeLines, " "))
+		if strings.Contains(probe, "error") || strings.Contains(probe, "fallo") {
+			appendStep(false, "Prueba local de firma", strings.Join(probeLines, " "), "Revisa certificado seleccionado y dependencias criptográficas.")
+			ui.HealthStatus = strings.Join(lines, "\n") + "\n\nResultado: ERROR en '" + failStep + "'."
+			return
+		}
+		appendStep(true, "Prueba local de firma", strings.Join(probeLines, " "), "")
 	}
 
 	errHints := collectRecentErrorHints(resolveCurrentLogFile())
-	lines = append(lines, errHints...)
-
-	if ui.IsSigning {
-		lines = append(lines, "Prueba activa de firma omitida: hay una operación de firma/verificación en curso.")
-	} else {
-		lines = append(lines, ui.runSelectedCertProbe()...)
+	if len(errHints) > 0 {
+		for _, hint := range errHints {
+			lines = append(lines, "- "+strings.TrimSpace(hint))
+		}
 	}
-
-	if len(lines) == 0 {
-		lines = append(lines, "No se detectó un fallo local claro.")
-		lines = append(lines, "Si el error persiste, puede ser incidencia temporal del servidor @firma o de la sede.")
-	}
-	ui.HealthStatus = strings.Join(lines, " | ")
+	lines = append(lines, "", "Resultado: PASADO. No se detectó un fallo crítico en el flujo guiado.")
+	ui.HealthStatus = strings.Join(lines, "\n")
 }
 
 func (ui *UI) runGuidedSelfTest() {
