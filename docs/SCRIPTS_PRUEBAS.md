@@ -148,3 +148,24 @@ Desde la GUI (modo experto) existe el **Panel de pruebas** que permite:
 - Ver resultados en el panel de mensajes con scroll.
 
 El panel está pensado para pruebas de desarrollo local y no sustituye la validación E2E real en sede.
+
+## Equivalentes para Windows (PowerShell)
+Scripts disponibles:
+- `scripts/windows/test_active_go.ps1`
+- `scripts/windows/smoke_native_host.ps1`
+- `scripts/windows/e2e_native_request.ps1`
+- `scripts/windows/run_web_compat_server.ps1`
+- `scripts/windows/install_and_trust_windows.ps1`
+- `scripts/windows/run_full_validation_windows.ps1`
+- `scripts/windows/run_test_suite.ps1`
+
+Ejemplos:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/windows/test_active_go.ps1
+powershell -ExecutionPolicy Bypass -File scripts/windows/smoke_native_host.ps1 -StrictFormats
+powershell -ExecutionPolicy Bypass -File scripts/windows/e2e_native_request.ps1 -Action sign-cades
+powershell -ExecutionPolicy Bypass -File scripts/windows/run_full_validation_windows.ps1 -SkipTrust
+```
+
+Referencia de compatibilidad por sistema operativo:
+- `docs/SCRIPTS_COMPATIBILIDAD_SO.md`

@@ -95,9 +95,11 @@ type ScriptTestCase struct {
 	ID          string
 	Nombre      string
 	Descripcion string
+	Ayuda       string
 	Comando     []string
 	Selected    widget.Bool
 	BtnRun      widget.Clickable
+	BtnHelp     widget.Clickable
 }
 
 type UI struct {
@@ -198,17 +200,21 @@ type UI struct {
 	Protocol *ProtocolState // Web protocol state
 
 	// PAdES visual seal placement (normalized in [0..1], y from bottom).
-	PadesSealX     float64
-	PadesSealY     float64
-	PadesSealW     float64
-	PadesSealH     float64
-	PadesSealPage  uint32
-	MainScrollList widget.List
-	MessageList    widget.List
-	TestList       widget.List
-	ScriptTests    []ScriptTestCase
-	ScriptTestBusy bool
-	ExportTempPass string
+	PadesSealX         float64
+	PadesSealY         float64
+	PadesSealW         float64
+	PadesSealH         float64
+	PadesSealPage      uint32
+	MainScrollList     widget.List
+	MessageList        widget.List
+	TestList           widget.List
+	ScriptTests        []ScriptTestCase
+	ScriptTestBusy     bool
+	ExportTempPass     string
+	ShowScriptHelp     bool
+	ScriptHelpName     string
+	ScriptHelpText     string
+	BtnCloseScriptHelp widget.Clickable
 
 	PDFPageWidthPt  float64
 	PDFPageHeightPt float64
@@ -610,6 +616,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 					)
 				})
+			}),
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				return ui.layoutScriptHelpModal(gtx)
 			}),
 		)
 	}
@@ -1417,6 +1426,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 				)
 			})
 		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return ui.layoutScriptHelpModal(gtx)
+		}),
 	)
 }
 
@@ -1646,11 +1658,77 @@ func (ui *UI) layoutMessagePanel(gtx layout.Context, title string, minHeight uni
 }
 
 func (ui *UI) initScriptTests() {
+	if runtime.GOOS == "windows" {
+		ps := []string{"powershell", "-ExecutionPolicy", "Bypass", "-File"}
+		ui.ScriptTests = []ScriptTestCase{
+			{
+				ID:          "test_active_go",
+				Nombre:      "Tests Go activos",
+				Descripcion: "Ejecuta pruebas de paquetes cmd/ y pkg/.",
+				Ayuda:       "Qué hace: ejecuta `go test` sobre paquetes activos (`cmd/`, `pkg/`).\nCuándo usarla: tras cambios de código o antes de commit.\nRequisitos: Go instalado.\nResultado esperado: salida final OK sin fallos.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/test_active_go.ps1"),
+				Selected:    widget.Bool{Value: true},
+			},
+			{
+				ID:          "smoke_native",
+				Nombre:      "Smoke host nativo",
+				Descripcion: "Ping + certificados + firma/verificación base.",
+				Ayuda:       "Qué hace: comprueba ping, certificados, firma y verificación básicas.\nCuándo usarla: validación rápida del host nativo antes de pruebas de sede.\nRequisitos: certificado disponible en el sistema.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/smoke_native_host.ps1"),
+				Selected:    widget.Bool{Value: true},
+			},
+			{
+				ID:          "smoke_native_strict",
+				Nombre:      "Smoke host nativo estricto",
+				Descripcion: "Incluye validación estricta PAdES/XAdES.",
+				Ayuda:       "Qué hace: igual que smoke básico, pero exige además PAdES/XAdES correctos.\nCuándo usarla: cierre de versión o validación estricta.\nResultado esperado: PASS sin advertencias.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/smoke_native_host.ps1", "-StrictFormats"),
+			},
+			{
+				ID:          "e2e_ping",
+				Nombre:      "E2E ping host",
+				Descripcion: "Envía solicitud ping por framing nativo.",
+				Ayuda:       "Qué hace: envía solicitud nativa `ping` con framing binario.\nCuándo usarla: diagnosticar canal Native Messaging.\nResultado esperado: `success=true`.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/e2e_native_request.ps1", "-Action", "ping"),
+			},
+			{
+				ID:          "e2e_getcerts",
+				Nombre:      "E2E certificados",
+				Descripcion: "Consulta certificados disponibles en host.",
+				Ayuda:       "Qué hace: consulta lista de certificados desde el host.\nCuándo usarla: revisar si la app está leyendo el almacén correcto.\nResultado esperado: respuesta con `certificates`.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/e2e_native_request.ps1", "-Action", "getCertificates"),
+			},
+			{
+				ID:          "e2e_sign_cades",
+				Nombre:      "E2E firma CAdES",
+				Descripcion: "Realiza firma CAdES mínima con certificado activo.",
+				Ayuda:       "Qué hace: realiza firma CAdES mínima con certificado activo.\nCuándo usarla: comprobar firma real extremo a extremo sin sede.\nResultado esperado: firma no vacía y `success=true`.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/e2e_native_request.ps1", "-Action", "sign-cades"),
+			},
+			{
+				ID:          "full_validation",
+				Nombre:      "Validación completa (Windows)",
+				Descripcion: "Pipeline completo de validación local para Windows.",
+				Ayuda:       "Qué hace: ejecuta batería completa de validación local para Windows.\nCuándo usarla: preparación de release o diagnóstico global.\nResultado esperado: PASS y reporte sin errores críticos.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/run_full_validation_windows.ps1"),
+			},
+			{
+				ID:          "trust_windows",
+				Nombre:      "Trust local Windows",
+				Descripcion: "Genera certificados locales e instala trust en almacenes Windows.",
+				Ayuda:       "Qué hace: genera certificados locales e instala confianza en almacenes Windows.\nCuándo usarla: errores TLS/WSS locales o problemas de trust.\nRequisitos: permisos de administrador según configuración del equipo.",
+				Comando:     append(append([]string{}, ps...), "scripts/windows/install_and_trust_windows.ps1", "-SkipInstaller"),
+			},
+		}
+		return
+	}
+
 	ui.ScriptTests = []ScriptTestCase{
 		{
 			ID:          "test_active_go",
 			Nombre:      "Tests Go activos",
 			Descripcion: "Ejecuta pruebas de paquetes cmd/ y pkg/.",
+			Ayuda:       "Qué hace: ejecuta `go test` sobre paquetes activos (`cmd/`, `pkg/`).\nCuándo usarla: tras cambios de código o antes de commit.\nRequisitos: Go instalado.\nResultado esperado: salida final OK sin fallos.",
 			Comando:     []string{"bash", "scripts/test_active_go.sh"},
 			Selected:    widget.Bool{Value: true},
 		},
@@ -1658,6 +1736,7 @@ func (ui *UI) initScriptTests() {
 			ID:          "smoke_native",
 			Nombre:      "Smoke host nativo",
 			Descripcion: "Ping + certificados + firma/verificación base.",
+			Ayuda:       "Qué hace: comprueba ping, certificados, firma y verificación básicas.\nCuándo usarla: validación rápida del host nativo antes de pruebas de sede.\nRequisitos: certificado disponible en el sistema.",
 			Comando:     []string{"bash", "scripts/smoke_native_host.sh"},
 			Selected:    widget.Bool{Value: true},
 		},
@@ -1665,30 +1744,35 @@ func (ui *UI) initScriptTests() {
 			ID:          "smoke_native_strict",
 			Nombre:      "Smoke host nativo estricto",
 			Descripcion: "Incluye validación estricta PAdES/XAdES.",
+			Ayuda:       "Qué hace: igual que smoke básico, pero exige además PAdES/XAdES correctos.\nCuándo usarla: cierre de versión o validación estricta.\nResultado esperado: PASS sin advertencias.",
 			Comando:     []string{"bash", "scripts/smoke_native_host.sh", "--strict-formats"},
 		},
 		{
 			ID:          "e2e_ping",
 			Nombre:      "E2E ping host",
 			Descripcion: "Envía solicitud ping por framing nativo.",
+			Ayuda:       "Qué hace: envía solicitud nativa `ping` con framing binario.\nCuándo usarla: diagnosticar canal Native Messaging.\nResultado esperado: `success=true`.",
 			Comando:     []string{"bash", "scripts/e2e_native_request.sh", "ping"},
 		},
 		{
 			ID:          "e2e_getcerts",
 			Nombre:      "E2E certificados",
 			Descripcion: "Consulta certificados disponibles en host.",
+			Ayuda:       "Qué hace: consulta lista de certificados desde el host.\nCuándo usarla: revisar si la app está leyendo el almacén correcto.\nResultado esperado: respuesta con `certificates`.",
 			Comando:     []string{"bash", "scripts/e2e_native_request.sh", "getCertificates"},
 		},
 		{
 			ID:          "e2e_sign_cades",
 			Nombre:      "E2E firma CAdES",
 			Descripcion: "Realiza firma CAdES mínima con certificado activo.",
+			Ayuda:       "Qué hace: realiza firma CAdES mínima con certificado activo.\nCuándo usarla: comprobar firma real extremo a extremo sin sede.\nResultado esperado: firma no vacía y `success=true`.",
 			Comando:     []string{"bash", "scripts/e2e_native_request.sh", "sign-cades"},
 		},
 		{
 			ID:          "full_validation",
 			Nombre:      "Validación completa",
 			Descripcion: "Pipeline completo local con reporte (puede tardar).",
+			Ayuda:       "Qué hace: ejecuta batería integral (tests, smoke, trust, web compat, logs y reporte).\nCuándo usarla: validación completa antes de entrega.\nResultado esperado: PASS general en el reporte.",
 			Comando:     []string{"bash", "scripts/run_full_validation.sh"},
 		},
 	}
@@ -1712,8 +1796,12 @@ func resolveScriptsRootDir() (string, error) {
 		if root == "" {
 			continue
 		}
-		marker := filepath.Join(root, "scripts", "test_active_go.sh")
-		if st, err := os.Stat(marker); err == nil && !st.IsDir() {
+		markerSh := filepath.Join(root, "scripts", "test_active_go.sh")
+		markerPs1 := filepath.Join(root, "scripts", "windows", "test_active_go.ps1")
+		if st, err := os.Stat(markerSh); err == nil && !st.IsDir() {
+			return root, nil
+		}
+		if st, err := os.Stat(markerPs1); err == nil && !st.IsDir() {
 			return root, nil
 		}
 	}
@@ -1952,6 +2040,16 @@ func (ui *UI) layoutScriptTestsPanel(gtx layout.Context) layout.Dimensions {
 													return material.CheckBox(ui.Theme, &tc.Selected, tc.Nombre).Layout(gtx)
 												}),
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if tc.BtnHelp.Clicked(gtx) {
+														ui.ShowScriptHelp = true
+														ui.ScriptHelpName = strings.TrimSpace(tc.Nombre)
+														ui.ScriptHelpText = strings.TrimSpace(tc.Ayuda)
+													}
+													btn := material.Button(ui.Theme, &tc.BtnHelp, "Ayuda")
+													btn.Background = color.NRGBA{R: 90, G: 110, B: 130, A: 255}
+													return layout.UniformInset(unit.Dp(2)).Layout(gtx, btn.Layout)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													if tc.BtnRun.Clicked(gtx) {
 														ui.runSingleScriptTest(index)
 													}
@@ -1975,6 +2073,91 @@ func (ui *UI) layoutScriptTestsPanel(gtx layout.Context) layout.Dimensions {
 			}),
 		)
 	})
+}
+
+func (ui *UI) layoutScriptHelpModal(gtx layout.Context) layout.Dimensions {
+	if !ui.ShowScriptHelp {
+		return layout.Dimensions{}
+	}
+	title := strings.TrimSpace(ui.ScriptHelpName)
+	if title == "" {
+		title = "Ayuda de utilidad"
+	}
+	body := strings.TrimSpace(ui.ScriptHelpText)
+	if body == "" {
+		body = "Sin ayuda disponible para esta utilidad."
+	}
+
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			paint.Fill(gtx.Ops, color.NRGBA{R: 10, G: 20, B: 30, A: 120})
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				maxW := gtx.Constraints.Max.X - gtx.Dp(unit.Dp(48))
+				if maxW > gtx.Dp(unit.Dp(760)) {
+					maxW = gtx.Dp(unit.Dp(760))
+				}
+				if maxW < gtx.Dp(unit.Dp(260)) {
+					maxW = gtx.Dp(unit.Dp(260))
+				}
+				gtx.Constraints.Min.X = maxW
+				gtx.Constraints.Max.X = maxW
+				return layout.Stack{}.Layout(gtx,
+					layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+						h := gtx.Dp(unit.Dp(280))
+						if h < 200 {
+							h = 200
+						}
+						gtx.Constraints.Min.Y = h
+						gtx.Constraints.Max.Y = h
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 251, G: 253, B: 255, A: 255}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, h)}.Op())
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 150, G: 168, B: 192, A: 255}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, 1)}.Op())
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 150, G: 168, B: 192, A: 255}, clip.Rect{Min: image.Pt(0, h-1), Max: image.Pt(gtx.Constraints.Max.X, h)}.Op())
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 150, G: 168, B: 192, A: 255}, clip.Rect{Max: image.Pt(1, h)}.Op())
+						paint.FillShape(gtx.Ops, color.NRGBA{R: 150, G: 168, B: 192, A: 255}, clip.Rect{Min: image.Pt(gtx.Constraints.Max.X-1, 0), Max: image.Pt(gtx.Constraints.Max.X, h)}.Op())
+						return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, h)}
+					}),
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						h := gtx.Dp(unit.Dp(280))
+						if h < 200 {
+							h = 200
+						}
+						gtx.Constraints.Min.Y = h
+						gtx.Constraints.Max.Y = h
+						return layout.UniformInset(unit.Dp(14)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									lbl := material.H6(ui.Theme, title)
+									lbl.Color = color.NRGBA{R: 32, G: 55, B: 88, A: 255}
+									return lbl.Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx)
+								}),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									txt := material.Body2(ui.Theme, body)
+									txt.Color = color.NRGBA{R: 40, G: 45, B: 56, A: 255}
+									return txt.Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.BtnCloseScriptHelp.Clicked(gtx) {
+										ui.ShowScriptHelp = false
+										ui.ScriptHelpName = ""
+										ui.ScriptHelpText = ""
+									}
+									btn := material.Button(ui.Theme, &ui.BtnCloseScriptHelp, "Cerrar")
+									btn.Background = color.NRGBA{R: 65, G: 95, B: 128, A: 255}
+									return btn.Layout(gtx)
+								}),
+							)
+						})
+					}),
+				)
+			})
+		}),
+	)
 }
 
 func opensslInstallHint() string {

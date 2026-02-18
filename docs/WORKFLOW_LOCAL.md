@@ -7,6 +7,7 @@ Directorio de trabajo:
 Antes de pruebas/manuales, revisar:
 - `docs/GUI_AYUDA_EXHAUSTIVA.md`
 - `docs/SCRIPTS_PRUEBAS.md`
+- `docs/SCRIPTS_COMPATIBILIDAD_SO.md`
 
 ## 1) Validación rápida de compatibilidad
 ```bash
