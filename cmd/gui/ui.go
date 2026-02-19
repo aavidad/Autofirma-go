@@ -130,33 +130,35 @@ type UI struct {
 	BtnExpertLoad       widget.Clickable
 	BtnExpertSave       widget.Clickable
 
-	BtnAbout           widget.Clickable
-	BtnHelp            widget.Clickable
-	BtnCheckUpdates    widget.Clickable
-	BtnViewLogs        widget.Clickable
-	BtnHealthCheck     widget.Clickable
-	BtnFindIssue       widget.Clickable
-	BtnCopyReport      widget.Clickable
-	BtnCopyLastError   widget.Clickable
-	BtnCopyHistory     widget.Clickable
-	BtnSelfTest        widget.Clickable
-	BtnOpenReports     widget.Clickable
-	BtnExportFullDiag  widget.Clickable
-	BtnCopyFullDiag    widget.Clickable
-	BtnRunFullCheck    widget.Clickable
-	BtnOpenSealWeb     widget.Clickable
-	BtnRunSelectedTest widget.Clickable
-	BtnRunAllTests     widget.Clickable
-	BtnSelectAllTests  widget.Clickable
-	BtnClearAllTests   widget.Clickable
-	BtnOpenCertManager widget.Clickable
-	BtnGenExportPass   widget.Clickable
-	BtnCopyExportPass  widget.Clickable
-	ShowAbout          bool
-	ChkVisibleSeal     widget.Bool
-	ChkStrictCompat    widget.Bool
-	ChkAllowInvalidPDF widget.Bool
-	ChkExpertMode      widget.Bool
+	BtnAbout            widget.Clickable
+	BtnHelp             widget.Clickable
+	BtnCheckUpdates     widget.Clickable
+	BtnViewLogs         widget.Clickable
+	BtnHealthCheck      widget.Clickable
+	BtnFindIssue        widget.Clickable
+	BtnCopyReport       widget.Clickable
+	BtnCopyLastError    widget.Clickable
+	BtnCopyHistory      widget.Clickable
+	BtnSelfTest         widget.Clickable
+	BtnOpenReports      widget.Clickable
+	BtnExportFullDiag   widget.Clickable
+	BtnCopyFullDiag     widget.Clickable
+	BtnRunFullCheck     widget.Clickable
+	BtnOpenSealWeb      widget.Clickable
+	BtnRunSelectedTest  widget.Clickable
+	BtnRunAllTests      widget.Clickable
+	BtnSelectAllTests   widget.Clickable
+	BtnClearAllTests    widget.Clickable
+	BtnOpenCertManager  widget.Clickable
+	BtnGenExportPass    widget.Clickable
+	BtnCopyExportPass   widget.Clickable
+	BtnRefreshWhitelist widget.Clickable
+	BtnAddWhitelist     widget.Clickable
+	ShowAbout           bool
+	ChkVisibleSeal      widget.Bool
+	ChkStrictCompat     widget.Bool
+	ChkAllowInvalidPDF  widget.Bool
+	ChkExpertMode       widget.Bool
 
 	ListCerts    widget.List
 	Certs        []protocol.Certificate
@@ -213,6 +215,10 @@ type UI struct {
 	ScriptTests        []ScriptTestCase
 	ScriptTestBusy     bool
 	ExportTempPass     string
+	TrustedDomainInput widget.Editor
+	TrustedDomains     []string
+	TrustedDomainBtns  []widget.Clickable
+	TrustedDomainList  widget.List
 	ShowScriptHelp     bool
 	ScriptHelpName     string
 	ScriptHelpText     string
@@ -265,7 +271,10 @@ func NewUI(w *app.Window) *UI {
 	ui.MainScrollList.Axis = layout.Vertical
 	ui.MessageList.Axis = layout.Vertical
 	ui.TestList.Axis = layout.Vertical
+	ui.TrustedDomainList.Axis = layout.Vertical
+	ui.TrustedDomainInput.SingleLine = true
 	ui.initScriptTests()
+	ui.refreshTrustedDomains()
 	if len(embeddedHeaderLogo) > 0 {
 		if img, err := png.Decode(bytes.NewReader(embeddedHeaderLogo)); err == nil {
 			ui.HeaderLogo = img
@@ -1124,6 +1133,90 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 										}),
 									)
 								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									lbl := material.Body1(ui.Theme, "Gestor de páginas blancas de firma")
+									lbl.Color = color.NRGBA{R: 48, G: 62, B: 88, A: 255}
+									return layout.UniformInset(unit.Dp(6)).Layout(gtx, lbl.Layout)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+										layout.Flexed(2, func(gtx layout.Context) layout.Dimensions {
+											ed := material.Editor(ui.Theme, &ui.TrustedDomainInput, "dominio (ej: sede.ejemplo.gob.es)")
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, ed.Layout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnAddWhitelist.Clicked(gtx) {
+												ui.addTrustedDomainFromInput()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnAddWhitelist, "Añadir")
+											btn.Background = color.NRGBA{R: 45, G: 103, B: 70, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											if ui.BtnRefreshWhitelist.Clicked(gtx) {
+												ui.refreshTrustedDomains()
+												ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Gestor de páginas blancas: lista actualizada.", 12000)
+												ui.Window.Invalidate()
+											}
+											btn := material.Button(ui.Theme, &ui.BtnRefreshWhitelist, "Actualizar")
+											btn.Background = color.NRGBA{R: 72, G: 88, B: 122, A: 255}
+											return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+										}),
+									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									cap := material.Caption(ui.Theme, "La app pedirá confirmación la primera vez que firmes en un dominio nuevo.")
+									cap.Color = color.NRGBA{R: 84, G: 92, B: 106, A: 255}
+									return layout.UniformInset(unit.Dp(6)).Layout(gtx, cap.Layout)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									maxH := gtx.Dp(unit.Dp(140))
+									if maxH < 96 {
+										maxH = 96
+									}
+									gtx.Constraints.Min.Y = maxH
+									gtx.Constraints.Max.Y = maxH
+									if len(ui.TrustedDomains) == 0 {
+										lbl := material.Caption(ui.Theme, "Sin dominios de firma confiados manualmente.")
+										lbl.Color = color.NRGBA{R: 96, G: 96, B: 96, A: 255}
+										return layout.UniformInset(unit.Dp(6)).Layout(gtx, lbl.Layout)
+									}
+									return material.List(ui.Theme, &ui.TrustedDomainList).Layout(gtx, len(ui.TrustedDomains), func(gtx layout.Context, index int) layout.Dimensions {
+										if index < 0 || index >= len(ui.TrustedDomains) || index >= len(ui.TrustedDomainBtns) {
+											return layout.Dimensions{}
+										}
+										host := strings.TrimSpace(ui.TrustedDomains[index])
+										return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+												layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+													lbl := material.Body2(ui.Theme, host)
+													lbl.Color = color.NRGBA{R: 50, G: 58, B: 72, A: 255}
+													return lbl.Layout(gtx)
+												}),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													if ui.TrustedDomainBtns[index].Clicked(gtx) {
+														ui.removeTrustedDomainAt(index)
+													}
+													btn := material.Button(ui.Theme, &ui.TrustedDomainBtns[index], "Quitar")
+													btn.Background = color.NRGBA{R: 130, G: 70, B: 70, A: 255}
+													return btn.Layout(gtx)
+												}),
+											)
+										})
+									})
+								}),
 								// Sign/Verify Button
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									if ui.IsSigning {
@@ -1854,6 +1947,47 @@ func scriptTestStatusColor(status string) color.NRGBA {
 	default:
 		return color.NRGBA{R: 75, G: 85, B: 100, A: 255}
 	}
+}
+
+func (ui *UI) refreshTrustedDomains() {
+	ui.TrustedDomains = trustedSigningDomainsSnapshot()
+	ui.TrustedDomainBtns = make([]widget.Clickable, len(ui.TrustedDomains))
+}
+
+func (ui *UI) addTrustedDomainFromInput() {
+	raw := strings.TrimSpace(ui.TrustedDomainInput.Text())
+	if raw == "" {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Gestor de páginas blancas: introduce un dominio para añadir.", 12000)
+		ui.Window.Invalidate()
+		return
+	}
+	if err := addTrustedSigningDomain(raw); err != nil {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Gestor de páginas blancas: no se pudo añadir dominio: "+err.Error(), 12000)
+		ui.Window.Invalidate()
+		return
+	}
+	ui.TrustedDomainInput.SetText("")
+	ui.refreshTrustedDomains()
+	ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Gestor de páginas blancas: dominio añadido correctamente.", 12000)
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) removeTrustedDomainAt(index int) {
+	if index < 0 || index >= len(ui.TrustedDomains) {
+		return
+	}
+	host := strings.TrimSpace(ui.TrustedDomains[index])
+	if host == "" {
+		return
+	}
+	if err := removeTrustedSigningDomain(host); err != nil {
+		ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Gestor de páginas blancas: no se pudo quitar dominio: "+err.Error(), 12000)
+		ui.Window.Invalidate()
+		return
+	}
+	ui.refreshTrustedDomains()
+	ui.HealthStatus = appendMultilineStatus(ui.HealthStatus, "Gestor de páginas blancas: dominio eliminado ("+host+").", 12000)
+	ui.Window.Invalidate()
 }
 
 func (ui *UI) runScriptTests(all bool) {

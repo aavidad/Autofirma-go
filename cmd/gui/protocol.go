@@ -9,6 +9,7 @@ import (
 	// Necesario para padding
 	"crypto/des"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -18,10 +19,26 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+const defaultAllowedSigningDomains = "*.gob.es,*.dipgra.es,localhost,127.0.0.1,::1"
+
+var confirmFirstDomainUseFunc = protocolConfirmFirstDomainUseDialog
+
+var trustedSigningDomainsState = struct {
+	mu     sync.Mutex
+	loaded bool
+	items  map[string]bool
+}{}
+
+type trustedSigningDomainsFile struct {
+	Domains []string `json:"domains"`
+}
 
 // Estructuras XML para análisis de manifiesto.
 type xmlEntry struct {
@@ -308,10 +325,243 @@ func normalizeProtocolAction(action string) string {
 	}
 }
 
+func allowedSigningDomainPatterns() []string {
+	raw := strings.TrimSpace(os.Getenv("AUTOFIRMA_ALLOWED_SIGN_DOMAINS"))
+	if raw == "" {
+		raw = defaultAllowedSigningDomains
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.ToLower(strings.TrimSpace(p))
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func isHostAllowedByPattern(host string, pattern string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	if host == "" || pattern == "" {
+		return false
+	}
+	if pattern == host {
+		return true
+	}
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := strings.TrimPrefix(pattern, "*.")
+		if suffix == "" {
+			return false
+		}
+		return strings.HasSuffix(host, "."+suffix)
+	}
+	return false
+}
+
+func validateSigningServerURL(rawURL string, fieldName string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("%s inválido: %w", fieldName, err)
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "" {
+		return fmt.Errorf("%s inválido: host vacío", fieldName)
+	}
+	allowed := allowedSigningDomainPatterns()
+	ok := false
+	for _, pattern := range allowed {
+		if isHostAllowedByPattern(host, pattern) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("%s fuera de lista blanca: %s (permitidos: %s)", fieldName, host, strings.Join(allowed, ","))
+	}
+	if !strings.EqualFold(u.Scheme, "https") && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		return fmt.Errorf("%s debe usar HTTPS para host remoto: %s", fieldName, host)
+	}
+	if err := ensureTrustedSigningDomain(host); err != nil {
+		return fmt.Errorf("%s bloqueado por política de confianza: %w", fieldName, err)
+	}
+	return nil
+}
+
+func trustedSigningDomainsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config", "AutofirmaDipgra", "trusted_sign_domains.json")
+}
+
+func loadTrustedSigningDomainsLocked() {
+	trustedSigningDomainsState.items = make(map[string]bool)
+	path := trustedSigningDomainsPath()
+	if strings.TrimSpace(path) == "" {
+		trustedSigningDomainsState.loaded = true
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		trustedSigningDomainsState.loaded = true
+		return
+	}
+	var payload trustedSigningDomainsFile
+	if err := json.Unmarshal(data, &payload); err != nil {
+		trustedSigningDomainsState.loaded = true
+		return
+	}
+	for _, host := range payload.Domains {
+		h := strings.ToLower(strings.TrimSpace(host))
+		if h == "" {
+			continue
+		}
+		trustedSigningDomainsState.items[h] = true
+	}
+	trustedSigningDomainsState.loaded = true
+}
+
+func saveTrustedSigningDomainsLocked() {
+	path := trustedSigningDomainsPath()
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return
+	}
+	domains := make([]string, 0, len(trustedSigningDomainsState.items))
+	for host := range trustedSigningDomainsState.items {
+		domains = append(domains, host)
+	}
+	payload := trustedSigningDomainsFile{Domains: domains}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0600)
+}
+
+func isImplicitlyTrustedDomain(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func ensureTrustedSigningDomain(host string) error {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || isImplicitlyTrustedDomain(host) {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AUTOFIRMA_DOMAIN_TRUST_AUTO_ALLOW")), "1") {
+		return nil
+	}
+
+	trustedSigningDomainsState.mu.Lock()
+	if !trustedSigningDomainsState.loaded {
+		loadTrustedSigningDomainsLocked()
+	}
+	if trustedSigningDomainsState.items[host] {
+		trustedSigningDomainsState.mu.Unlock()
+		return nil
+	}
+	trustedSigningDomainsState.mu.Unlock()
+
+	accepted, err := confirmFirstDomainUseFunc(host)
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		return fmt.Errorf("el usuario no confió en el dominio %s", host)
+	}
+
+	trustedSigningDomainsState.mu.Lock()
+	if !trustedSigningDomainsState.loaded {
+		loadTrustedSigningDomainsLocked()
+	}
+	trustedSigningDomainsState.items[host] = true
+	saveTrustedSigningDomainsLocked()
+	trustedSigningDomainsState.mu.Unlock()
+	return nil
+}
+
+func normalizeSigningDomainInput(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return ""
+	}
+	if strings.Contains(v, "://") {
+		if u, err := url.Parse(v); err == nil {
+			v = strings.ToLower(strings.TrimSpace(u.Hostname()))
+		}
+	}
+	if i := strings.Index(v, "/"); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	if i := strings.Index(v, ":"); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	return v
+}
+
+func trustedSigningDomainsSnapshot() []string {
+	trustedSigningDomainsState.mu.Lock()
+	defer trustedSigningDomainsState.mu.Unlock()
+	if !trustedSigningDomainsState.loaded {
+		loadTrustedSigningDomainsLocked()
+	}
+	out := make([]string, 0, len(trustedSigningDomainsState.items))
+	for host := range trustedSigningDomainsState.items {
+		out = append(out, host)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func addTrustedSigningDomain(domain string) error {
+	host := normalizeSigningDomainInput(domain)
+	if host == "" {
+		return fmt.Errorf("dominio vacío")
+	}
+	trustedSigningDomainsState.mu.Lock()
+	defer trustedSigningDomainsState.mu.Unlock()
+	if !trustedSigningDomainsState.loaded {
+		loadTrustedSigningDomainsLocked()
+	}
+	trustedSigningDomainsState.items[host] = true
+	saveTrustedSigningDomainsLocked()
+	return nil
+}
+
+func removeTrustedSigningDomain(domain string) error {
+	host := normalizeSigningDomainInput(domain)
+	if host == "" {
+		return fmt.Errorf("dominio vacío")
+	}
+	trustedSigningDomainsState.mu.Lock()
+	defer trustedSigningDomainsState.mu.Unlock()
+	if !trustedSigningDomainsState.loaded {
+		loadTrustedSigningDomainsLocked()
+	}
+	delete(trustedSigningDomainsState.items, host)
+	saveTrustedSigningDomainsLocked()
+	return nil
+}
+
 func (p *ProtocolState) DownloadFile() (string, error) {
 	if p.RTServlet == "" {
 		log.Println("[Protocol] RTServlet vacío, se omite la descarga.")
 		return "", nil // Sin error, simplemente no hay nada que descargar.
+	}
+	if err := validateSigningServerURL(p.RTServlet, "rtservlet"); err != nil {
+		return "", err
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 
@@ -580,6 +830,9 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	} else {
 		log.Printf("[Protocol] Usando STServlet para subida: %s", uploadServlet)
 	}
+	if err := validateSigningServerURL(uploadServlet, "stservlet/rtservlet"); err != nil {
+		return err
+	}
 	reqURL, err := url.Parse(uploadServlet)
 	if err != nil {
 		return err
@@ -768,6 +1021,9 @@ func (p *ProtocolState) SendWaitSignal() error {
 	if p.STServlet == "" {
 		return fmt.Errorf("servlet de almacenamiento vacío")
 	}
+	if err := validateSigningServerURL(p.STServlet, "stservlet"); err != nil {
+		return err
+	}
 	if p.RequestID == "" {
 		return fmt.Errorf("identificador de solicitud vacío")
 	}
@@ -909,6 +1165,9 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 
 	// Crítico: actualizar STServlet si está presente
 	if st := params["stservlet"]; st != "" {
+		if err := validateSigningServerURL(st, "stservlet"); err != nil {
+			return nil, "", err
+		}
 		p.STServlet = st
 		log.Printf("[Protocol] STServlet actualizado desde XML: %s", st)
 	}

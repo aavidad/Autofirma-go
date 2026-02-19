@@ -27,6 +27,63 @@ func protocolSelectCertDialog(certs []protocol.Certificate) (int, bool, error) {
 	}
 }
 
+func protocolConfirmFirstDomainUseDialog(host string) (bool, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false, fmt.Errorf("dominio vacío")
+	}
+	title := "Confirmación de seguridad"
+	msg := "Primera vez firmando en este sitio: " + host + ".\n\n" +
+		"Solo continúa si conoces y confías en esta sede.\n\n" +
+		"Riesgos si no es fiable:\n" +
+		"- envío de firma/certificado a un dominio no confiable\n" +
+		"- posible suplantación del servicio de firma\n" +
+		"- exposición de metadatos del documento\n\n" +
+		"¿Quieres permitir firma para este dominio?"
+	switch runtime.GOOS {
+	case "windows":
+		ps := "$ErrorActionPreference='Stop'; " +
+			"Add-Type -AssemblyName PresentationFramework; " +
+			"$r=[System.Windows.MessageBox]::Show('" + psQuote(msg) + "','" + psQuote(title) + "','YesNo','Warning'); " +
+			"if ($r -eq 'Yes') { 'YES' } else { 'NO' }"
+		cmd := exec.Command("powershell", "-NoProfile", "-STA", "-NonInteractive", "-Command", ps)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return false, err
+		}
+		return strings.EqualFold(strings.TrimSpace(string(out)), "YES"), nil
+	case "darwin":
+		script := "display dialog \"" + osaQuote(msg) + "\" with title \"" + osaQuote(title) + "\" buttons {\"No\", \"Sí\"} default button \"No\" with icon caution"
+		cmd := exec.Command("osascript", "-e", script)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			if isDialogCancelErr(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		return strings.Contains(strings.ToLower(strings.TrimSpace(string(out))), "sí"), nil
+	default:
+		cmd := exec.Command("zenity", "--question", "--title="+title, "--text="+msg, "--ok-label=Sí, confiar", "--cancel-label=No, cancelar")
+		configureGUICommand(cmd)
+		err := cmd.Run()
+		if err == nil {
+			return true, nil
+		}
+		if isDialogCancelErr(err) {
+			return false, nil
+		}
+		kcmd := exec.Command("kdialog", "--warningyesno", msg, "--title", title)
+		configureGUICommand(kcmd)
+		if err := kcmd.Run(); err == nil {
+			return true, nil
+		}
+		return false, nil
+	}
+}
+
 func protocolSaveDialog(defaultPath string, exts string) (string, bool, error) {
 	defaultPath = strings.TrimSpace(defaultPath)
 	switch runtime.GOOS {
