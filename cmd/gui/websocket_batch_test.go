@@ -7,9 +7,11 @@ package main
 import (
 	"autofirma-host/pkg/protocol"
 	"encoding/base64"
+	"encoding/pem"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"reflect"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,6 +33,55 @@ func optionAsString(options map[string]interface{}, key string) string {
 		return ""
 	}
 	return s
+}
+
+func TestBuildBatchCertsParamSingleCert(t *testing.T) {
+	der := []byte{0x30, 0x82, 0x01, 0x23}
+	got := buildBatchCertsParam(protocol.Certificate{Content: der})
+	want := base64.URLEncoding.EncodeToString(der)
+	if got != want {
+		t.Fatalf("certsParam inesperado: got=%q want=%q", got, want)
+	}
+}
+
+func TestBuildBatchCertsParamFromPEMChainDedup(t *testing.T) {
+	derLeaf := []byte{0x30, 0x82, 0x01, 0x11}
+	derCA := []byte{0x30, 0x82, 0x01, 0x22}
+	pemLeaf := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derLeaf})
+	pemCA := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derCA})
+	got := buildBatchCertsParam(protocol.Certificate{
+		Content: derLeaf,
+		PEM:     string(pemLeaf) + string(pemCA), // incluye hoja repetida + intermedio
+	})
+	parts := strings.Split(got, ";")
+	wantParts := []string{
+		base64.URLEncoding.EncodeToString(derLeaf),
+		base64.URLEncoding.EncodeToString(derCA),
+	}
+	if !reflect.DeepEqual(parts, wantParts) {
+		t.Fatalf("cadena certs inesperada: got=%v want=%v", parts, wantParts)
+	}
+}
+
+func TestNormalizeBatchPreResponseSignsFallback(t *testing.T) {
+	raw := []byte(`{"td":{"format":"CAdES","signs":[{"signinfo":[{"id":"123","params":{"PRE":"abc"}}]}]},"results":[]}`)
+	var preResp batchPreResponse
+	if err := json.Unmarshal(raw, &preResp); err != nil {
+		t.Fatalf("json invalido: %v", err)
+	}
+	if preResp.TD == nil {
+		t.Fatal("td nil")
+	}
+	if got := len(preResp.TD.SignInfo); got != 0 {
+		t.Fatalf("signinfo inicial inesperado: %d", got)
+	}
+	normalizeBatchPreResponse(&preResp)
+	if got := len(preResp.TD.SignInfo); got != 1 {
+		t.Fatalf("signinfo normalizado inesperado: %d", got)
+	}
+	if preResp.TD.SignInfo[0].ID != "123" {
+		t.Fatalf("id inesperado: %q", preResp.TD.SignInfo[0].ID)
+	}
 }
 
 func TestProcessProtocolRequestBatchLocalJSONNeedsUI(t *testing.T) {
@@ -561,6 +612,38 @@ func TestSignTriphaseDataAppliesPerSignOptionsBySignIDFallback(t *testing.T) {
 	}
 	if gotPolicy != "urn:doc42" {
 		t.Fatalf("fallback por signid no aplicado: %q", gotPolicy)
+	}
+}
+
+func TestSignTriphaseDataCopiesSignIDIntoIDWhenMissing(t *testing.T) {
+	oldPK1 := signPKCS1WithOptionsFunc
+	defer func() { signPKCS1WithOptionsFunc = oldPK1 }()
+
+	signPKCS1WithOptionsFunc = func(preSignData []byte, certificateID string, algorithm string, options map[string]interface{}) (string, error) {
+		return base64.StdEncoding.EncodeToString([]byte("PK1")), nil
+	}
+
+	td := &triphaseDataResponse{
+		Format: "CAdES",
+		SignInfo: []triphaseSignInfoDTO{
+			{
+				ID:     "",
+				SignID: "Doc-Id-Fallback",
+				Params: map[string]string{
+					"PRE": base64.StdEncoding.EncodeToString([]byte("predata")),
+				},
+			},
+		},
+	}
+	got, err := signTriphaseData(td, "c1", "SHA256withRSA", map[string]interface{}{}, nil)
+	if err != nil {
+		t.Fatalf("error inesperado firmando triphase: %v", err)
+	}
+	if len(got.SignInfo) != 1 {
+		t.Fatalf("numero de firmas inesperado: %d", len(got.SignInfo))
+	}
+	if got.SignInfo[0].ID != "Doc-Id-Fallback" {
+		t.Fatalf("ID no heredado desde signid: %q", got.SignInfo[0].ID)
 	}
 }
 
@@ -1253,7 +1336,7 @@ func TestBatchHTTPPostWithRetryRetriesTransientHTTP5xx(t *testing.T) {
 		return []byte(`{"ok":true}`), nil
 	}
 
-	out, err := batchHTTPPostWithRetry("https://example.invalid/pre")
+	out, err := batchHTTPPostWithRetry("https://example.invalid/pre", "prefirma")
 	if err != nil {
 		t.Fatalf("se esperaba exito tras reintentos, error: %v", err)
 	}
@@ -1275,7 +1358,7 @@ func TestBatchHTTPPostWithRetryDoesNotRetryOnHTTP400(t *testing.T) {
 		return nil, &batchHTTPError{StatusCode: 400, Body: "bad request"}
 	}
 
-	_, err := batchHTTPPostWithRetry("https://example.invalid/pre")
+	_, err := batchHTTPPostWithRetry("https://example.invalid/pre", "prefirma")
 	if err == nil {
 		t.Fatalf("se esperaba error en HTTP 400")
 	}
@@ -1297,7 +1380,7 @@ func TestBatchHTTPPostWithRetryRetriesOnNetworkError(t *testing.T) {
 		return []byte(`OK`), nil
 	}
 
-	out, err := batchHTTPPostWithRetry("https://example.invalid/post")
+	out, err := batchHTTPPostWithRetry("https://example.invalid/post", "postfirma")
 	if err != nil {
 		t.Fatalf("se esperaba exito tras reintento de red, error: %v", err)
 	}
@@ -1416,7 +1499,7 @@ func TestBatchRemoteCircuitResetsOnSuccess(t *testing.T) {
 
 func TestMapBatchRemoteHTTPErrorCircuitOpenReturnsSaf26(t *testing.T) {
 	err := &batchCircuitOpenError{Key: "pre.example", OpenUntil: time.Now().Add(1 * time.Second)}
-	msg := mapBatchRemoteHTTPError("prefirma", err)
+	msg := mapBatchRemoteHTTPError("prefirma", "https://pre.example/presign", err)
 	if !strings.HasPrefix(msg, "SAF_26:") {
 		t.Fatalf("circuit open debe mapear a SAF_26, obtenido: %s", msg)
 	}

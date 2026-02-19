@@ -6,17 +6,24 @@ package main
 
 import (
 	"autofirma-host/pkg/protocol"
+	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,23 +58,298 @@ var (
 )
 
 var batchHTTPPostFunc = func(rawURL string) ([]byte, error) {
-	client := &http.Client{Timeout: resolveBatchHTTPTimeout()}
-	resp, err := client.Post(rawURL, "application/x-www-form-urlencoded", nil) // #nosec G107 -- URL viene de integración batch Java compatible.
+	timeout := resolveBatchHTTPTimeout()
+	client := &http.Client{Timeout: timeout}
+	body, err := batchHTTPPostOnce(client, rawURL)
+	if err == nil {
+		return body, nil
+	}
+	if isTLSUnknownAuthorityError(err) {
+		fallbackClient, loaded, fbErr := buildBatchHTTPFallbackClient(timeout, rawURL)
+		if fbErr == nil && loaded > 0 {
+			log.Printf("[Batch] fallback TLS activado (unknown authority): certificados extra cargados=%d", loaded)
+			body2, err2 := batchHTTPPostOnce(fallbackClient, rawURL)
+			if err2 == nil {
+				return body2, nil
+			}
+			err = err2
+		} else if fbErr != nil {
+			log.Printf("[Batch] fallback TLS no disponible: %v", fbErr)
+		}
+		if host, allowed := shouldUseBatchInsecureTLSException(rawURL); allowed {
+			log.Printf("[Batch] AVISO SEGURIDAD: usando excepción TLS por dominio=%s (cadena no verificada).", host)
+			insecureClient := buildBatchHTTPInsecureExceptionClient(timeout, host)
+			body3, err3 := batchHTTPPostOnce(insecureClient, rawURL)
+			if err3 == nil {
+				return body3, nil
+			}
+			err = err3
+		}
+	}
+	safeMsg := strings.ReplaceAll(strings.TrimSpace(err.Error()), rawURL, sanitizeBatchRemoteURL(rawURL))
+	return nil, &batchTransportError{Detail: safeMsg, Cause: err}
+}
+
+func batchHTTPPostOnce(client *http.Client, rawURL string) ([]byte, error) {
+	respBody, err := batchHTTPPostOnceMode(client, rawURL, false)
+	if err != nil {
+		var httpErr *batchHTTPError
+		if errors.As(err, &httpErr) && httpErr != nil && shouldFallbackToFormBody(httpErr) {
+			log.Printf("[Batch] fallback de transporte remoto: reintento POST form-body (estado=%d)", httpErr.StatusCode)
+			return batchHTTPPostOnceMode(client, rawURL, true)
+		}
+		return nil, err
+	}
+	return respBody, nil
+}
+
+func batchHTTPPostOnceMode(client *http.Client, rawURL string, sendQueryAsFormBody bool) ([]byte, error) {
+	targetURL := strings.TrimSpace(rawURL)
+	formBody := ""
+	originalQuery := ""
+	if u, pErr := url.Parse(targetURL); pErr == nil && u != nil {
+		originalQuery = strings.TrimSpace(u.RawQuery)
+	}
+	if sendQueryAsFormBody {
+		if u, pErr := url.Parse(targetURL); pErr == nil && u != nil {
+			formBody = strings.TrimSpace(u.RawQuery)
+			u.RawQuery = ""
+			targetURL = u.String()
+		}
+	}
+	var reqBody io.Reader
+	if sendQueryAsFormBody && formBody != "" {
+		reqBody = strings.NewReader(formBody)
+	}
+	req, err := http.NewRequest(http.MethodPost, targetURL, reqBody) // #nosec G107 -- URL viene de integración batch Java compatible.
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "AutoFirma/1.6.5")
+	if sendQueryAsFormBody && formBody != "" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	}
+	if isBatchCompatTraceEnabled() {
+		log.Printf(
+			"[Batch-TRACE] envio remoto modo=%s destino=%s ctype=%q query=%s body=%s",
+			batchTransportModeLabel(sendQueryAsFormBody, formBody),
+			sanitizeBatchRemoteURL(targetURL),
+			strings.TrimSpace(req.Header.Get("Content-Type")),
+			batchPayloadFingerprint(originalQuery),
+			batchPayloadFingerprint(formBody),
+		)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, readErr := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return nil, readErr
+	}
+	if isBatchCompatTraceEnabled() {
+		log.Printf(
+			"[Batch-TRACE] respuesta remota estado=%d destino=%s body=%s",
+			resp.StatusCode,
+			sanitizeBatchRemoteURL(targetURL),
+			batchPayloadFingerprint(string(respBody)),
+		)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &batchHTTPError{
 			StatusCode: resp.StatusCode,
-			Body:       truncateBatchBodyForError(body),
+			Body:       truncateBatchBodyForError(respBody),
 		}
 	}
-	return body, nil
+	return respBody, nil
+}
+
+func shouldFallbackToFormBody(httpErr *batchHTTPError) bool {
+	if httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	body := strings.ToLower(strings.TrimSpace(httpErr.Body))
+	if body == "" {
+		return false
+	}
+	return strings.Contains(body, "parametro json") ||
+		strings.Contains(body, "parametro xml") ||
+		strings.Contains(body, "definicion de lote")
+}
+
+func isTLSUnknownAuthorityError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var unknownAuthorityErr x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthorityErr) {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "unknown authority") || strings.Contains(msg, "certificate signed by unknown authority")
+}
+
+func buildBatchHTTPFallbackClient(timeout time.Duration, rawURL string) (*http.Client, int, error) {
+	roots, _ := x509.SystemCertPool()
+	if roots == nil {
+		roots = x509.NewCertPool()
+	}
+	loaded := 0
+	loaded += appendEndpointTrustStoreCerts(roots)
+	loaded += appendBatchRemoteChainCerts(roots, rawURL)
+	loaded += appendBatchFallbackFNMTCerts(roots)
+	if loaded == 0 {
+		return nil, 0, fmt.Errorf("no se encontraron certificados de fallback (almacén local/FNMT/cadena remota)")
+	}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    roots,
+		},
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: tr,
+	}, loaded, nil
+}
+
+func appendBatchRemoteChainCerts(pool *x509.CertPool, rawURL string) int {
+	if pool == nil {
+		return 0
+	}
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u == nil || strings.TrimSpace(u.Hostname()) == "" {
+		return 0
+	}
+	host := strings.TrimSpace(u.Hostname())
+	port := strings.TrimSpace(u.Port())
+	if port == "" {
+		port = "443"
+	}
+	target := net.JoinHostPort(host, port)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", target, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, // Solo para extraer cadena y revalidar con RootCAs en el siguiente intento.
+		MinVersion:         tls.VersionTLS12,
+	})
+	if err != nil {
+		return 0
+	}
+	defer conn.Close()
+
+	cs := conn.ConnectionState()
+	loaded := 0
+	for _, cert := range cs.PeerCertificates {
+		if cert == nil || len(cert.Raw) == 0 {
+			continue
+		}
+		block := &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}
+		if pool.AppendCertsFromPEM(pem.EncodeToMemory(block)) {
+			loaded++
+		}
+	}
+	return loaded
+}
+
+func appendBatchFallbackFNMTCerts(pool *x509.CertPool) int {
+	if pool == nil {
+		return 0
+	}
+	paths := candidateBatchFNMTCertPaths()
+	seen := map[string]bool{}
+	loaded := 0
+	for _, p := range paths {
+		pp := strings.TrimSpace(p)
+		if pp == "" || seen[pp] {
+			continue
+		}
+		seen[pp] = true
+		data, err := os.ReadFile(pp)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		if pool.AppendCertsFromPEM(data) {
+			loaded++
+		}
+	}
+	return loaded
+}
+
+func candidateBatchFNMTCertPaths() []string {
+	paths := []string{
+		"/opt/autofirma-dipgra/certs/fnmt-accomp.crt",
+		"/usr/local/share/ca-certificates/fnmt-accomp.crt",
+		"/usr/share/ca-certificates/AutoFirma/fnmt-accomp.crt",
+	}
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		paths = append(paths,
+			filepath.Join(exeDir, "certs", "fnmt-accomp.crt"),
+			filepath.Join(exeDir, "fnmt-accomp.crt"),
+			filepath.Join(exeDir, "ACCOMP.crt"),
+		)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		paths = append(paths,
+			filepath.Join(wd, "packaging", "linux", "certs", "fnmt-accomp.crt"),
+			filepath.Join(wd, "packaging", "macos", "certs", "fnmt-accomp.crt"),
+			filepath.Join(wd, "packaging", "windows", "certs", "fnmt-accomp.crt"),
+			filepath.Join(wd, "ACCOMP.crt"),
+		)
+	}
+	return paths
+}
+
+func shouldUseBatchInsecureTLSException(rawURL string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u == nil {
+		return "", false
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "" {
+		return "", false
+	}
+	raw := strings.TrimSpace(os.Getenv("AUTOFIRMA_BATCH_TLS_INSECURE_DOMAINS"))
+	if raw == "" {
+		return host, false
+	}
+	for _, token := range strings.Split(raw, ",") {
+		domain := strings.ToLower(strings.TrimSpace(token))
+		if domain == "" {
+			continue
+		}
+		if host == domain {
+			return host, true
+		}
+		if strings.HasPrefix(domain, "*.") {
+			suffix := strings.TrimPrefix(domain, "*")
+			if strings.HasSuffix(host, suffix) {
+				return host, true
+			}
+		}
+	}
+	return host, false
+}
+
+func buildBatchHTTPInsecureExceptionClient(timeout time.Duration, expectedHost string) *http.Client {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true, // Excepción explícita por dominio. Se valida hostname manualmente en VerifyConnection.
+			VerifyConnection: func(cs tls.ConnectionState) error {
+				if len(cs.PeerCertificates) == 0 {
+					return fmt.Errorf("sin certificado presentado por el servidor")
+				}
+				return cs.PeerCertificates[0].VerifyHostname(expectedHost)
+			},
+		},
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: tr,
+	}
 }
 
 func resolveBatchHTTPTimeout() time.Duration {
@@ -97,6 +379,11 @@ type batchCircuitOpenError struct {
 	OpenUntil time.Time
 }
 
+type batchTransportError struct {
+	Detail string
+	Cause  error
+}
+
 func (e *batchHTTPError) Error() string {
 	if e == nil {
 		return "error http"
@@ -112,6 +399,26 @@ func (e *batchCircuitOpenError) Error() string {
 		return "circuit open"
 	}
 	return fmt.Sprintf("circuit open for %s until %s", e.Key, e.OpenUntil.Format(time.RFC3339))
+}
+
+func (e *batchTransportError) Error() string {
+	if e == nil {
+		return "error de transporte"
+	}
+	if strings.TrimSpace(e.Detail) != "" {
+		return e.Detail
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	return "error de transporte"
+}
+
+func (e *batchTransportError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 type batchRequest struct {
@@ -196,6 +503,11 @@ type batchPreResponse struct {
 
 type triphaseDataResponse struct {
 	Format   string                `json:"format"`
+	SignInfo []triphaseSignInfoDTO `json:"signinfo"`
+	Signs    []triphaseSignBlock   `json:"signs,omitempty"`
+}
+
+type triphaseSignBlock struct {
 	SignInfo []triphaseSignInfoDTO `json:"signinfo"`
 }
 
@@ -499,19 +811,125 @@ func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBa
 		return "", fmt.Errorf("SAF_03: Faltan URLs de prefirma/postfirma de lote")
 	}
 
-	batchB64URL := base64.URLEncoding.EncodeToString(rawBatch)
-	certB64 := base64.URLEncoding.EncodeToString(cert.Content)
+	type batchEncodingVariant struct {
+		name string
+		b64  string
+	}
+	type batchParamEncodingVariant struct {
+		name   string
+		encode func(string) string
+	}
+	batchVariants := []batchEncodingVariant{
+		{name: "urlsafe", b64: base64.URLEncoding.EncodeToString(rawBatch)},
+		{name: "std", b64: base64.StdEncoding.EncodeToString(rawBatch)},
+	}
+	paramEncodingVariants := []batchParamEncodingVariant{
+		{name: "escape", encode: url.QueryEscape},
+		{
+			name: "escape_pct20",
+			encode: func(v string) string {
+				return strings.ReplaceAll(url.QueryEscape(v), "+", "%20")
+			},
+		},
+		{name: "java_raw", encode: func(v string) string { return v }},
+	}
+	certVariants := buildBatchCertsParamVariants(cert)
+	if len(certVariants) == 0 {
+		certVariants = []string{buildBatchCertsParam(cert)}
+	}
+	if len(certVariants) == 0 {
+		certVariants = []string{""}
+	}
 	batchParam := "xml"
 	if isJSONBatch {
 		batchParam = "json"
 	}
-	preReq := preURL + "?" + batchParam + "=" + url.QueryEscape(batchB64URL) + "&certs=" + url.QueryEscape(certB64)
-	preRaw, err := batchHTTPPostWithRetry(preReq)
-	if err != nil {
-		return "", fmt.Errorf("%s", mapBatchRemoteHTTPError("prefirma", err))
+	var (
+		preRaw                   []byte
+		preReq                   string
+		preErr                   error
+		selectedBatchVariantName = "urlsafe"
+		selectedParamEncoding    = "escape"
+		selectedCertParam        = certVariants[0]
+		emptyPreRaw              []byte
+		emptyPreReq              string
+		emptyBatchVariantName    = "urlsafe"
+		emptyParamEncodingName   = "escape"
+		emptyCertParam           = certVariants[0]
+	)
+	preSuccess := false
+	for _, batchVariant := range batchVariants {
+		for _, certParam := range certVariants {
+			for _, paramEncoding := range paramEncodingVariants {
+				candidateReq := preURL + "?" + batchParam + "=" + paramEncoding.encode(batchVariant.b64) + "&certs=" + paramEncoding.encode(certParam)
+				if isBatchCompatTraceEnabled() {
+					log.Printf(
+						"[Batch-TRACE] intento prefirma codif_batch=%s codif_params=%s certs=%s",
+						batchVariant.name,
+						paramEncoding.name,
+						batchPayloadFingerprint(certParam),
+					)
+				}
+				candidateRaw, candidateErr := batchHTTPPostWithRetry(candidateReq, "prefirma")
+				if candidateErr != nil {
+					preReq = candidateReq
+					preErr = candidateErr
+					var httpErr *batchHTTPError
+					if errors.As(candidateErr, &httpErr) && httpErr != nil && shouldFallbackToFormBody(httpErr) {
+						continue
+					}
+					return "", fmt.Errorf("%s", mapBatchRemoteHTTPError("prefirma", candidateReq, candidateErr))
+				}
+				if protoErr := detectBatchServiceProtocolError(candidateRaw, "prefirma"); protoErr != nil {
+					return "", protoErr
+				}
+				if isJSONBatch {
+					var probe batchPreResponse
+					if err := json.Unmarshal(candidateRaw, &probe); err == nil && probe.TD == nil && len(probe.Results) == 0 {
+						if len(emptyPreRaw) == 0 {
+							emptyPreRaw = candidateRaw
+							emptyPreReq = candidateReq
+							emptyBatchVariantName = batchVariant.name
+							emptyParamEncodingName = paramEncoding.name
+							emptyCertParam = certParam
+						}
+						continue
+					}
+				}
+				preReq = candidateReq
+				preRaw = candidateRaw
+				selectedBatchVariantName = batchVariant.name
+				selectedParamEncoding = paramEncoding.name
+				selectedCertParam = certParam
+				preSuccess = true
+				break
+			}
+			if preSuccess {
+				break
+			}
+		}
+		if preSuccess {
+			break
+		}
 	}
-	if protoErr := detectBatchServiceProtocolError(preRaw, "prefirma"); protoErr != nil {
-		return "", protoErr
+	if !preSuccess {
+		if len(emptyPreRaw) > 0 {
+			preRaw = emptyPreRaw
+			preReq = emptyPreReq
+			selectedBatchVariantName = emptyBatchVariantName
+			selectedParamEncoding = emptyParamEncodingName
+			selectedCertParam = emptyCertParam
+			preSuccess = true
+		}
+	}
+	if !preSuccess {
+		if preErr != nil {
+			if mapped := mapBatchRemoteHTTPError("prefirma", preReq, preErr); !strings.Contains(mapped, "SAF_26: Error contactando servicio de prefirma de lote") || strings.TrimSpace(preReq) != "" {
+				return "", fmt.Errorf("%s", mapped)
+			}
+			return "", fmt.Errorf("SAF_26: Error contactando servicio de prefirma de lote")
+		}
+		return "", fmt.Errorf("SAF_26: Error contactando servicio de prefirma de lote")
 	}
 
 	var tdSignedB64 string
@@ -522,13 +940,49 @@ func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBa
 		if err := json.Unmarshal(preRaw, &preResp); err != nil {
 			return "", fmt.Errorf("SAF_27: Respuesta de prefirma de lote invalida")
 		}
-		if preResp.TD == nil && len(preResp.Results) == 0 {
-			return `{"signs":[]}`, nil
+		normalizeBatchPreResponse(&preResp)
+		emptyRetryDelays := []time.Duration{
+			250 * time.Millisecond,
+			500 * time.Millisecond,
+			900 * time.Millisecond,
+			1400 * time.Millisecond,
+			2 * time.Second,
 		}
-		if preResp.TD == nil {
+		for emptyAttempt := 1; preResp.TD == nil && len(preResp.Results) == 0 && emptyAttempt <= len(emptyRetryDelays); emptyAttempt++ {
+			log.Printf(
+				"[Batch] prefirma vacia, sondeo %d/%d (espera=%s, codif=%s, params=%s): cuerpo=%q",
+				emptyAttempt,
+				len(emptyRetryDelays),
+				emptyRetryDelays[emptyAttempt-1],
+				selectedBatchVariantName,
+				selectedParamEncoding,
+				summarizeServerBody(string(preRaw)),
+			)
+			time.Sleep(emptyRetryDelays[emptyAttempt-1])
+			preRawRetry, retryErr := batchHTTPPostWithRetry(preReq, "prefirma")
+			if retryErr != nil {
+				break
+			}
+			preRaw = preRawRetry
+			var retryResp batchPreResponse
+			if err := json.Unmarshal(preRawRetry, &retryResp); err != nil {
+				break
+			}
+			normalizeBatchPreResponse(&retryResp)
+			preResp = retryResp
+		}
+		if preResp.TD == nil || len(preResp.TD.SignInfo) == 0 {
+			if preResp.TD != nil && len(preResp.TD.SignInfo) == 0 {
+				log.Printf("[Batch] prefirma sin datos trifasicos: signinfo=0; results=%d cuerpo=%q", len(preResp.Results), summarizeServerBody(string(preRaw)))
+			}
 			out, mErr := json.Marshal(batchResponse{Signs: preResp.Results})
 			if mErr != nil {
 				return "", fmt.Errorf("SAF_12: Error preparando respuesta de lote")
+			}
+			// Si prefirma no devuelve firmas trifasicas no hay nada que postsignar.
+			// Devolvemos el resultado de prefirma para evitar ERROR_POST espurio.
+			if len(preResp.Results) == 0 {
+				return "", fmt.Errorf("SAF_27: Prefirma de lote sin datos trifasicos ni resultados (%s)", summarizeServerBody(string(preRaw)))
 			}
 			return string(out), nil
 		}
@@ -537,6 +991,8 @@ func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBa
 		if err != nil {
 			return "", fmt.Errorf("SAF_27: Error en firma trifasica de lote")
 		}
+		logBatchTriphaseIDSummary("prefirma_td", preResp.TD.SignInfo)
+		logBatchTriphaseIDSummary("postfirma_td", tdSigned.SignInfo)
 		tdJSON, err := json.Marshal(tdSigned)
 		if err != nil {
 			return "", fmt.Errorf("SAF_27: Error en firma trifasica de lote")
@@ -556,12 +1012,27 @@ func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBa
 		tdSignedB64 = base64.URLEncoding.EncodeToString(tdSignedXML)
 	}
 
-	postReq := postURL + "?" + batchParam + "=" + url.QueryEscape(base64.URLEncoding.EncodeToString(batchForPost)) +
-		"&certs=" + url.QueryEscape(certB64) +
-		"&tridata=" + url.QueryEscape(tdSignedB64)
-	postRaw, err := batchHTTPPostWithRetry(postReq)
+	postBatchB64 := base64.URLEncoding.EncodeToString(batchForPost)
+	if selectedBatchVariantName == "std" {
+		postBatchB64 = base64.StdEncoding.EncodeToString(batchForPost)
+	}
+	selectedParamEncoder := url.QueryEscape
+	if selectedParamEncoding == "escape_pct20" {
+		selectedParamEncoder = func(v string) string {
+			return strings.ReplaceAll(url.QueryEscape(v), "+", "%20")
+		}
+	} else if selectedParamEncoding == "java_raw" {
+		selectedParamEncoder = func(v string) string { return v }
+	}
+	postReq := postURL + "?" + batchParam + "=" + selectedParamEncoder(postBatchB64) +
+		"&certs=" + selectedParamEncoder(selectedCertParam) +
+		"&tridata=" + selectedParamEncoder(tdSignedB64)
+	if isJSONBatch {
+		logBatchPostIDCheck(batchForPost, tdSignedB64)
+	}
+	postRaw, err := batchHTTPPostWithRetry(postReq, "postfirma")
 	if err != nil {
-		return "", fmt.Errorf("%s", mapBatchRemoteHTTPError("postfirma", err))
+		return "", fmt.Errorf("%s", mapBatchRemoteHTTPError("postfirma", postReq, err))
 	}
 	if protoErr := detectBatchServiceProtocolError(postRaw, "postfirma"); protoErr != nil {
 		return "", protoErr
@@ -569,7 +1040,114 @@ func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBa
 	return string(postRaw), nil
 }
 
-func batchHTTPPostWithRetry(rawURL string) ([]byte, error) {
+func normalizeBatchPreResponse(preResp *batchPreResponse) {
+	if preResp == nil || preResp.TD == nil {
+		return
+	}
+	if len(preResp.TD.SignInfo) > 0 || len(preResp.TD.Signs) == 0 {
+		return
+	}
+	flat := make([]triphaseSignInfoDTO, 0, 8)
+	for _, block := range preResp.TD.Signs {
+		if len(block.SignInfo) == 0 {
+			continue
+		}
+		flat = append(flat, block.SignInfo...)
+	}
+	preResp.TD.SignInfo = flat
+}
+
+func buildBatchCertsParam(cert protocol.Certificate) string {
+	derChain := collectBatchCertDERChain(cert)
+	return encodeBatchCertChainURLSafe(derChain)
+}
+
+func buildBatchCertsParamVariants(cert protocol.Certificate) []string {
+	derChain := collectBatchCertDERChain(cert)
+	if len(derChain) == 0 {
+		return nil
+	}
+	variants := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	addVariant := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		variants = append(variants, v)
+	}
+	addVariant(encodeBatchCertChainURLSafe(derChain))
+	addVariant(encodeBatchCertChainStd(derChain))
+	addVariant(encodeBatchCertChainURLSafe(derChain[:1]))
+	addVariant(encodeBatchCertChainStd(derChain[:1]))
+	return variants
+}
+
+func collectBatchCertDERChain(cert protocol.Certificate) [][]byte {
+	added := make(map[[32]byte]struct{}, 4)
+	derChain := make([][]byte, 0, 4)
+	appendDER := func(der []byte) {
+		if len(der) == 0 {
+			return
+		}
+		sum := sha256.Sum256(der)
+		if _, exists := added[sum]; exists {
+			return
+		}
+		added[sum] = struct{}{}
+		derChain = append(derChain, der)
+	}
+
+	// Java envía la cadena completa en orden hoja->emisores; usamos DER de Content y,
+	// si PEM trae más bloques CERTIFICATE, los añadimos como posibles intermedios.
+	appendDER(cert.Content)
+	pemData := []byte(strings.TrimSpace(cert.PEM))
+	for len(pemData) > 0 {
+		var block *pem.Block
+		block, pemData = pem.Decode(pemData)
+		if block == nil {
+			break
+		}
+		if !strings.EqualFold(strings.TrimSpace(block.Type), "CERTIFICATE") || len(block.Bytes) == 0 {
+			continue
+		}
+		if parsed, err := x509.ParseCertificate(block.Bytes); err == nil && parsed != nil {
+			appendDER(parsed.Raw)
+		} else {
+			appendDER(block.Bytes)
+		}
+	}
+
+	return derChain
+}
+
+func encodeBatchCertChainURLSafe(derChain [][]byte) string {
+	if len(derChain) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(derChain))
+	for _, der := range derChain {
+		parts = append(parts, base64.URLEncoding.EncodeToString(der))
+	}
+	return strings.Join(parts, ";")
+}
+
+func encodeBatchCertChainStd(derChain [][]byte) string {
+	if len(derChain) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(derChain))
+	for _, der := range derChain {
+		parts = append(parts, base64.StdEncoding.EncodeToString(der))
+	}
+	return strings.Join(parts, ";")
+}
+
+func batchHTTPPostWithRetry(rawURL string, phase string) ([]byte, error) {
 	var lastErr error
 	timeout := resolveBatchHTTPTimeout()
 	maxAttempts := resolveBatchHTTPMaxAttempts()
@@ -594,6 +1172,7 @@ func batchHTTPPostWithRetry(rawURL string) ([]byte, error) {
 		time.Sleep(backoff)
 	}
 	batchRemoteRecordFailure(key, time.Now())
+	logBatchRemoteFailureDiagnostics(rawURL, phase, lastErr)
 	return nil, lastErr
 }
 
@@ -618,6 +1197,35 @@ func sanitizeBatchRemoteURL(rawURL string) string {
 		return "<invalid-url>"
 	}
 	return strings.TrimSpace(u.Scheme + "://" + u.Host + u.Path)
+}
+
+func isBatchCompatTraceEnabled() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("AUTOFIRMA_BATCH_COMPAT_TRACE")))
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "si"
+}
+
+func batchPayloadFingerprint(v string) string {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return "len=0 sha12=e3b0c44298fc head=\"\" tail=\"\""
+	}
+	sum := sha256.Sum256([]byte(s))
+	head := s
+	if len(head) > 96 {
+		head = head[:96]
+	}
+	tail := s
+	if len(tail) > 64 {
+		tail = tail[len(tail)-64:]
+	}
+	return fmt.Sprintf("len=%d sha12=%x head=%q tail=%q", len(s), sum[:6], head, tail)
+}
+
+func batchTransportModeLabel(sendQueryAsFormBody bool, formBody string) string {
+	if sendQueryAsFormBody && strings.TrimSpace(formBody) != "" {
+		return "post-form-urlencoded"
+	}
+	return "post-query"
 }
 
 func batchRemoteKey(rawURL string) string {
@@ -742,7 +1350,7 @@ func truncateBatchBodyForError(body []byte) string {
 	return s[:180]
 }
 
-func mapBatchRemoteHTTPError(phase string, err error) string {
+func mapBatchRemoteHTTPError(phase string, rawURL string, err error) string {
 	var circuitErr *batchCircuitOpenError
 	if errors.As(err, &circuitErr) && circuitErr != nil {
 		return "SAF_26: Servicio de " + phase + " de lote temporalmente no disponible"
@@ -757,7 +1365,157 @@ func mapBatchRemoteHTTPError(phase string, err error) string {
 		}
 		return "SAF_27: Error en servicio de " + phase + " de lote"
 	}
+	var transportErr *batchTransportError
+	if errors.As(err, &transportErr) && transportErr != nil {
+		msg := strings.ToLower(strings.TrimSpace(transportErr.Error()))
+		switch {
+		case strings.Contains(msg, "x509"), strings.Contains(msg, "tls"), strings.Contains(msg, "certificate"):
+			extra := describeBatchRemoteTLSFailure(rawURL)
+			base := "SAF_26: Error TLS verificando el certificado del servicio de " + phase + " de lote"
+			if strings.TrimSpace(extra) != "" {
+				return base + ". " + extra
+			}
+			return base
+		case strings.Contains(msg, "no such host"), strings.Contains(msg, "lookup"):
+			return "SAF_26: Error DNS resolviendo el servicio de " + phase + " de lote"
+		}
+	}
 	return "SAF_26: Error contactando servicio de " + phase + " de lote"
+}
+
+func describeBatchRemoteTLSFailure(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u == nil || strings.TrimSpace(u.Hostname()) == "" {
+		return ""
+	}
+	host := strings.TrimSpace(u.Hostname())
+	port := strings.TrimSpace(u.Port())
+	if port == "" {
+		port = "443"
+	}
+	addr := net.JoinHostPort(host, port)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, // Diagnóstico puntual para mostrar emisor/subject.
+		MinVersion:         tls.VersionTLS12,
+	})
+	if err != nil {
+		return "Endpoint=" + host + " (" + summarizeServerBody(err.Error()) + ")"
+	}
+	defer conn.Close()
+
+	st := conn.ConnectionState()
+	if len(st.PeerCertificates) == 0 {
+		return "Endpoint=" + host + " (sin certificado TLS remoto)"
+	}
+	leaf := st.PeerCertificates[0]
+	subject := strings.TrimSpace(leaf.Subject.String())
+	issuer := strings.TrimSpace(leaf.Issuer.String())
+	if subject == "" {
+		subject = "-"
+	}
+	if issuer == "" {
+		issuer = "-"
+	}
+
+	roots, _ := x509.SystemCertPool()
+	if roots == nil {
+		roots = x509.NewCertPool()
+	}
+	inters := x509.NewCertPool()
+	for i := 1; i < len(st.PeerCertificates); i++ {
+		inters.AddCert(st.PeerCertificates[i])
+	}
+	if _, verifyErr := leaf.Verify(x509.VerifyOptions{
+		DNSName:       host,
+		Roots:         roots,
+		Intermediates: inters,
+		CurrentTime:   time.Now(),
+	}); verifyErr != nil {
+		if len(leaf.IssuingCertificateURL) > 0 {
+			return fmt.Sprintf("Endpoint=%s; Certificado servidor=%s; Emisor=%s; URL cadena oficial=%s", host, subject, issuer, strings.Join(leaf.IssuingCertificateURL, ", "))
+		}
+		return fmt.Sprintf("Endpoint=%s; Certificado servidor=%s; Emisor=%s", host, subject, issuer)
+	}
+	return fmt.Sprintf("Endpoint=%s; Certificado servidor=%s; Emisor=%s", host, subject, issuer)
+}
+
+func logBatchRemoteFailureDiagnostics(rawURL string, phase string, err error) {
+	target := sanitizeBatchRemoteURL(rawURL)
+	log.Printf("[Batch] diagnóstico fallo remoto fase=%s destino=%s error=%v", phase, target, err)
+
+	u, parseErr := url.Parse(rawURL)
+	if parseErr != nil {
+		log.Printf("[Batch] diagnóstico remoto: URL inválida (%v)", parseErr)
+		return
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if host == "" {
+		log.Printf("[Batch] diagnóstico remoto: host vacío")
+		return
+	}
+	port := strings.TrimSpace(u.Port())
+	if port == "" {
+		port = "443"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	ips, dnsErr := net.DefaultResolver.LookupHost(ctx, host)
+	if dnsErr != nil {
+		log.Printf("[Batch] diagnóstico remoto DNS host=%s error=%v", host, dnsErr)
+	} else {
+		log.Printf("[Batch] diagnóstico remoto DNS host=%s ips=%v", host, ips)
+	}
+
+	addr := net.JoinHostPort(host, port)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, tlsErr := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, // Solo diagnóstico de cadena recibida.
+		MinVersion:         tls.VersionTLS12,
+	})
+	if tlsErr != nil {
+		log.Printf("[Batch] diagnóstico remoto TLS host=%s handshake_error=%v", host, tlsErr)
+		return
+	}
+	defer conn.Close()
+
+	st := conn.ConnectionState()
+	if len(st.PeerCertificates) == 0 {
+		log.Printf("[Batch] diagnóstico remoto TLS host=%s sin_certificados_peer", host)
+		return
+	}
+	leaf := st.PeerCertificates[0]
+	log.Printf(
+		"[Batch] diagnóstico remoto TLS host=%s subject=%q issuer=%q not_before=%s not_after=%s",
+		host,
+		leaf.Subject.String(),
+		leaf.Issuer.String(),
+		leaf.NotBefore.Format(time.RFC3339),
+		leaf.NotAfter.Format(time.RFC3339),
+	)
+
+	roots, _ := x509.SystemCertPool()
+	if roots == nil {
+		roots = x509.NewCertPool()
+	}
+	inters := x509.NewCertPool()
+	for i := 1; i < len(st.PeerCertificates); i++ {
+		inters.AddCert(st.PeerCertificates[i])
+	}
+	_, verifyErr := leaf.Verify(x509.VerifyOptions{
+		DNSName:       host,
+		Roots:         roots,
+		Intermediates: inters,
+		CurrentTime:   time.Now(),
+	})
+	if verifyErr != nil {
+		log.Printf("[Batch] diagnóstico remoto TLS host=%s verify_error=%v", host, verifyErr)
+	} else {
+		log.Printf("[Batch] diagnóstico remoto TLS host=%s verify_ok", host)
+	}
 }
 
 func detectBatchServiceProtocolError(raw []byte, phase string) error {
@@ -770,7 +1528,10 @@ func detectBatchServiceProtocolError(raw []byte, phase string) error {
 		return fmt.Errorf("%s", text)
 	}
 	if strings.HasPrefix(up, "ERR-") {
-		return fmt.Errorf("SAF_27: Error en servicio de %s de lote", phase)
+		return fmt.Errorf("SAF_27: Error en servicio de %s de lote (%s)", phase, summarizeServerBody(text))
+	}
+	if strings.Contains(up, "ERROR_POST") {
+		return fmt.Errorf("SAF_27: Error en servicio de %s de lote (%s)", phase, summarizeServerBody(text))
 	}
 	return nil
 }
@@ -801,7 +1562,7 @@ func signTriphaseData(td *triphaseDataResponse, certID, algorithm string, signOp
 		}
 		preB64 := strings.TrimSpace(params["PRE"])
 		if preB64 == "" {
-		return nil, fmt.Errorf("falta PRE")
+			return nil, fmt.Errorf("falta PRE")
 		}
 		preData, err := decodeAutoFirmaB64(strings.ReplaceAll(preB64, " ", "+"))
 		if err != nil {
@@ -825,9 +1586,17 @@ func signTriphaseData(td *triphaseDataResponse, certID, algorithm string, signOp
 			return nil, err
 		}
 		params["PK1"] = pk1B64
+		postID := strings.TrimSpace(si.ID)
+		postSignID := strings.TrimSpace(si.SignID)
+		if postID == "" {
+			postID = postSignID
+		}
+		if postID == "" {
+			postID = strings.TrimSpace(params["ID"])
+		}
 		out.SignInfo = append(out.SignInfo, triphaseSignInfoDTO{
-			ID:     si.ID,
-			SignID: si.SignID,
+			ID:     postID,
+			SignID: postSignID,
 			Params: params,
 		})
 	}
@@ -939,6 +1708,83 @@ func mergePresignResultsIntoBatchJSON(rawBatch []byte, results []batchSingleResu
 	return json.Marshal(root)
 }
 
+func logBatchTriphaseIDSummary(stage string, items []triphaseSignInfoDTO) {
+	if len(items) == 0 {
+		log.Printf("[Batch] %s: sin firmas en tri-fase", stage)
+		return
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		id := strings.TrimSpace(it.ID)
+		signID := strings.TrimSpace(it.SignID)
+		if id == "" {
+			id = "-"
+		}
+		if signID == "" {
+			signID = "-"
+		}
+		parts = append(parts, "id="+id+"/signid="+signID)
+	}
+	log.Printf("[Batch] %s: firmas=%d [%s]", stage, len(items), strings.Join(parts, ", "))
+}
+
+func logBatchPostIDCheck(rawBatch []byte, tdSignedB64 string) {
+	var root map[string]interface{}
+	if err := json.Unmarshal(rawBatch, &root); err != nil {
+		log.Printf("[Batch] post-id-check: lote JSON no parseable (%v)", err)
+		return
+	}
+	ss, ok := root["singlesigns"].([]interface{})
+	if !ok {
+		log.Printf("[Batch] post-id-check: sin singlesigns")
+		return
+	}
+	want := make([]string, 0, len(ss))
+	for _, it := range ss {
+		m, ok := it.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id, _ := m["id"].(string)
+		id = strings.TrimSpace(id)
+		if id != "" {
+			want = append(want, id)
+		}
+	}
+
+	tdRaw, err := base64.URLEncoding.DecodeString(strings.TrimSpace(tdSignedB64))
+	if err != nil {
+		log.Printf("[Batch] post-id-check: tridata no decodificable (%v)", err)
+		return
+	}
+	var td triphaseDataRequest
+	if err := json.Unmarshal(tdRaw, &td); err != nil {
+		log.Printf("[Batch] post-id-check: tridata JSON no parseable (%v)", err)
+		return
+	}
+	gotMap := make(map[string]struct{}, len(td.SignInfo))
+	for _, si := range td.SignInfo {
+		id := strings.TrimSpace(si.ID)
+		if id == "" {
+			id = strings.TrimSpace(si.SignID)
+		}
+		if id != "" {
+			gotMap[id] = struct{}{}
+		}
+	}
+	missing := make([]string, 0)
+	for _, id := range want {
+		if _, ok := gotMap[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		log.Printf("[Batch] post-id-check: OK ids_lote=%d ids_trifase=%d", len(want), len(gotMap))
+		return
+	}
+	log.Printf("[Batch] post-id-check: faltan_ids_en_trifase=%v ids_lote=%d ids_trifase=%d", missing, len(want), len(gotMap))
+}
+
 func (s *WebSocketServer) selectBatchSigningCertificate(state *ProtocolState) (protocol.Certificate, string) {
 	certs, err := loadCertificatesForState(state)
 	if err != nil {
@@ -971,6 +1817,21 @@ func (s *WebSocketServer) selectBatchSigningCertificate(state *ProtocolState) (p
 	}
 
 	autoWithoutDialog := filterOpts.forceAutoSelection || (filterOpts.autoSelectWhenSingle && len(filtered) == 1)
+	if normalizeProtocolAction(state.Action) == "batch" && s.ui != nil {
+		// En flujo batch lanzado por protocolo web, la selección debe hacerse en la
+		// ventana principal (lista de certificados) para evitar diálogos duplicados.
+		autoWithoutDialog = true
+		if s.ui.SelectedCert >= 0 && s.ui.SelectedCert < len(s.ui.Certs) {
+			selectedID := strings.TrimSpace(s.ui.Certs[s.ui.SelectedCert].ID)
+			if selectedID != "" {
+				if uiIdx := findCertificateIndexByID(filtered, selectedID); uiIdx >= 0 {
+					idx = uiIdx
+				} else {
+					return protocol.Certificate{}, "SAF_08: El certificado seleccionado no está disponible para este lote"
+				}
+			}
+		}
+	}
 	if !autoWithoutDialog {
 		if s.ui == nil {
 			return protocol.Certificate{}, "SAF_09: Interfaz de firma no disponible"
@@ -990,7 +1851,16 @@ func (s *WebSocketServer) selectBatchSigningCertificate(state *ProtocolState) (p
 	if sticky {
 		s.stickyID = filtered[idx].ID
 	}
-	return filtered[idx], ""
+	chosen := filtered[idx]
+	log.Printf(
+		"[Batch] certificado seleccionado nombre=%q origen=%s apto=%t serie=%s id=%s",
+		certificateBestDisplayName(chosen),
+		strings.TrimSpace(chosen.Source),
+		chosen.CanSign,
+		strings.TrimSpace(chosen.SerialNumber),
+		chosen.ID,
+	)
+	return chosen, ""
 }
 
 func decodeBatchExtraParams(v string) map[string]string {
