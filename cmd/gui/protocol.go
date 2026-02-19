@@ -777,8 +777,18 @@ func saveTemp(data []byte, fileID string, key string) (string, error) {
 		ext = ".txt"
 	}
 
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma_%s%s", safeID, ext))
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+	tmpf, err := os.CreateTemp(os.TempDir(), fmt.Sprintf("autofirma_%s_*%s", safeID, ext))
+	if err != nil {
+		return "", err
+	}
+	tmpFile := tmpf.Name()
+	if _, err := tmpf.Write(data); err != nil {
+		_ = tmpf.Close()
+		_ = os.Remove(tmpFile)
+		return "", err
+	}
+	if err := tmpf.Close(); err != nil {
+		_ = os.Remove(tmpFile)
 		return "", err
 	}
 	return tmpFile, nil
@@ -883,7 +893,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		}
 
 		payload = encCertVal + "|" + encSigVal
-		log.Printf("[Protocol] Subiendo carga cifrada (Cert|Firma): %s", payload)
+		log.Printf("[Protocol] Subiendo carga cifrada (Cert|Firma): %s", summarizePayloadForLog(payload))
 	} else {
 		// Plano: Cert|Sig (AutoFirma suele usar URL Safe Base64 incluso sin cifrado)
 		payload = base64.URLEncoding.EncodeToString(certBytes) + "|" + base64.URLEncoding.EncodeToString(sigBytes)
@@ -1013,6 +1023,17 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	return fmt.Errorf("la subida al servidor devolvió cuerpo no-OK: %s", bodyText)
 }
 
+func summarizePayloadForLog(payload string) string {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return "payload[vacio]"
+	}
+	if len(payload) <= 24 {
+		return "payload[" + payload + "]"
+	}
+	return fmt.Sprintf("payload[%s...%s len=%d]", payload[:12], payload[len(payload)-8:], len(payload))
+}
+
 // SendWaitSignal envía marcador WAIT compatible con Java al storage servlet.
 func (p *ProtocolState) SendWaitSignal() error {
 	if p == nil {
@@ -1114,8 +1135,22 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 					ext = ".xml"
 				}
 
-				actualPath := strings.TrimSuffix(path, filepath.Ext(path)) + "_data" + ext
-				if err := os.WriteFile(actualPath, actualData, 0644); err != nil {
+				tmpDataFile, err := os.CreateTemp(os.TempDir(), "autofirma_xml_data_*"+ext)
+				if err != nil {
+					ui.StatusMsg = "Error guardando datos: " + err.Error()
+					ui.Window.Invalidate()
+					return
+				}
+				actualPath := tmpDataFile.Name()
+				if _, err := tmpDataFile.Write(actualData); err != nil {
+					_ = tmpDataFile.Close()
+					_ = os.Remove(actualPath)
+					ui.StatusMsg = "Error guardando datos: " + err.Error()
+					ui.Window.Invalidate()
+					return
+				}
+				if err := tmpDataFile.Close(); err != nil {
+					_ = os.Remove(actualPath)
 					ui.StatusMsg = "Error guardando datos: " + err.Error()
 					ui.Window.Invalidate()
 					return

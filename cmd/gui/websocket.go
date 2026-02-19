@@ -36,8 +36,7 @@ const (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// AutoFirma Java server doesn't restrict origin, so we allow all
-		return true
+		return isAllowedWebOrigin(r.Header.Get("Origin"))
 	},
 }
 
@@ -145,11 +144,55 @@ func (s *WebSocketServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("Servidor local AutoFirma activo"))
 }
 
-func setCompatHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+func setCompatHeaders(w http.ResponseWriter, r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" {
+		if !isAllowedWebOrigin(origin) {
+			return false
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+	}
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	return true
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func isAllowedWebOrigin(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "" {
+		return false
+	}
+	if scheme == "chrome-extension" || scheme == "moz-extension" {
+		return true
+	}
+	if isLoopbackHost(host) {
+		return scheme == "http" || scheme == "https"
+	}
+	if scheme != "https" {
+		return false
+	}
+	for _, pattern := range allowedSigningDomainPatterns() {
+		if isHostAllowedByPattern(host, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func compatError(code, msg string) string {
@@ -157,7 +200,10 @@ func compatError(code, msg string) string {
 }
 
 func (s *WebSocketServer) handleStorageService(w http.ResponseWriter, r *http.Request) {
-	setCompatHeaders(w)
+	if ok := setCompatHeaders(w, r); !ok {
+		http.Error(w, compatError("ERR-99", "Origen no permitido"), http.StatusForbidden)
+		return
+	}
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -204,7 +250,10 @@ func (s *WebSocketServer) handleStorageService(w http.ResponseWriter, r *http.Re
 }
 
 func (s *WebSocketServer) handleRetrieveService(w http.ResponseWriter, r *http.Request) {
-	setCompatHeaders(w)
+	if ok := setCompatHeaders(w, r); !ok {
+		http.Error(w, compatError("ERR-99", "Origen no permitido"), http.StatusForbidden)
+		return
+	}
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -458,8 +507,18 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 			ext = ".xml"
 		}
 
-		actualPath := strings.TrimSuffix(filePath, ".xml") + "_data" + ext
-		if err := os.WriteFile(actualPath, actualData, 0644); err != nil {
+		tmpDataFile, err := os.CreateTemp(os.TempDir(), "autofirma_xml_data_*"+ext)
+		if err != nil {
+			return s.formatError("ERROR_SAVING_DATA", err.Error())
+		}
+		actualPath := tmpDataFile.Name()
+		if _, err := tmpDataFile.Write(actualData); err != nil {
+			_ = tmpDataFile.Close()
+			_ = os.Remove(actualPath)
+			return s.formatError("ERROR_SAVING_DATA", err.Error())
+		}
+		if err := tmpDataFile.Close(); err != nil {
+			_ = os.Remove(actualPath)
 			return s.formatError("ERROR_SAVING_DATA", err.Error())
 		}
 
