@@ -47,12 +47,64 @@ autofirma-desktop -install-trust
 autofirma-desktop -trust-status
 autofirma-desktop -server
 autofirma-desktop -exportar-certs-java /ruta/directorio
+
+# Modo CLI en castellano (alias compatibles)
+autofirma-desktop -modo-cli -listar-certificados
+autofirma-desktop -modo-cli -operacion firmar -entrada /ruta/doc.pdf -indice-certificado 0 -formato pades
+autofirma-desktop -modo-cli -operacion verificar -entrada /ruta/firmado.pdf
+autofirma-desktop -modo-cli -operacion informe-diagnostico -salida-json
+
+# Modo REST en castellano (alias compatibles)
+autofirma-desktop -servidor-rest -direccion-rest 127.0.0.1:63118 -token-rest secreto
 ```
 
 ## Empaquetado
 - Linux: `./packaging/linux/make_linux_release.sh`
 - Windows: `./packaging/windows/make_windows_release.sh`
 - macOS: `./packaging/macos/make_macos_release.sh`
+
+Empaquetado Linux con Qt nativo real incluido:
+```bash
+QT_REAL_BIN_PATH=/ruta/autofirma-desktop-qt-real BUILD_SELF_CONTAINED=0 ./packaging/linux/make_linux_release.sh
+```
+
+Empaquetado Linux con runtime Qt incluido:
+```bash
+QT_REAL_BIN_PATH=/ruta/autofirma-desktop-qt-real \
+QT_RUNTIME_DIR=/ruta/qt-runtime \
+BUILD_SELF_CONTAINED=0 \
+./packaging/linux/make_linux_release.sh
+```
+
+## Perfiles de instalación (Linux)
+Perfiles disponibles en instalador `.run`:
+- `completo` (por defecto): instala todo (GUI + integración de escritorio + handler `afirma://` + Native Messaging).
+- `escritorio`: GUI + integración de escritorio + handler `afirma://`, sin registro Native Messaging.
+- `minimo`: binarios y comandos, sin integración de escritorio ni Native Messaging.
+
+Subperfil de escritorio (para `escritorio` y `completo`):
+- `fyne` (por defecto)
+- `gio`
+- `qt`
+
+Nota sobre `qt`:
+- El lanzador `qt` usa `autofirma-desktop-qt-bin`.
+- Si existe un binario Qt nativo real, puede indicarse con `AUTOFIRMA_QT_BIN_REAL=/ruta/autofirma-desktop-qt-real`.
+- Mientras no exista ese binario, el instalador deja fallback temporal a Fyne para no bloquear el uso.
+
+El instalador genera lanzadores directos:
+- `autofirma-dipgra-fyne`
+- `autofirma-dipgra-gio`
+- `autofirma-dipgra-qt`
+- `autofirma-dipgra` (apunta al subperfil elegido)
+
+Ejemplos:
+```bash
+./release/linux/AutofirmaDipgra-linux-installer.run --perfil completo
+./release/linux/AutofirmaDipgra-linux-installer.run --perfil escritorio
+./release/linux/AutofirmaDipgra-linux-installer.run --perfil minimo
+./release/linux/AutofirmaDipgra-linux-installer.run --perfil escritorio --subperfil-escritorio qt
+```
 
 ## Licencia
 GPLv3. Ver `LICENSE`.

@@ -13,8 +13,14 @@ ARTIFACT_TGZ="${REL_DIR}/AutofirmaDipgra-linux-x64.tar.gz"
 ARTIFACT_RUN="${REL_DIR}/AutofirmaDipgra-linux-installer.run"
 BIN_PATH="${BUNDLE_DIR}/autofirma-desktop"
 HOST_BIN_PATH="${BUNDLE_DIR}/autofirma-host"
+QT_BIN_PATH="${BUNDLE_DIR}/autofirma-desktop-qt-bin"
+QT_REAL_BUNDLE_PATH="${BUNDLE_DIR}/autofirma-desktop-qt-real"
 CHECK_STATIC="${CHECK_STATIC:-1}"
 BUILD_SELF_CONTAINED="${BUILD_SELF_CONTAINED:-1}"
+QT_REAL_BIN_PATH="${QT_REAL_BIN_PATH:-}"
+QT_RUNTIME_DIR="${QT_RUNTIME_DIR:-}"
+QT_RUNTIME_FROM_SYSTEM="${QT_RUNTIME_FROM_SYSTEM:-0}"
+BUILD_QT_REAL_FROM_SOURCE="${BUILD_QT_REAL_FROM_SOURCE:-1}"
 
 mkdir -p "${REL_DIR}" "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
 rm -rf "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
@@ -47,6 +53,122 @@ else
 fi
 
 chmod +x "${BIN_PATH}"
+
+echo "[linux] Building Qt frontend binary (preparación)..."
+(
+  cd "${ROOT_DIR}"
+  GOCACHE=/tmp/gocache GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w" -o "${QT_BIN_PATH}" ./cmd/qt
+)
+chmod +x "${QT_BIN_PATH}"
+
+if [[ -n "${QT_REAL_BIN_PATH}" ]]; then
+  if [[ ! -f "${QT_REAL_BIN_PATH}" ]]; then
+    echo "[linux] Error: QT_REAL_BIN_PATH no existe: ${QT_REAL_BIN_PATH}" >&2
+    exit 1
+  fi
+  cp -f "${QT_REAL_BIN_PATH}" "${QT_REAL_BUNDLE_PATH}"
+  chmod +x "${QT_REAL_BUNDLE_PATH}"
+  echo "[linux] Frontend Qt nativo incluido: ${QT_REAL_BIN_PATH}"
+elif [[ "${BUILD_QT_REAL_FROM_SOURCE}" == "1" ]]; then
+  echo "[linux] Compilando frontend Qt nativo desde fuente..."
+  if "${ROOT_DIR}/scripts/build_qt_real_linux.sh" "${QT_REAL_BUNDLE_PATH}"; then
+    echo "[linux] Frontend Qt nativo compilado e incluido."
+  else
+    echo "[linux] Aviso: no se pudo compilar qt-real automáticamente. Se continuará con fallback Qt->Fyne."
+    rm -f "${QT_REAL_BUNDLE_PATH}"
+  fi
+fi
+
+if [[ -n "${QT_RUNTIME_DIR}" ]]; then
+  if [[ ! -d "${QT_RUNTIME_DIR}" ]]; then
+    echo "[linux] Error: QT_RUNTIME_DIR no existe o no es directorio: ${QT_RUNTIME_DIR}" >&2
+    exit 1
+  fi
+  rm -rf "${BUNDLE_DIR}/qt-runtime"
+  mkdir -p "${BUNDLE_DIR}/qt-runtime"
+  cp -a "${QT_RUNTIME_DIR}/." "${BUNDLE_DIR}/qt-runtime/"
+  echo "[linux] Runtime Qt incluido desde: ${QT_RUNTIME_DIR}"
+elif [[ "${QT_RUNTIME_FROM_SYSTEM}" == "1" ]]; then
+  echo "[linux] Intentando incluir runtime Qt desde librerías del sistema..."
+  rm -rf "${BUNDLE_DIR}/qt-runtime"
+  mkdir -p "${BUNDLE_DIR}/qt-runtime/lib" "${BUNDLE_DIR}/qt-runtime/plugins"
+
+  plugin_dir=""
+  for c in /usr/lib/*/qt6/plugins /usr/lib/qt6/plugins /usr/lib64/qt6/plugins; do
+    if [[ -d "${c}" ]]; then
+      plugin_dir="${c}"
+      break
+    fi
+  done
+  if [[ -n "${plugin_dir}" ]]; then
+    # Conjunto mínimo de plugins para Linux/X11 + TLS.
+    declare -a plugin_candidates=(
+      "${plugin_dir}/platforms/libqxcb.so"
+      "${plugin_dir}/platforms/libqminimal.so"
+      "${plugin_dir}/tls/libqopensslbackend.so"
+    )
+    for plugin_file in "${plugin_candidates[@]}"; do
+      if [[ -f "${plugin_file}" ]]; then
+        rel_dir="$(dirname "${plugin_file#${plugin_dir}/}")"
+        mkdir -p "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}"
+        cp -f "${plugin_file}" "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}/"
+      fi
+    done
+  else
+    echo "[linux] Aviso: no se encontró carpeta de plugins Qt6 del sistema."
+  fi
+
+  if command -v ldd >/dev/null 2>&1; then
+    should_skip_core_lib() {
+      case "$(basename "$1")" in
+        linux-vdso.so*|ld-linux*.so*|libc.so*|libm.so*|libpthread.so*|librt.so*|libdl.so*|libgcc_s.so*|libstdc++.so*|libresolv.so*|libnsl.so*|libutil.so*)
+          return 0
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+    }
+
+    queue_file() {
+      [[ -f "$1" ]] && printf '%s\n' "$1" >> "${BUNDLE_DIR}/qt-runtime/.dep_queue"
+    }
+
+    : > "${BUNDLE_DIR}/qt-runtime/.dep_queue"
+    : > "${BUNDLE_DIR}/qt-runtime/.dep_seen"
+
+    [[ -f "${QT_REAL_BUNDLE_PATH}" ]] && queue_file "${QT_REAL_BUNDLE_PATH}"
+    if [[ -n "${plugin_dir}" ]]; then
+      find "${BUNDLE_DIR}/qt-runtime/plugins" -type f -name '*.so' -print0 2>/dev/null | while IFS= read -r -d '' p; do
+        queue_file "${p}"
+      done
+    fi
+
+    while IFS= read -r current; do
+      [[ -n "${current}" ]] || continue
+      if grep -Fxq "${current}" "${BUNDLE_DIR}/qt-runtime/.dep_seen"; then
+        continue
+      fi
+      printf '%s\n' "${current}" >> "${BUNDLE_DIR}/qt-runtime/.dep_seen"
+
+      while IFS= read -r dep; do
+        [[ -f "${dep}" ]] || continue
+        should_skip_core_lib "${dep}" && continue
+        cp -n "${dep}" "${BUNDLE_DIR}/qt-runtime/lib/" 2>/dev/null || true
+        if [[ "${dep}" == /usr/lib/* || "${dep}" == /lib/* ]]; then
+          queue_file "${dep}"
+        fi
+      done < <(ldd "${current}" 2>/dev/null | awk '/=> \// {print $3} /^\/[^[:space:]]+[[:space:]]+\(/ {print $1}')
+    done < "${BUNDLE_DIR}/qt-runtime/.dep_queue"
+
+    rm -f "${BUNDLE_DIR}/qt-runtime/.dep_queue" "${BUNDLE_DIR}/qt-runtime/.dep_seen"
+  else
+    echo "[linux] Aviso: ldd no disponible; no se pudo calcular cierre mínimo de dependencias Qt."
+  fi
+
+  echo "[linux] Runtime Qt del sistema incluido."
+fi
 
 if [[ "${BUILD_SELF_CONTAINED}" == "1" && "${CHECK_STATIC}" == "1" ]]; then
   echo "[linux] Verifying binary is self-contained (no dynamic linker deps)..."
@@ -83,6 +205,10 @@ Autofirma Dipgra Linux
 
 Ejecutable:
   ./autofirma-desktop
+Frontend Qt:
+  ./autofirma-desktop-qt-bin
+Frontend Qt nativo (opcional, si se incluyó):
+  ./autofirma-desktop-qt-real
 Host nativo:
   ./autofirma-host
 
@@ -90,6 +216,8 @@ Notas de compilacion:
   - Modo autocontenido activo: ${BUILD_SELF_CONTAINED}
   - Build con CGO desactivado solo en modo autocontenido
   - Validacion de binario no dinamico solo en modo autocontenido
+  - Qt nativo incluido: $( [[ -n "${QT_REAL_BIN_PATH}" ]] && echo "sí" || echo "no" )
+  - Runtime Qt incluido: $( [[ -n "${QT_RUNTIME_DIR}" || "${QT_RUNTIME_FROM_SYSTEM}" == "1" ]] && echo "sí" || echo "no" )
 README
 
 # Tarball portable
@@ -115,10 +243,28 @@ cat > "${ARTIFACT_RUN}" <<'HDR'
 set -euo pipefail
 
 PREFIX="/opt/autofirma-dipgra"
-if [[ "${1:-}" == "--prefix" ]]; then
-  PREFIX="${2:-/opt/autofirma-dipgra}"
-  shift 2 || true
-fi
+PROFILE="${AUTOFIRMA_INSTALL_PERFIL:-${AUTOFIRMA_INSTALL_PROFILE:-completo}}"
+SUBPROFILE_DESKTOP="${AUTOFIRMA_SUBPERFIL_ESCRITORIO:-${AUTOFIRMA_DESKTOP_SUBPROFILE:-fyne}}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prefix)
+      PREFIX="${2:-/opt/autofirma-dipgra}"
+      shift 2 || true
+      ;;
+    --perfil|--profile)
+      PROFILE="${2:-completo}"
+      shift 2 || true
+      ;;
+    --subperfil-escritorio|--subperfil-desktop|--subperfil)
+      SUBPROFILE_DESKTOP="${2:-fyne}"
+      shift 2 || true
+      ;;
+    *)
+      echo "Uso: $0 [--prefix <ruta>] [--perfil minimo|escritorio|completo] [--subperfil-escritorio fyne|gio|qt]" >&2
+      exit 1
+      ;;
+  esac
+done
 
 SELF="$0"
 MARKER="__ARCHIVE_BELOW__"
@@ -130,9 +276,9 @@ tail -n +"$LINE" "$SELF" | tar -xz -C "$TMPDIR"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "Este instalador necesita permisos de root. Reintentando con sudo..."
-  exec sudo "$TMPDIR/install.sh" "$PREFIX"
+  exec sudo "$TMPDIR/install.sh" "$PREFIX" --perfil "$PROFILE" --subperfil-escritorio "$SUBPROFILE_DESKTOP"
 else
-  exec "$TMPDIR/install.sh" "$PREFIX"
+  exec "$TMPDIR/install.sh" "$PREFIX" --perfil "$PROFILE" --subperfil-escritorio "$SUBPROFILE_DESKTOP"
 fi
 
 exit 0

@@ -13,6 +13,9 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,7 +39,34 @@ var (
 	detailHelpFlag     = flag.Bool("ayuda-detallada", false, "Mostrar ayuda detallada en castellano y salir")
 	fyneFlag           = flag.Bool("fyne", false, "Forzar interfaz gráfica Fyne")
 	gioFlag            = flag.Bool("gio", false, "Forzar interfaz clásica Gio (compatibilidad/protocolo legado)")
+	qtFlag             = flag.Bool("qt", false, "Forzar interfaz Qt (requiere binario autofirma-desktop-qt-bin)")
+	frontendFlag       = flag.String("frontend", "", "Seleccionar interfaz de escritorio: fyne|gio|qt")
+
+	// Alias REST en castellano.
+	restModoCastFlag      = flag.Bool("servidor-rest", false, "Alias de -rest")
+	restDirCastFlag       = flag.String("direccion-rest", "", "Alias de -rest-addr")
+	restTokenCastFlag     = flag.String("token-rest", "", "Alias de -rest-token")
+	restHuellasCastFlag   = flag.String("huellas-cert-rest", "", "Alias de -rest-cert-fingerprints")
+	restSesionTTLCastFlag = flag.Duration("ttl-sesion-rest", 0, "Alias de -rest-session-ttl")
 )
+
+func applyRESTSpanishAliases() {
+	if *restModoCastFlag {
+		*restModeFlag = true
+	}
+	if v := strings.TrimSpace(*restDirCastFlag); v != "" {
+		*restAddrFlag = v
+	}
+	if v := strings.TrimSpace(*restTokenCastFlag); v != "" {
+		*restTokenFlag = v
+	}
+	if v := strings.TrimSpace(*restHuellasCastFlag); v != "" {
+		*restCertFPFlag = v
+	}
+	if *restSesionTTLCastFlag > 0 {
+		*restSessionTTLFlag = *restSesionTTLCastFlag
+	}
+}
 
 func main() {
 	flag.Usage = func() {
@@ -45,6 +75,7 @@ func main() {
 
 	// Parse command-line flags
 	flag.Parse()
+	applyRESTSpanishAliases()
 
 	if *versionFlag {
 		fmt.Printf("AutoFirma Dipgra %s\n", version.CurrentVersion)
@@ -144,7 +175,33 @@ func main() {
 	// UI mode selection:
 	// - Fyne es el modo por defecto para uso interactivo y protocolario.
 	// - Gio queda disponible como fallback explícito con -gio.
+	// - Qt se activa con -qt o -frontend qt, delegando a binario dedicado.
 	protocolArg := firstAfirmaProtocolArg(os.Args[1:])
+	switch strings.ToLower(strings.TrimSpace(*frontendFlag)) {
+	case "":
+	case "fyne":
+		*fyneFlag = true
+		*gioFlag = false
+		*qtFlag = false
+	case "gio":
+		*gioFlag = true
+		*fyneFlag = false
+		*qtFlag = false
+	case "qt":
+		*qtFlag = true
+		*fyneFlag = false
+		*gioFlag = false
+	default:
+		log.Printf("frontend no soportado: %s (use fyne|gio|qt)", strings.TrimSpace(*frontendFlag))
+		os.Exit(1)
+	}
+	if *qtFlag {
+		if err := runQtFrontend(protocolArg); err != nil {
+			log.Printf("No se pudo iniciar frontend Qt: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 	useFyne := *fyneFlag || !*gioFlag
 	if useFyne {
 		log.Println("Arrancando en modo Fyne")
@@ -181,6 +238,80 @@ func main() {
 	app.Main()
 }
 
+func runQtFrontend(protocolArg string) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exeDir := filepath.Dir(exePath)
+	candidates := executableCandidates(exeDir, "autofirma-desktop-qt-bin")
+	candidates = append(candidates, "autofirma-desktop-qt-bin")
+	qtBin := ""
+	for _, c := range candidates {
+		if strings.ContainsRune(c, filepath.Separator) {
+			if st, err := os.Stat(c); err == nil && !st.IsDir() {
+				qtBin = c
+				break
+			}
+			continue
+		}
+		if p, err := exec.LookPath(c); err == nil {
+			qtBin = p
+			break
+		}
+	}
+	if qtBin == "" {
+		return fmt.Errorf("autofirma-desktop-qt-bin no encontrado")
+	}
+
+	args := make([]string, 0, len(os.Args)-1)
+	skipNext := false
+	for _, a := range os.Args[1:] {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		la := strings.ToLower(strings.TrimSpace(a))
+		if la == "-qt" || la == "--qt" || la == "-fyne" || la == "--fyne" || la == "-gio" || la == "--gio" {
+			continue
+		}
+		if la == "-frontend" || la == "--frontend" {
+			skipNext = true
+			continue
+		}
+		if strings.HasPrefix(la, "-frontend=") || strings.HasPrefix(la, "--frontend=") {
+			continue
+		}
+		args = append(args, a)
+	}
+	if protocolArg != "" {
+		found := false
+		for _, a := range args {
+			if a == protocolArg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			args = append(args, protocolArg)
+		}
+	}
+
+	cmd := exec.Command(qtBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func executableCandidates(baseDir, baseName string) []string {
+	candidates := []string{filepath.Join(baseDir, baseName)}
+	if runtime.GOOS == "windows" {
+		candidates = append(candidates, filepath.Join(baseDir, baseName+".exe"))
+	}
+	return candidates
+}
+
 func writeSpanishFlagUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintf(out, "Uso de %s:\n", program)
 	flag.CommandLine.SetOutput(out)
@@ -207,6 +338,7 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "  -rest [-rest-token <token>] [-rest-cert-fingerprints <sha256,sha256>] [-rest-session-ttl 10m]")
 	_, _ = fmt.Fprintln(out, "    Inicia API REST local con token y/o login por certificado (reto firmado).")
 	_, _ = fmt.Fprintln(out, "    Endpoints protegidos: /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs.")
+	_, _ = fmt.Fprintln(out, "    Alias castellano: -servidor-rest [-token-rest <token>] [-huellas-cert-rest <sha256,sha256>] [-ttl-sesion-rest 10m] [-direccion-rest 127.0.0.1:63118].")
 	_, _ = fmt.Fprintln(out, "  -version")
 	_, _ = fmt.Fprintln(out, "    Muestra la versión actual del binario.")
 	_, _ = fmt.Fprintln(out, "  -ayuda-detallada")
@@ -215,6 +347,10 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "    Fuerza el arranque con la interfaz Fyne (por defecto en modo interactivo).")
 	_, _ = fmt.Fprintln(out, "  -gio")
 	_, _ = fmt.Fprintln(out, "    Fuerza la interfaz clásica Gio (compatibilidad para flujos protocolarios legados).")
+	_, _ = fmt.Fprintln(out, "  -qt")
+	_, _ = fmt.Fprintln(out, "    Fuerza el arranque con la interfaz Qt (requiere binario adicional).")
+	_, _ = fmt.Fprintln(out, "  -frontend fyne|gio|qt")
+	_, _ = fmt.Fprintln(out, "    Selecciona explícitamente el frontend de escritorio.")
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "Opciones de modo CLI (sin interfaz):")
 	var cliHelp strings.Builder

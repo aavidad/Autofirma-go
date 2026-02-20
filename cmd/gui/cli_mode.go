@@ -39,9 +39,155 @@ var (
 	cliSealYFlag             = flag.Float64("seal-y", 0.04, "Y normalizada (0..1) del sello visible")
 	cliSealWFlag             = flag.Float64("seal-w", 0.34, "Ancho normalizado (0..1) del sello visible")
 	cliSealHFlag             = flag.Float64("seal-h", 0.12, "Alto normalizado (0..1) del sello visible")
+	cliSealLayoutFlag        = flag.String("seal-layout", "manual", "Layout del sello visible: manual|footer")
+	cliSealFooterMarginFlag  = flag.Float64("seal-footer-margin", 0.02, "Margen normalizado (0..1) para layout footer")
+	cliDomainFlag            = flag.String("domain", "", "Dominio para operaciones de confianza (domains-add/domains-remove)")
+
+	// Alias en castellano (compatibles con flags existentes).
+	cliModoFlag                = flag.Bool("modo-cli", false, "Alias de -cli")
+	cliAyudaFlag               = flag.Bool("ayuda-cli", false, "Alias de -cli-help")
+	cliOperacionFlag           = flag.String("operacion", "", "Alias de -op")
+	cliEntradaFlag             = flag.String("entrada", "", "Alias de -in")
+	cliSalidaFlag              = flag.String("salida", "", "Alias de -out")
+	cliFormatoFlag             = flag.String("formato", "", "Alias de -format")
+	cliCertIDCastFlag          = flag.String("id-certificado", "", "Alias de -cert-id")
+	cliCertIndiceFlag          = flag.Int("indice-certificado", -1, "Alias de -cert-index")
+	cliCertContieneFlag        = flag.String("certificado-contiene", "", "Alias de -cert-contains")
+	cliListarCertsFlag         = flag.Bool("listar-certificados", false, "Alias de -list-certs")
+	cliComprobarCertsFlag      = flag.Bool("comprobar-certificados", false, "Alias de -check-certs")
+	cliSalidaJSONFlag          = flag.Bool("salida-json", false, "Alias de -json")
+	cliNoGuardarFlag           = flag.Bool("no-guardar", false, "Alias de -no-save")
+	cliImprimirFirmaFlag       = flag.Bool("imprimir-firma", false, "Alias de -print-signature")
+	cliPermitirPDFInvalidoFlag = flag.Bool("permitir-pdf-invalido", false, "Alias de -allow-invalid-pdf")
+	cliCompatibilidadEstricta  = flag.Bool("compatibilidad-estricta", false, "Alias de -strict-compat")
+	cliSobrescribirFlag        = flag.String("sobrescribir", "", "Alias de -overwrite")
+	cliSelloVisibleFlag        = flag.Bool("sello-visible", false, "Alias de -visible-seal")
+	cliSelloPaginaFlag         = flag.Uint("sello-pagina", 0, "Alias de -seal-page")
+	cliSelloXFlag              = flag.Float64("sello-x", -1, "Alias de -seal-x")
+	cliSelloYFlag              = flag.Float64("sello-y", -1, "Alias de -seal-y")
+	cliSelloWFlag              = flag.Float64("sello-ancho", -1, "Alias de -seal-w")
+	cliSelloHFlag              = flag.Float64("sello-alto", -1, "Alias de -seal-h")
+	cliDisposicionSelloFlag    = flag.String("disposicion-sello", "", "Alias de -seal-layout")
+	cliMargenInferiorSelloFlag = flag.Float64("margen-inferior-sello", -1, "Alias de -seal-footer-margin")
+	cliDominioFlagCast         = flag.String("dominio", "", "Alias de -domain")
 )
 
+func applyCLISpanishAliases() {
+	if *cliModoFlag {
+		*cliModeFlag = true
+	}
+	if *cliAyudaFlag {
+		*cliHelpFlag = true
+	}
+	if v := strings.TrimSpace(*cliOperacionFlag); v != "" {
+		*cliOperationFlag = v
+	}
+	if v := strings.TrimSpace(*cliEntradaFlag); v != "" {
+		*cliInputFlag = v
+	}
+	if v := strings.TrimSpace(*cliSalidaFlag); v != "" {
+		*cliOutputFlag = v
+	}
+	if v := strings.TrimSpace(*cliFormatoFlag); v != "" {
+		*cliFormatFlag = v
+	}
+	if v := strings.TrimSpace(*cliCertIDCastFlag); v != "" {
+		*cliCertIDFlag = v
+	}
+	if *cliCertIndiceFlag >= 0 {
+		*cliCertIndexFlag = *cliCertIndiceFlag
+	}
+	if v := strings.TrimSpace(*cliCertContieneFlag); v != "" {
+		*cliCertContainsFlag = v
+	}
+	if *cliListarCertsFlag {
+		*cliListCertsFlag = true
+	}
+	if *cliComprobarCertsFlag {
+		*cliCheckCertsFlag = true
+	}
+	if *cliSalidaJSONFlag {
+		*cliJSONFlag = true
+	}
+	if *cliNoGuardarFlag {
+		*cliNoSaveFlag = true
+	}
+	if *cliImprimirFirmaFlag {
+		*cliPrintSignatureB64Flag = true
+	}
+	if *cliPermitirPDFInvalidoFlag {
+		*cliAllowInvalidPDFFlag = true
+	}
+	if *cliCompatibilidadEstricta {
+		*cliStrictCompatFlag = true
+	}
+	if v := strings.TrimSpace(*cliSobrescribirFlag); v != "" {
+		*cliOverwriteFlag = v
+	}
+	if *cliSelloVisibleFlag {
+		*cliVisibleSealFlag = true
+	}
+	if *cliSelloPaginaFlag > 0 {
+		*cliSealPageFlag = *cliSelloPaginaFlag
+	}
+	if *cliSelloXFlag >= 0 {
+		*cliSealXFlag = *cliSelloXFlag
+	}
+	if *cliSelloYFlag >= 0 {
+		*cliSealYFlag = *cliSelloYFlag
+	}
+	if *cliSelloWFlag >= 0 {
+		*cliSealWFlag = *cliSelloWFlag
+	}
+	if *cliSelloHFlag >= 0 {
+		*cliSealHFlag = *cliSelloHFlag
+	}
+	if v := strings.TrimSpace(*cliDisposicionSelloFlag); v != "" {
+		*cliSealLayoutFlag = v
+	}
+	if *cliMargenInferiorSelloFlag >= 0 {
+		*cliSealFooterMarginFlag = *cliMargenInferiorSelloFlag
+	}
+	if v := strings.TrimSpace(*cliDominioFlagCast); v != "" {
+		*cliDomainFlag = v
+	}
+}
+
+func normalizeCLIOperation(op string) string {
+	switch strings.ToLower(strings.TrimSpace(op)) {
+	case "firmar":
+		return "sign"
+	case "cofirmar":
+		return "cosign"
+	case "contrafirmar":
+		return "countersign"
+	case "verificar":
+		return "verify"
+	case "informe-diagnostico":
+		return "diagnostics-report"
+	case "listar-dominios":
+		return "domains-list"
+	case "anadir-dominio", "añadir-dominio":
+		return "domains-add"
+	case "eliminar-dominio":
+		return "domains-remove"
+	case "estado-almacen-tls":
+		return "tls-store-status"
+	case "limpiar-almacen-tls":
+		return "tls-store-clear"
+	case "estado-confianza-tls":
+		return "tls-trust-status"
+	case "generar-certificados-tls":
+		return "tls-generate-certs"
+	case "instalar-confianza-tls":
+		return "tls-install-trust"
+	default:
+		return strings.ToLower(strings.TrimSpace(op))
+	}
+}
+
 func isCLIModeRequested() bool {
+	applyCLISpanishAliases()
 	if *cliModeFlag || *cliHelpFlag {
 		return true
 	}
@@ -52,6 +198,7 @@ func isCLIModeRequested() bool {
 }
 
 func runCLIMode() error {
+	applyCLISpanishAliases()
 	if *cliHelpFlag {
 		writeCLIHelp(os.Stdout, os.Args[0])
 		return nil
@@ -83,7 +230,7 @@ func runCLIMode() error {
 		}
 	}
 
-	op := strings.ToLower(strings.TrimSpace(*cliOperationFlag))
+	op := normalizeCLIOperation(*cliOperationFlag)
 	if op == "" {
 		return nil
 	}
@@ -91,11 +238,179 @@ func runCLIMode() error {
 	switch op {
 	case "verify":
 		return runCLIVerify(core)
+	case "diagnostics-report":
+		return runCLIDiagnosticsReport(core)
+	case "domains-list":
+		return runCLIDomainsList()
+	case "domains-add":
+		return runCLIDomainsAdd()
+	case "domains-remove":
+		return runCLIDomainsRemove()
+	case "tls-store-status":
+		return runCLITLSStoreStatus()
+	case "tls-store-clear":
+		return runCLITLSStoreClear()
+	case "tls-trust-status":
+		return runCLITLSTrustStatus()
+	case "tls-generate-certs":
+		return runCLITLSGenerateCerts()
+	case "tls-install-trust":
+		return runCLITLSInstallTrust()
 	case "sign", "cosign", "countersign":
 		return runCLISign(core, certs, op)
 	default:
-		return fmt.Errorf("operación no soportada en CLI: %s (use sign|cosign|countersign|verify)", op)
+		return fmt.Errorf("operación no soportada en CLI: %s", op)
 	}
+}
+
+func runCLIDiagnosticsReport(core *CoreService) error {
+	certs, err := core.LoadCertificates()
+	if err != nil {
+		return err
+	}
+	certs, _, _ = core.CheckCertificates(certs)
+	canSign := 0
+	for _, c := range certs {
+		if c.CanSign {
+			canSign++
+		}
+	}
+	storeDir, storeCount := endpointTrustStoreStatus()
+	trustLines, trustErr := localTLSTrustStatus()
+	out := map[string]interface{}{
+		"ok":                 true,
+		"certificateCount":   len(certs),
+		"canSignCount":       canSign,
+		"trustedDomains":     trustedSigningDomainsSnapshot(),
+		"endpointStoreDir":   storeDir,
+		"endpointStoreCount": storeCount,
+		"trustStatusLines":   trustLines,
+	}
+	if trustErr != nil {
+		out["trustStatusError"] = trustErr.Error()
+	}
+	if *cliJSONFlag {
+		return writeJSONOut(out)
+	}
+	fmt.Printf("Certificados: %d (aptos para firma: %d)\n", len(certs), canSign)
+	fmt.Printf("Dominios confiados: %v\n", trustedSigningDomainsSnapshot())
+	fmt.Printf("TLS endpoint store: %s (certificados=%d)\n", storeDir, storeCount)
+	for _, line := range trustLines {
+		fmt.Println(line)
+	}
+	if trustErr != nil {
+		fmt.Printf("Error trust-status: %v\n", trustErr)
+	}
+	return nil
+}
+
+func runCLIDomainsList() error {
+	domains := trustedSigningDomainsSnapshot()
+	if *cliJSONFlag {
+		return writeJSONOut(map[string]interface{}{"ok": true, "domains": domains})
+	}
+	if len(domains) == 0 {
+		fmt.Println("No hay dominios confiados.")
+		return nil
+	}
+	for _, d := range domains {
+		fmt.Println(d)
+	}
+	return nil
+}
+
+func runCLIDomainsAdd() error {
+	d := strings.TrimSpace(*cliDomainFlag)
+	if d == "" {
+		return fmt.Errorf("debe indicar -domain o -dominio para domains-add")
+	}
+	if err := addTrustedSigningDomain(d); err != nil {
+		return err
+	}
+	return runCLIDomainsList()
+}
+
+func runCLIDomainsRemove() error {
+	d := strings.TrimSpace(*cliDomainFlag)
+	if d == "" {
+		return fmt.Errorf("debe indicar -domain o -dominio para domains-remove")
+	}
+	if err := removeTrustedSigningDomain(d); err != nil {
+		return err
+	}
+	return runCLIDomainsList()
+}
+
+func runCLITLSStoreStatus() error {
+	dir, count := endpointTrustStoreStatus()
+	if *cliJSONFlag {
+		return writeJSONOut(map[string]interface{}{"ok": true, "endpointStoreDir": dir, "endpointStoreCount": count})
+	}
+	fmt.Printf("TLS endpoint store: %s (certificados=%d)\n", dir, count)
+	return nil
+}
+
+func runCLITLSStoreClear() error {
+	removed, err := clearEndpointTrustStore()
+	if err != nil {
+		return err
+	}
+	dir, count := endpointTrustStoreStatus()
+	if *cliJSONFlag {
+		return writeJSONOut(map[string]interface{}{
+			"ok":                 true,
+			"removed":            removed,
+			"endpointStoreDir":   dir,
+			"endpointStoreCount": count,
+		})
+	}
+	fmt.Printf("TLS endpoint store limpiado. Eliminados=%d. Estado actual: %s (certificados=%d)\n", removed, dir, count)
+	return nil
+}
+
+func runCLITLSTrustStatus() error {
+	lines, err := localTLSTrustStatus()
+	if *cliJSONFlag {
+		out := map[string]interface{}{"ok": err == nil, "lines": lines}
+		if err != nil {
+			out["error"] = err.Error()
+		}
+		return writeJSONOut(out)
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+	return err
+}
+
+func runCLITLSGenerateCerts() error {
+	certFile, keyFile, err := ensureLocalTLSCerts()
+	if err != nil {
+		return err
+	}
+	if *cliJSONFlag {
+		return writeJSONOut(map[string]interface{}{"ok": true, "certFile": certFile, "keyFile": keyFile})
+	}
+	fmt.Printf("Certificados generados/listos:\ncert=%s\nkey=%s\n", certFile, keyFile)
+	return nil
+}
+
+func runCLITLSInstallTrust() error {
+	if _, _, err := ensureLocalTLSCerts(); err != nil {
+		return err
+	}
+	lines, err := installLocalTLSTrust()
+	if *cliJSONFlag {
+		out := map[string]interface{}{"ok": err == nil, "lines": lines}
+		if err != nil {
+			out["error"] = err.Error()
+		}
+		return writeJSONOut(out)
+	}
+	for _, line := range lines {
+		fmt.Println(line)
+	}
+	return err
 }
 
 func runCLIVerify(core *CoreService) error {
@@ -212,10 +527,24 @@ func buildCLISignOptions(rawFormat string, inputPath string) map[string]interfac
 	}
 	if *cliVisibleSealFlag && format == "pades" {
 		opts["visibleSeal"] = true
-		opts["visibleSealRectX"] = clamp01(*cliSealXFlag) * 595.28
-		opts["visibleSealRectY"] = clamp01(*cliSealYFlag) * 841.89
-		opts["visibleSealRectW"] = clamp01(*cliSealWFlag) * 595.28
-		opts["visibleSealRectH"] = clamp01(*cliSealHFlag) * 841.89
+		x := clamp01(*cliSealXFlag)
+		y := clamp01(*cliSealYFlag)
+		w := clamp01(*cliSealWFlag)
+		h := clamp01(*cliSealHFlag)
+		if strings.EqualFold(strings.TrimSpace(*cliSealLayoutFlag), "footer") {
+			m := clamp01(*cliSealFooterMarginFlag)
+			if m > 0.2 {
+				m = 0.2
+			}
+			x = m
+			y = m
+			w = 1.0 - (2.0 * m)
+			h = 0.10
+		}
+		opts["visibleSealRectX"] = x * 595.28
+		opts["visibleSealRectY"] = y * 841.89
+		opts["visibleSealRectW"] = w * 595.28
+		opts["visibleSealRectH"] = h * 841.89
 		page := uint32(*cliSealPageFlag)
 		if page == 0 {
 			page = 1
@@ -330,31 +659,57 @@ func writeJSONOut(v interface{}) error {
 func appendCLIDetailedUsage(out *strings.Builder) {
 	out.WriteString("  -cli-help\n")
 	out.WriteString("    Muestra ayuda CLI específica con ejemplos.\n")
+	out.WriteString("  -ayuda-cli\n")
+	out.WriteString("    Alias castellano de -cli-help.\n")
 	out.WriteString("  -cli\n")
 	out.WriteString("    Ejecuta en modo línea de comandos sin abrir interfaz gráfica.\n")
+	out.WriteString("  -modo-cli\n")
+	out.WriteString("    Alias castellano de -cli.\n")
 	out.WriteString("  -list-certs [-check-certs] [-json]\n")
 	out.WriteString("    Lista certificados. Con -check-certs prueba firma CAdES de capacidad.\n")
 	out.WriteString("  -op sign|cosign|countersign -in <fichero> (-cert-id <id> | -cert-index <n> | -cert-contains <texto>)\n")
 	out.WriteString("    Firma en CLI. Si no se indica certificado, usa el primero disponible.\n")
+	out.WriteString("    Alias castellano: -operacion firmar|cofirmar|contrafirmar -entrada <fichero> (-id-certificado|-indice-certificado|-certificado-contiene).\n")
 	out.WriteString("  -op verify -in <fichero>\n")
 	out.WriteString("    Verifica firma en CLI.\n")
+	out.WriteString("    Alias castellano: -operacion verificar -entrada <fichero>.\n")
+	out.WriteString("  -op diagnostics-report\n")
+	out.WriteString("    Resumen técnico sin GUI: certificados, trust TLS y dominios confiados.\n")
+	out.WriteString("    Alias castellano: -operacion informe-diagnostico.\n")
+	out.WriteString("  -op domains-list | domains-add -domain <host> | domains-remove -domain <host>\n")
+	out.WriteString("    Gestiona whitelist de dominios de firma confiados.\n")
+	out.WriteString("    Alias castellano: listar-dominios | anadir-dominio -dominio <host> | eliminar-dominio -dominio <host>.\n")
+	out.WriteString("  -op tls-store-status | tls-store-clear | tls-trust-status | tls-generate-certs | tls-install-trust\n")
+	out.WriteString("    Gestión no gráfica de certificados y confianza TLS local.\n")
+	out.WriteString("    Alias castellano: estado-almacen-tls | limpiar-almacen-tls | estado-confianza-tls | generar-certificados-tls | instalar-confianza-tls.\n")
 	out.WriteString("  -out <ruta> | -no-save | -print-signature\n")
 	out.WriteString("    Controla salida firmada en disco y/o firma Base64 por stdout.\n")
+	out.WriteString("    Alias castellano: -salida <ruta> | -no-guardar | -imprimir-firma.\n")
 	out.WriteString("  -overwrite fail|rename|force\n")
 	out.WriteString("    Política al existir salida en disco.\n")
+	out.WriteString("    Alias castellano: -sobrescribir.\n")
 	out.WriteString("  -format auto|pades|cades|xades\n")
 	out.WriteString("    Fuerza formato de firma/verificación.\n")
+	out.WriteString("    Alias castellano: -formato.\n")
 	out.WriteString("  -strict-compat\n")
 	out.WriteString("    Aplica defaults Java: algorithm/mode/signatureSubFilter.\n")
+	out.WriteString("    Alias castellano: -compatibilidad-estricta.\n")
 	out.WriteString("  -allow-invalid-pdf\n")
 	out.WriteString("    Permite PDF no válido en PAdES.\n")
+	out.WriteString("    Alias castellano: -permitir-pdf-invalido.\n")
 	out.WriteString("  -visible-seal [-seal-page N -seal-x X -seal-y Y -seal-w W -seal-h H]\n")
 	out.WriteString("    Firma visible en PAdES con coordenadas normalizadas (0..1).\n")
+	out.WriteString("    Alias castellano: -sello-visible [-sello-pagina N -sello-x X -sello-y Y -sello-ancho W -sello-alto H].\n")
+	out.WriteString("  -seal-layout manual|footer [-seal-footer-margin M]\n")
+	out.WriteString("    footer coloca la firma automáticamente abajo del todo.\n")
+	out.WriteString("    Alias castellano: -disposicion-sello manual|footer [-margen-inferior-sello M].\n")
 	out.WriteString("  -json\n")
 	out.WriteString("    Salida estructurada en JSON para automatizaciones.\n")
+	out.WriteString("    Alias castellano: -salida-json.\n")
 	out.WriteString("  -rest -rest-addr -rest-token -rest-cert-fingerprints -rest-session-ttl\n")
 	out.WriteString("    Modo servidor REST local con autenticación por token y/o certificado.\n")
 	out.WriteString("    Endpoints protegidos: /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs.\n")
+	out.WriteString("    Alias castellano: -servidor-rest -direccion-rest -token-rest -huellas-cert-rest -ttl-sesion-rest.\n")
 }
 
 func writeCLIHelp(out io.Writer, program string) {
@@ -373,10 +728,17 @@ func writeCLIHelp(out io.Writer, program string) {
 	_, _ = fmt.Fprintf(out, "  %s -cli -op sign -in /ruta/entrada.pdf -cert-index 0 -visible-seal -seal-page 1 -seal-x 0.62 -seal-y 0.04 -seal-w 0.34 -seal-h 0.12\n", program)
 	_, _ = fmt.Fprintf(out, "  %s -cli -op verify -in /ruta/firmado.pdf\n", program)
 	_, _ = fmt.Fprintf(out, "  %s -cli -op sign -in /ruta/entrada.pdf -cert-index 0 -no-save -print-signature -json\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -cli -op sign -in /ruta/entrada.pdf -cert-index 0 -visible-seal -seal-layout footer\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -cli -op diagnostics-report -json\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -cli -op domains-add -domain firma.ejemplo.gob.es\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -cli -op tls-trust-status\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -modo-cli -operacion firmar -entrada /ruta/entrada.pdf -indice-certificado 0 -formato pades\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -modo-cli -operacion informe-diagnostico -salida-json\n", program)
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "Modo REST (API local + consola web):")
 	_, _ = fmt.Fprintf(out, "  %s -rest -rest-addr 127.0.0.1:63118 -rest-token secreto\n", program)
 	_, _ = fmt.Fprintf(out, "  %s -rest -rest-addr 127.0.0.1:63118 -rest-cert-fingerprints <sha256>\n", program)
+	_, _ = fmt.Fprintf(out, "  %s -servidor-rest -direccion-rest 127.0.0.1:63118 -token-rest secreto\n", program)
 	_, _ = fmt.Fprintln(out, "")
 	_, _ = fmt.Fprintln(out, "Flujo de autenticación por certificado (challenge/verify):")
 	_, _ = fmt.Fprintln(out, "  1) Obtener reto: GET /auth/challenge")

@@ -19,6 +19,8 @@ APP_VERSION="${APP_VERSION:-${DEFAULT_APP_VERSION}}"
 UPDATE_JSON_URL="${UPDATE_JSON_URL:-https://autofirma.dipgra.es/version.json}"
 GUI_CMD_PKG="${GUI_CMD_PKG:-}"
 PREBUILT_EXE="${PREBUILT_EXE:-}"
+PREBUILT_QT_EXE="${PREBUILT_QT_EXE:-}"
+QT_REAL_EXE="${QT_REAL_EXE:-}"
 
 if ! command -v makensis >/dev/null 2>&1; then
   echo "[windows] Error: 'makensis' no esta instalado o no esta en PATH."
@@ -80,6 +82,31 @@ if [[ -f "${ROOT_DIR}/packaging/windows/certs/fnmt-accomp.crt" ]]; then
   cp -f "${ROOT_DIR}/packaging/windows/certs/fnmt-accomp.crt" "${BUNDLE_DIR}/certs/fnmt-accomp.crt"
 else
   echo "[windows] Warning: cert file not found at packaging/windows/certs/fnmt-accomp.crt"
+fi
+
+if [[ -n "${PREBUILT_QT_EXE}" ]]; then
+  if [[ ! -f "${PREBUILT_QT_EXE}" ]]; then
+    echo "[windows] Error: PREBUILT_QT_EXE no existe: ${PREBUILT_QT_EXE}"
+    exit 1
+  fi
+  echo "[windows] Using prebuilt Qt wrapper executable: ${PREBUILT_QT_EXE}"
+  cp -f "${PREBUILT_QT_EXE}" "${BUNDLE_DIR}/autofirma-desktop-qt-bin.exe"
+else
+  echo "[windows] Building Qt wrapper binary..."
+  (
+    cd "${ROOT_DIR}"
+    GOCACHE=/tmp/gocache GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+      go build -ldflags="-H=windowsgui" -o "${BUNDLE_DIR}/autofirma-desktop-qt-bin.exe" ./cmd/qt
+  )
+fi
+
+if [[ -n "${QT_REAL_EXE}" ]]; then
+  if [[ ! -f "${QT_REAL_EXE}" ]]; then
+    echo "[windows] Error: QT_REAL_EXE no existe: ${QT_REAL_EXE}"
+    exit 1
+  fi
+  cp -f "${QT_REAL_EXE}" "${BUNDLE_DIR}/autofirma-desktop-qt-real.exe"
+  echo "[windows] Frontend Qt nativo incluido: ${QT_REAL_EXE}"
 fi
 
 echo "[windows] Building NSIS installer..."

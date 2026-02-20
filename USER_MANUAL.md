@@ -103,3 +103,72 @@ Cuando abra incidencia:
 1. Incluya hora exacta de la prueba.
 2. Adjunte log reciente de `~/.local/state/autofirma-dipgra/logs/` (Linux) o ruta equivalente en su SO.
 3. Adjunte reporte de diagnostico exportado desde la app.
+
+## 11. Opciones sin interfaz (CLI/REST)
+Puede operar sin entorno grafico con parametros en castellano.
+
+### CLI en castellano
+- Activar modo CLI: `-modo-cli` (alias de `-cli`).
+- Ayuda CLI: `-ayuda-cli` (alias de `-cli-help`).
+- Operacion: `-operacion`.
+  - Valores de firma: `firmar`, `cofirmar`, `contrafirmar`, `verificar`.
+  - Valores de soporte: `informe-diagnostico`, `listar-dominios`, `anadir-dominio`, `eliminar-dominio`, `estado-almacen-tls`, `limpiar-almacen-tls`, `estado-confianza-tls`, `generar-certificados-tls`, `instalar-confianza-tls`.
+- Entrada/salida: `-entrada`, `-salida`.
+- Certificado: `-id-certificado`, `-indice-certificado`, `-certificado-contiene`.
+- Listado/comprobacion: `-listar-certificados`, `-comprobar-certificados`.
+- JSON: `-salida-json`.
+- Firma visible PAdES: `-sello-visible`, `-sello-pagina`, `-sello-x`, `-sello-y`, `-sello-ancho`, `-sello-alto`, `-disposicion-sello`, `-margen-inferior-sello`.
+
+Ejemplo:
+`autofirma-desktop -modo-cli -operacion firmar -entrada /ruta/doc.pdf -indice-certificado 0 -formato pades -sello-visible -disposicion-sello footer`
+
+### REST en castellano
+- Activar servidor REST: `-servidor-rest` (alias de `-rest`).
+- Direccion: `-direccion-rest` (alias de `-rest-addr`).
+- Token: `-token-rest` (alias de `-rest-token`).
+- Lista blanca de huellas: `-huellas-cert-rest` (alias de `-rest-cert-fingerprints`).
+- TTL de sesión: `-ttl-sesion-rest` (alias de `-rest-session-ttl`).
+
+Ejemplo:
+`autofirma-desktop -servidor-rest -direccion-rest 127.0.0.1:63118 -token-rest secreto`
+
+## 12. Perfiles de instalación (Linux)
+El instalador Linux soporta perfiles para ajustar tamaño/funcionalidad instalada:
+
+- `completo` (por defecto):
+  - Instala todo.
+  - Incluye integración de escritorio, protocolo `afirma://` y registro Native Messaging.
+- `escritorio`:
+  - Instala app de escritorio e integración `afirma://`.
+  - No registra Native Messaging de navegador.
+- `minimo`:
+  - Instala binarios para uso CLI/REST.
+  - No crea accesos de escritorio ni handler `afirma://`.
+  - No registra Native Messaging.
+
+Subperfiles de escritorio (solo en `escritorio` y `completo`):
+- `fyne` (predeterminado)
+- `gio`
+- `qt`
+
+Detalle del subperfil `qt`:
+- Usa el binario `autofirma-desktop-qt-bin`.
+- Para frontend Qt nativo real, configure `AUTOFIRMA_QT_BIN_REAL=/ruta/autofirma-desktop-qt-real`.
+- Si no existe binario Qt nativo, el instalador habilita fallback temporal a Fyne para mantener operatividad.
+- En empaquetado Linux puede incluirse el binario Qt nativo con:
+  `QT_REAL_BIN_PATH=/ruta/autofirma-desktop-qt-real BUILD_SELF_CONTAINED=0 ./packaging/linux/make_linux_release.sh`
+
+Parámetro:
+- `--subperfil-escritorio fyne|gio|qt`
+
+Lanzadores creados por el instalador:
+- `autofirma-dipgra-fyne`
+- `autofirma-dipgra-gio`
+- `autofirma-dipgra-qt`
+- `autofirma-dipgra` (usa el subperfil elegido para el acceso principal)
+
+Ejemplos:
+- `./AutofirmaDipgra-linux-installer.run --perfil completo`
+- `./AutofirmaDipgra-linux-installer.run --perfil escritorio`
+- `./AutofirmaDipgra-linux-installer.run --perfil minimo`
+- `./AutofirmaDipgra-linux-installer.run --perfil escritorio --subperfil-escritorio qt`

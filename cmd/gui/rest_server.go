@@ -77,19 +77,32 @@ type restSignVisibleSeal struct {
 }
 
 type restSignRequest struct {
-	InputPath           string               `json:"inputPath"`
-	OutputPath          string               `json:"outputPath"`
-	CertificateID       string               `json:"certificateId"`
-	CertificateIndex    int                  `json:"certificateIndex"`
-	CertificateContains string               `json:"certificateContains"`
-	Action              string               `json:"action"`
-	Format              string               `json:"format"`
-	AllowInvalidPDF     bool                 `json:"allowInvalidPDF"`
-	StrictCompat        bool                 `json:"strictCompat"`
-	Overwrite           string               `json:"overwrite"`
-	SaveToDisk          *bool                `json:"saveToDisk"`
-	ReturnSignatureB64  bool                 `json:"returnSignatureB64"`
-	VisibleSeal         *restSignVisibleSeal `json:"visibleSeal"`
+	InputPath             string               `json:"inputPath"`
+	InputPathES           string               `json:"rutaEntrada"`
+	OutputPath            string               `json:"outputPath"`
+	OutputPathES          string               `json:"rutaSalida"`
+	CertificateID         string               `json:"certificateId"`
+	CertificateIDES       string               `json:"idCertificado"`
+	CertificateIndex      int                  `json:"certificateIndex"`
+	CertificateIndexES    int                  `json:"indiceCertificado"`
+	CertificateContains   string               `json:"certificateContains"`
+	CertificateContainsES string               `json:"certificadoContiene"`
+	Action                string               `json:"action"`
+	ActionES              string               `json:"accion"`
+	Format                string               `json:"format"`
+	FormatES              string               `json:"formato"`
+	AllowInvalidPDF       bool                 `json:"allowInvalidPDF"`
+	AllowInvalidPDFES     bool                 `json:"permitirPDFInvalido"`
+	StrictCompat          bool                 `json:"strictCompat"`
+	StrictCompatES        bool                 `json:"compatibilidadEstricta"`
+	Overwrite             string               `json:"overwrite"`
+	OverwriteES           string               `json:"sobrescribir"`
+	SaveToDisk            *bool                `json:"saveToDisk"`
+	SaveToDiskES          *bool                `json:"guardarEnDisco"`
+	ReturnSignatureB64    bool                 `json:"returnSignatureB64"`
+	ReturnSignatureB64ES  bool                 `json:"devolverFirmaB64"`
+	VisibleSeal           *restSignVisibleSeal `json:"visibleSeal"`
+	VisibleSealES         *restSignVisibleSeal `json:"selloVisible"`
 }
 
 type restSignResponse struct {
@@ -104,10 +117,14 @@ type restSignResponse struct {
 }
 
 type restVerifyRequest struct {
-	InputPath     string `json:"inputPath"`
-	SignaturePath string `json:"signaturePath"`
-	OriginalPath  string `json:"originalPath"`
-	Format        string `json:"format"`
+	InputPath       string `json:"inputPath"`
+	InputPathES     string `json:"rutaEntrada"`
+	SignaturePath   string `json:"signaturePath"`
+	SignaturePathES string `json:"rutaFirma"`
+	OriginalPath    string `json:"originalPath"`
+	OriginalPathES  string `json:"rutaOriginal"`
+	Format          string `json:"format"`
+	FormatES        string `json:"formato"`
 }
 
 type restVerifyResponse struct {
@@ -140,7 +157,8 @@ type restTrustedDomainsResponse struct {
 }
 
 type restDomainUpdateRequest struct {
-	Domain string `json:"domain"`
+	Domain   string `json:"domain"`
+	DomainES string `json:"dominio"`
 }
 
 type restTLSClearStoreResponse struct {
@@ -177,10 +195,14 @@ type restChallengeResponse struct {
 }
 
 type restAuthVerifyRequest struct {
-	ChallengeID    string `json:"challengeId"`
-	SignatureB64   string `json:"signatureB64"`
-	CertificatePEM string `json:"certificatePEM"`
-	CertificateB64 string `json:"certificateB64"`
+	ChallengeID      string `json:"challengeId"`
+	ChallengeIDES    string `json:"idReto"`
+	SignatureB64     string `json:"signatureB64"`
+	SignatureB64ES   string `json:"firmaB64"`
+	CertificatePEM   string `json:"certificatePEM"`
+	CertificatePEMES string `json:"certificadoPEM"`
+	CertificateB64   string `json:"certificateB64"`
+	CertificateB64ES string `json:"certificadoB64"`
 }
 
 type restAuthVerifyResponse struct {
@@ -217,16 +239,28 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 	mux.HandleFunc("/", s.handleRootConsole)
 	mux.HandleFunc("/auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("/auth/verify", s.handleAuthVerify)
+	mux.HandleFunc("/autenticacion/reto", s.handleAuthChallenge)
+	mux.HandleFunc("/autenticacion/verificar", s.handleAuthVerify)
 	mux.HandleFunc("/health", s.withAuth(s.handleHealth))
 	mux.HandleFunc("/certificates", s.withAuth(s.handleCertificates))
 	mux.HandleFunc("/sign", s.withAuth(s.handleSign))
 	mux.HandleFunc("/verify", s.withAuth(s.handleVerify))
+	mux.HandleFunc("/salud", s.withAuth(s.handleHealth))
+	mux.HandleFunc("/certificados", s.withAuth(s.handleCertificates))
+	mux.HandleFunc("/firmar", s.withAuth(s.handleSign))
+	mux.HandleFunc("/verificar", s.withAuth(s.handleVerify))
 	mux.HandleFunc("/diagnostics/report", s.withAuth(s.handleDiagnosticsReport))
 	mux.HandleFunc("/security/domains", s.withAuth(s.handleSecurityDomains))
 	mux.HandleFunc("/tls/clear-store", s.withAuth(s.handleTLSClearStore))
 	mux.HandleFunc("/tls/trust-status", s.withAuth(s.handleTLSTrustStatus))
 	mux.HandleFunc("/tls/install-trust", s.withAuth(s.handleTLSInstallTrust))
 	mux.HandleFunc("/tls/generate-certs", s.withAuth(s.handleTLSGenerateCerts))
+	mux.HandleFunc("/diagnostico/informe", s.withAuth(s.handleDiagnosticsReport))
+	mux.HandleFunc("/seguridad/dominios", s.withAuth(s.handleSecurityDomains))
+	mux.HandleFunc("/tls/limpiar-almacen", s.withAuth(s.handleTLSClearStore))
+	mux.HandleFunc("/tls/estado-confianza", s.withAuth(s.handleTLSTrustStatus))
+	mux.HandleFunc("/tls/instalar-confianza", s.withAuth(s.handleTLSInstallTrust))
+	mux.HandleFunc("/tls/generar-certificados", s.withAuth(s.handleTLSGenerateCerts))
 
 	log.Printf("[REST] Servidor API REST local activo en http://%s", addr)
 	log.Printf("[REST] Endpoints: / /auth/challenge /auth/verify /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs")
@@ -352,6 +386,7 @@ func (s *restServer) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "json inválido"})
 		return
 	}
+	normalizeAuthVerifyRequestAliases(&req)
 	challengeID := strings.TrimSpace(req.ChallengeID)
 	signatureB64 := strings.TrimSpace(req.SignatureB64)
 	if challengeID == "" || signatureB64 == "" {
@@ -443,7 +478,11 @@ func (s *restServer) handleCertificates(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
 		return
 	}
-	if parseBoolParam(strings.TrimSpace(r.URL.Query().Get("check"))) {
+	check := strings.TrimSpace(r.URL.Query().Get("check"))
+	if check == "" {
+		check = strings.TrimSpace(r.URL.Query().Get("comprobar"))
+	}
+	if parseBoolParam(check) {
 		certs, _, _ = s.core.CheckCertificates(certs)
 	}
 	out := make([]restCertificate, 0, len(certs))
@@ -474,6 +513,7 @@ func (s *restServer) handleSign(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "json inválido"})
 		return
 	}
+	normalizeSignRequestAliases(&req)
 	action := strings.ToLower(strings.TrimSpace(req.Action))
 	if action == "" {
 		action = "sign"
@@ -572,6 +612,7 @@ func (s *restServer) handleVerify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "json inválido"})
 		return
 	}
+	normalizeVerifyRequestAliases(&req)
 	format := normalizeProtocolFormat(strings.TrimSpace(req.Format))
 	if format == "" || strings.EqualFold(format, "auto") {
 		if strings.TrimSpace(req.SignaturePath) != "" {
@@ -680,6 +721,9 @@ func (s *restServer) handleSecurityDomains(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if strings.TrimSpace(req.Domain) == "" {
+			req.Domain = strings.TrimSpace(req.DomainES)
+		}
+		if strings.TrimSpace(req.Domain) == "" {
 			writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "domain obligatorio"})
 			return
 		}
@@ -771,6 +815,89 @@ func (s *restServer) handleTLSGenerateCerts(w http.ResponseWriter, r *http.Reque
 		"certFile": certFile,
 		"keyFile":  keyFile,
 	})
+}
+
+func normalizeAuthVerifyRequestAliases(req *restAuthVerifyRequest) {
+	if req == nil {
+		return
+	}
+	if strings.TrimSpace(req.ChallengeID) == "" {
+		req.ChallengeID = strings.TrimSpace(req.ChallengeIDES)
+	}
+	if strings.TrimSpace(req.SignatureB64) == "" {
+		req.SignatureB64 = strings.TrimSpace(req.SignatureB64ES)
+	}
+	if strings.TrimSpace(req.CertificatePEM) == "" {
+		req.CertificatePEM = strings.TrimSpace(req.CertificatePEMES)
+	}
+	if strings.TrimSpace(req.CertificateB64) == "" {
+		req.CertificateB64 = strings.TrimSpace(req.CertificateB64ES)
+	}
+}
+
+func normalizeSignRequestAliases(req *restSignRequest) {
+	if req == nil {
+		return
+	}
+	if strings.TrimSpace(req.InputPath) == "" {
+		req.InputPath = strings.TrimSpace(req.InputPathES)
+	}
+	if strings.TrimSpace(req.OutputPath) == "" {
+		req.OutputPath = strings.TrimSpace(req.OutputPathES)
+	}
+	if strings.TrimSpace(req.CertificateID) == "" {
+		req.CertificateID = strings.TrimSpace(req.CertificateIDES)
+	}
+	if req.CertificateIndex < 0 && req.CertificateIndexES >= 0 {
+		req.CertificateIndex = req.CertificateIndexES
+	} else if req.CertificateIndex == 0 && req.CertificateIndexES > 0 {
+		req.CertificateIndex = req.CertificateIndexES
+	}
+	if strings.TrimSpace(req.CertificateContains) == "" {
+		req.CertificateContains = strings.TrimSpace(req.CertificateContainsES)
+	}
+	if strings.TrimSpace(req.Action) == "" {
+		req.Action = strings.TrimSpace(req.ActionES)
+	}
+	if strings.TrimSpace(req.Format) == "" {
+		req.Format = strings.TrimSpace(req.FormatES)
+	}
+	if !req.AllowInvalidPDF && req.AllowInvalidPDFES {
+		req.AllowInvalidPDF = true
+	}
+	if !req.StrictCompat && req.StrictCompatES {
+		req.StrictCompat = true
+	}
+	if strings.TrimSpace(req.Overwrite) == "" {
+		req.Overwrite = strings.TrimSpace(req.OverwriteES)
+	}
+	if req.SaveToDisk == nil && req.SaveToDiskES != nil {
+		req.SaveToDisk = req.SaveToDiskES
+	}
+	if !req.ReturnSignatureB64 && req.ReturnSignatureB64ES {
+		req.ReturnSignatureB64 = true
+	}
+	if req.VisibleSeal == nil && req.VisibleSealES != nil {
+		req.VisibleSeal = req.VisibleSealES
+	}
+}
+
+func normalizeVerifyRequestAliases(req *restVerifyRequest) {
+	if req == nil {
+		return
+	}
+	if strings.TrimSpace(req.InputPath) == "" {
+		req.InputPath = strings.TrimSpace(req.InputPathES)
+	}
+	if strings.TrimSpace(req.SignaturePath) == "" {
+		req.SignaturePath = strings.TrimSpace(req.SignaturePathES)
+	}
+	if strings.TrimSpace(req.OriginalPath) == "" {
+		req.OriginalPath = strings.TrimSpace(req.OriginalPathES)
+	}
+	if strings.TrimSpace(req.Format) == "" {
+		req.Format = strings.TrimSpace(req.FormatES)
+	}
 }
 
 func selectCertificateForREST(certs []protocol.Certificate, req restSignRequest) (protocol.Certificate, error) {

@@ -21,16 +21,28 @@ func newRESTMuxForTest(s *restServer) *http.ServeMux {
 	mux.HandleFunc("/", s.handleRootConsole)
 	mux.HandleFunc("/auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("/auth/verify", s.handleAuthVerify)
+	mux.HandleFunc("/autenticacion/reto", s.handleAuthChallenge)
+	mux.HandleFunc("/autenticacion/verificar", s.handleAuthVerify)
 	mux.HandleFunc("/health", s.withAuth(s.handleHealth))
 	mux.HandleFunc("/certificates", s.withAuth(s.handleCertificates))
 	mux.HandleFunc("/sign", s.withAuth(s.handleSign))
 	mux.HandleFunc("/verify", s.withAuth(s.handleVerify))
+	mux.HandleFunc("/salud", s.withAuth(s.handleHealth))
+	mux.HandleFunc("/certificados", s.withAuth(s.handleCertificates))
+	mux.HandleFunc("/firmar", s.withAuth(s.handleSign))
+	mux.HandleFunc("/verificar", s.withAuth(s.handleVerify))
 	mux.HandleFunc("/diagnostics/report", s.withAuth(s.handleDiagnosticsReport))
 	mux.HandleFunc("/security/domains", s.withAuth(s.handleSecurityDomains))
 	mux.HandleFunc("/tls/clear-store", s.withAuth(s.handleTLSClearStore))
 	mux.HandleFunc("/tls/trust-status", s.withAuth(s.handleTLSTrustStatus))
 	mux.HandleFunc("/tls/install-trust", s.withAuth(s.handleTLSInstallTrust))
 	mux.HandleFunc("/tls/generate-certs", s.withAuth(s.handleTLSGenerateCerts))
+	mux.HandleFunc("/diagnostico/informe", s.withAuth(s.handleDiagnosticsReport))
+	mux.HandleFunc("/seguridad/dominios", s.withAuth(s.handleSecurityDomains))
+	mux.HandleFunc("/tls/limpiar-almacen", s.withAuth(s.handleTLSClearStore))
+	mux.HandleFunc("/tls/estado-confianza", s.withAuth(s.handleTLSTrustStatus))
+	mux.HandleFunc("/tls/instalar-confianza", s.withAuth(s.handleTLSInstallTrust))
+	mux.HandleFunc("/tls/generar-certificados", s.withAuth(s.handleTLSGenerateCerts))
 	return mux
 }
 
@@ -62,13 +74,21 @@ func TestRESTNewEndpointsRequireAuth(t *testing.T) {
 		path   string
 	}{
 		{method: http.MethodGet, path: "/diagnostics/report"},
+		{method: http.MethodGet, path: "/diagnostico/informe"},
 		{method: http.MethodGet, path: "/security/domains"},
+		{method: http.MethodGet, path: "/seguridad/dominios"},
 		{method: http.MethodPost, path: "/security/domains"},
+		{method: http.MethodPost, path: "/seguridad/dominios"},
 		{method: http.MethodDelete, path: "/security/domains"},
+		{method: http.MethodDelete, path: "/seguridad/dominios"},
 		{method: http.MethodPost, path: "/tls/clear-store"},
+		{method: http.MethodPost, path: "/tls/limpiar-almacen"},
 		{method: http.MethodGet, path: "/tls/trust-status"},
+		{method: http.MethodGet, path: "/tls/estado-confianza"},
 		{method: http.MethodPost, path: "/tls/install-trust"},
+		{method: http.MethodPost, path: "/tls/instalar-confianza"},
 		{method: http.MethodPost, path: "/tls/generate-certs"},
+		{method: http.MethodPost, path: "/tls/generar-certificados"},
 	}
 	for _, tc := range tests {
 		rec := doRESTRequestForTest(mux, tc.method, tc.path, "", nil)
@@ -120,6 +140,18 @@ func TestRESTSecurityDomainsCRUD(t *testing.T) {
 		t.Fatalf("dominios tras alta inesperados: %+v", listResp.Domains)
 	}
 
+	addBodyES := []byte(`{"dominio":"https://sede.grx.es/firma"}`)
+	rec = doRESTRequestForTest(mux, http.MethodPost, "/seguridad/dominios", "secret", addBodyES)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /seguridad/dominios status=%d, esperado=%d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("respuesta JSON inválida en POST castellano: %v", err)
+	}
+	if len(listResp.Domains) != 2 {
+		t.Fatalf("se esperaban 2 dominios tras alta castellano, obtenido=%d", len(listResp.Domains))
+	}
+
 	delBody := []byte(`{"domain":"firma.ejemplo.gob.es"}`)
 	rec = doRESTRequestForTest(mux, http.MethodDelete, "/security/domains", "secret", delBody)
 	if rec.Code != http.StatusOK {
@@ -128,8 +160,20 @@ func TestRESTSecurityDomainsCRUD(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
 		t.Fatalf("respuesta JSON inválida en DELETE: %v", err)
 	}
+	if len(listResp.Domains) != 1 {
+		t.Fatalf("se esperaba 1 dominio tras borrar uno, obtenido=%d", len(listResp.Domains))
+	}
+
+	delBodyES := []byte(`{"dominio":"sede.grx.es"}`)
+	rec = doRESTRequestForTest(mux, http.MethodDelete, "/seguridad/dominios", "secret", delBodyES)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE /seguridad/dominios status=%d, esperado=%d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("respuesta JSON inválida en DELETE castellano: %v", err)
+	}
 	if len(listResp.Domains) != 0 {
-		t.Fatalf("se esperaban 0 dominios tras borrar, obtenido=%d", len(listResp.Domains))
+		t.Fatalf("se esperaban 0 dominios tras borrar todo, obtenido=%d", len(listResp.Domains))
 	}
 }
 
@@ -210,5 +254,54 @@ func TestRESTRootConsoleIncludesSecurityActions(t *testing.T) {
 		if !strings.Contains(body, marker) {
 			t.Fatalf("la consola web no contiene marcador %s", marker)
 		}
+	}
+}
+
+func TestRESTAliasNormalizationFunctions(t *testing.T) {
+	signReq := restSignRequest{
+		InputPathES:           "/tmp/in.pdf",
+		OutputPathES:          "/tmp/out.pdf",
+		CertificateIDES:       "cert-1",
+		CertificateIndexES:    2,
+		CertificateContainsES: "Juan",
+		ActionES:              "sign",
+		FormatES:              "pades",
+		AllowInvalidPDFES:     true,
+		StrictCompatES:        true,
+		OverwriteES:           "force",
+		ReturnSignatureB64ES:  true,
+		VisibleSealES:         &restSignVisibleSeal{Page: 1, X: 0.1, Y: 0.1, W: 0.3, H: 0.1},
+	}
+	normalizeSignRequestAliases(&signReq)
+	if signReq.InputPath == "" || signReq.OutputPath == "" || signReq.CertificateID == "" {
+		t.Fatalf("normalización de aliases de firma incompleta: %+v", signReq)
+	}
+	if signReq.CertificateIndex != 2 || signReq.Action != "sign" || signReq.Format != "pades" {
+		t.Fatalf("normalización de campos numéricos/texto incorrecta: %+v", signReq)
+	}
+	if !signReq.AllowInvalidPDF || !signReq.StrictCompat || !signReq.ReturnSignatureB64 || signReq.VisibleSeal == nil {
+		t.Fatalf("normalización de bool/objeto incorrecta: %+v", signReq)
+	}
+
+	verifyReq := restVerifyRequest{
+		InputPathES:     "/tmp/firmado.pdf",
+		SignaturePathES: "/tmp/firma.csig",
+		OriginalPathES:  "/tmp/original.bin",
+		FormatES:        "cades",
+	}
+	normalizeVerifyRequestAliases(&verifyReq)
+	if verifyReq.InputPath == "" || verifyReq.SignaturePath == "" || verifyReq.OriginalPath == "" || verifyReq.Format != "cades" {
+		t.Fatalf("normalización de aliases de verificación incorrecta: %+v", verifyReq)
+	}
+
+	authReq := restAuthVerifyRequest{
+		ChallengeIDES:    "reto-1",
+		SignatureB64ES:   "ZmlybWE=",
+		CertificatePEMES: "pem",
+		CertificateB64ES: "b64",
+	}
+	normalizeAuthVerifyRequestAliases(&authReq)
+	if authReq.ChallengeID == "" || authReq.SignatureB64 == "" || authReq.CertificatePEM == "" || authReq.CertificateB64 == "" {
+		t.Fatalf("normalización de aliases de auth incorrecta: %+v", authReq)
 	}
 }

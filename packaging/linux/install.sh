@@ -5,7 +5,70 @@
 
 set -euo pipefail
 
-PREFIX="${1:-/opt/autofirma-dipgra}"
+PREFIX="/opt/autofirma-dipgra"
+PROFILE="${AUTOFIRMA_INSTALL_PERFIL:-${AUTOFIRMA_INSTALL_PROFILE:-${AUTOFIRMA_PERFIL:-${AUTOFIRMA_PROFILE:-completo}}}}"
+DESKTOP_SUBPROFILE="${AUTOFIRMA_SUBPERFIL_ESCRITORIO:-${AUTOFIRMA_DESKTOP_SUBPROFILE:-fyne}}"
+
+# Compatibilidad retro: primer argumento posicional como prefix.
+if [[ $# -gt 0 && "${1}" != --* ]]; then
+  PREFIX="${1}"
+  shift
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prefix)
+      PREFIX="${2:-${PREFIX}}"
+      shift 2 || true
+      ;;
+    --perfil|--profile)
+      PROFILE="${2:-${PROFILE}}"
+      shift 2 || true
+      ;;
+    --subperfil-escritorio|--subperfil-desktop|--subperfil)
+      DESKTOP_SUBPROFILE="${2:-${DESKTOP_SUBPROFILE}}"
+      shift 2 || true
+      ;;
+    -h|--help)
+      echo "Uso: $0 [--prefix <ruta>] [--perfil minimo|escritorio|completo] [--subperfil-escritorio fyne|gio|qt]"
+      exit 0
+      ;;
+    *)
+      echo "[install] ERROR: opción no soportada: $1" >&2
+      echo "[install] Uso: $0 [--prefix <ruta>] [--perfil minimo|escritorio|completo] [--subperfil-escritorio fyne|gio|qt]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+PROFILE="$(echo "${PROFILE}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+case "${PROFILE}" in
+  min|minimo|minimal) PROFILE="minimo" ;;
+  desk|desktop|escritorio) PROFILE="escritorio" ;;
+  full|completo) PROFILE="completo" ;;
+  *)
+    echo "[install] ERROR: perfil inválido: ${PROFILE}" >&2
+    echo "[install] perfiles válidos: minimo | escritorio | completo" >&2
+    exit 1
+    ;;
+esac
+ENABLE_DESKTOP_PROFILE=0
+ENABLE_NATIVE_PROFILE=0
+if [[ "${PROFILE}" == "escritorio" || "${PROFILE}" == "completo" ]]; then
+  ENABLE_DESKTOP_PROFILE=1
+fi
+if [[ "${PROFILE}" == "completo" ]]; then
+  ENABLE_NATIVE_PROFILE=1
+fi
+DESKTOP_SUBPROFILE="$(echo "${DESKTOP_SUBPROFILE}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+case "${DESKTOP_SUBPROFILE}" in
+  fyne|gio|qt)
+    ;;
+  *)
+    echo "[install] Aviso: subperfil de escritorio inválido (${DESKTOP_SUBPROFILE}), usando fyne."
+    DESKTOP_SUBPROFILE="fyne"
+    ;;
+esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SRC="${SCRIPT_DIR}/AutofirmaDipgra"
 FNMT_ACCOMP_CERT="${SCRIPT_DIR}/certs/fnmt-accomp.crt"
@@ -194,7 +257,7 @@ fi
 
 stop_running_instances
 
-echo "[install] Installing into ${PREFIX}"
+echo "[install] Installing into ${PREFIX} (perfil=${PROFILE})"
 mkdir -p "${PREFIX}"
 cp -a "${APP_SRC}/." "${PREFIX}/"
 chmod +x "${PREFIX}/autofirma-desktop"
@@ -202,37 +265,92 @@ if [[ -f "${PREFIX}/autofirma-host" ]]; then
   chmod +x "${PREFIX}/autofirma-host"
 fi
 
-# Generate local certificates for the installing user (best effort).
-if [[ -n "${USER_NAME}" ]] && command -v runuser >/dev/null 2>&1; then
-  target_user_certs_dir="${USER_HOME:-${HOME}}/.config/AutofirmaDipgra/certs"
-  runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
-  runuser -u "${USER_NAME}" -- env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
-  runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --exportar-certs-java "${target_user_certs_dir}" >/dev/null 2>&1 || true
-else
-  "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
-  env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
-  "${PREFIX}/autofirma-desktop" --exportar-certs-java "${HOME}/.config/AutofirmaDipgra/certs" >/dev/null 2>&1 || true
-fi
-copy_java_compat_certs_to_prefix
+if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
+  # Generate local certificates for the installing user (best effort).
+  if [[ -n "${USER_NAME}" ]] && command -v runuser >/dev/null 2>&1; then
+    target_user_certs_dir="${USER_HOME:-${HOME}}/.config/AutofirmaDipgra/certs"
+    runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
+    runuser -u "${USER_NAME}" -- env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+    runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --exportar-certs-java "${target_user_certs_dir}" >/dev/null 2>&1 || true
+  else
+    "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
+    env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+    "${PREFIX}/autofirma-desktop" --exportar-certs-java "${HOME}/.config/AutofirmaDipgra/certs" >/dev/null 2>&1 || true
+  fi
+  copy_java_compat_certs_to_prefix
 
-# System-wide trust (best effort, needs root)
-if [[ "$(id -u)" -eq 0 ]]; then
-  env AUTOFIRMA_TRUST_SKIP_NSS=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
-  install_fnmt_accomp_system_ca
+  # System-wide trust (best effort, needs root)
+  if [[ "$(id -u)" -eq 0 ]]; then
+    env AUTOFIRMA_TRUST_SKIP_NSS=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+    install_fnmt_accomp_system_ca
+  fi
+else
+  echo "[install] Perfil ${PROFILE}: se omite bootstrap de confianza/certificados de escritorio."
 fi
 
 mkdir -p /usr/local/bin
-ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
+
+if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
+  # Evita sobrescribir el binario real si existían symlinks legacy
+  # (p.ej. /usr/local/bin/autofirma-dipgra -> /opt/.../autofirma-desktop).
+  rm -f /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio /usr/local/bin/autofirma-dipgra-qt
+
+  if [[ "${DESKTOP_SUBPROFILE}" == "qt" && ! -x "${PREFIX}/autofirma-desktop-qt-bin" ]]; then
+    echo "[install] Aviso: subperfil qt solicitado pero no se encontró ${PREFIX}/autofirma-desktop-qt-bin; se usará fyne."
+    DESKTOP_SUBPROFILE="fyne"
+  fi
+
+  qt_env_base=""
+  if [[ -d "${PREFIX}/qt-runtime" ]]; then
+    qt_env_base="AUTOFIRMA_QT_RUNTIME_DIR=${PREFIX}/qt-runtime "
+  fi
+  qt_fallback_env=""
+  if [[ ! -x "${PREFIX}/autofirma-desktop-qt-real" ]]; then
+    qt_fallback_env="AUTOFIRMA_QT_FALLBACK_FYNE=1 "
+  fi
+
+  for frontend in fyne gio qt; do
+    if [[ "${frontend}" == "qt" ]]; then
+      cat > "/usr/local/bin/autofirma-dipgra-${frontend}" <<WRAP
+#!/usr/bin/env bash
+exec env ${qt_env_base}${qt_fallback_env}"${PREFIX}/autofirma-desktop" -frontend "${frontend}" "\$@"
+WRAP
+    else
+      cat > "/usr/local/bin/autofirma-dipgra-${frontend}" <<WRAP
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" -frontend "${frontend}" "\$@"
+WRAP
+    fi
+    chmod 0755 "/usr/local/bin/autofirma-dipgra-${frontend}"
+  done
+
+  if [[ "${DESKTOP_SUBPROFILE}" == "qt" ]]; then
+    cat > /usr/local/bin/autofirma-dipgra <<WRAP
+#!/usr/bin/env bash
+exec env ${qt_env_base}${qt_fallback_env}"${PREFIX}/autofirma-desktop" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
+WRAP
+  else
+    cat > /usr/local/bin/autofirma-dipgra <<WRAP
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
+WRAP
+  fi
+  chmod 0755 /usr/local/bin/autofirma-dipgra
+else
+  ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
+fi
+
 if [[ -f "${PREFIX}/autofirma-host" ]]; then
   ln -sf "${PREFIX}/autofirma-host" /usr/local/bin/autofirma-host
 fi
 
+if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
 mkdir -p /usr/local/share/applications
 cat > /usr/local/share/applications/autofirma-dipgra.desktop <<DESKTOP
 [Desktop Entry]
 Name=Autofirma Dipgra
 Comment=Firma electronica de documentos
-Exec=${PREFIX}/autofirma-desktop %u
+Exec=/usr/local/bin/autofirma-dipgra %u
 Terminal=false
 Type=Application
 Categories=Office;Security;
@@ -292,9 +410,14 @@ MIMEAPPS
     chown "${USER_NAME}:${USER_NAME}" "${USER_DESKTOP_SHORTCUT}" || true
   fi
 fi
+else
+  echo "[install] Perfil ${PROFILE}: sin integración de menú ni handler afirma://."
+fi
 
 # Native Messaging manifests for Chromium/Firefox.
-if [[ ! -x "${PREFIX}/autofirma-host" ]]; then
+if [[ "${ENABLE_NATIVE_PROFILE}" -ne 1 ]]; then
+  echo "[install] Perfil ${PROFILE}: se omite registro Native Messaging."
+elif [[ ! -x "${PREFIX}/autofirma-host" ]]; then
   echo "[install] Warning: autofirma-host not found in ${PREFIX}. Native Messaging will not be installed."
 else
   declare -a chromium_ids=()
@@ -409,10 +532,22 @@ JSON
   fi
 fi
 
-echo "[install] Done"
+echo "[install] Done (perfil=${PROFILE})"
 echo "[install] Binary: ${PREFIX}/autofirma-desktop"
 echo "[install] Command: autofirma-dipgra"
+if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
+  echo "[install] Integración de escritorio: habilitada"
+  echo "[install] Subperfil escritorio por defecto: ${DESKTOP_SUBPROFILE}"
+  echo "[install] Lanzadores: autofirma-dipgra-fyne | autofirma-dipgra-gio | autofirma-dipgra-qt"
+else
+  echo "[install] Integración de escritorio: omitida"
+fi
 if [[ -x "${PREFIX}/autofirma-host" ]]; then
   echo "[install] Native host: ${PREFIX}/autofirma-host"
   echo "[install] Native host command: autofirma-host"
+  if [[ "${ENABLE_NATIVE_PROFILE}" -eq 1 ]]; then
+    echo "[install] Native Messaging: habilitado"
+  else
+    echo "[install] Native Messaging: omitido"
+  fi
 fi
