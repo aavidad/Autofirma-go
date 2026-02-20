@@ -72,6 +72,11 @@ type FyneUI struct {
 	SealY           float64
 	SealW           float64
 	SealH           float64
+	SealPageInput   *widget.Entry
+	SealXInput      *widget.Entry
+	SealYInput      *widget.Entry
+	SealWInput      *widget.Entry
+	SealHInput      *widget.Entry
 	PreviewBaseURL  string
 	PreviewToken    string
 	PreviewFile     string
@@ -207,6 +212,8 @@ func (ui *FyneUI) buildUI() {
 		ui.MessageBox.Wrapping = fyne.TextWrapWord
 		ui.MessageBox.Disable()
 		ui.Window.SetContent(container.NewVBox(
+			ui.buildProtocolQuickHeader(),
+			widget.NewSeparator(),
 			widget.NewCard("AutoFirma Dipgra", "Modo protocolario", ui.StatusLabel),
 			widget.NewCard("Detalle", "", container.NewVScroll(ui.MessageBox)),
 		))
@@ -256,10 +263,31 @@ func (ui *FyneUI) buildHeader() fyne.CanvasObject {
 
 	bg := canvas.NewRectangle(color.NRGBA{R: 0xF4, G: 0xF7, B: 0xFF, A: 0xFF})
 
+	var logoBox fyne.CanvasObject = widget.NewLabel("")
+	if logoPath, err := fyneResolveBrandLogoPath(); err == nil {
+		logo := canvas.NewImageFromFile(logoPath)
+		logo.FillMode = canvas.ImageFillContain
+		logo.SetMinSize(fyne.NewSize(360, 76))
+		logoBox = container.NewPadded(logo)
+	} else {
+		log.Printf("[FyneUI] Logo no encontrado, se usa cabecera textual: %v", err)
+	}
+
 	return container.NewStack(
 		bg,
-		container.NewPadded(container.NewVBox(title, sub)),
+		container.NewPadded(container.NewBorder(nil, nil, logoBox, nil, container.NewVBox(title, sub))),
 	)
+}
+
+func (ui *FyneUI) buildProtocolQuickHeader() fyne.CanvasObject {
+	bg := canvas.NewRectangle(color.NRGBA{R: 0xF4, G: 0xF7, B: 0xFF, A: 0xFF})
+	if logoPath, err := fyneResolveBrandLogoPath(); err == nil {
+		logo := canvas.NewImageFromFile(logoPath)
+		logo.FillMode = canvas.ImageFillContain
+		logo.SetMinSize(fyne.NewSize(280, 52))
+		return container.NewStack(bg, container.NewPadded(container.NewCenter(logo)))
+	}
+	return container.NewStack(bg, container.NewPadded(widget.NewLabelWithStyle("AutoFirma Dipgra", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})))
 }
 
 func (ui *FyneUI) buildSignTab() fyne.CanvasObject {
@@ -310,6 +338,11 @@ func (ui *FyneUI) buildSignTab() fyne.CanvasObject {
 	sealH := widget.NewEntry()
 	sealH.SetText(fmt.Sprintf("%.2f", ui.SealH))
 	sealH.SetPlaceHolder("Alto 0..1")
+	ui.SealPageInput = sealPage
+	ui.SealXInput = sealX
+	ui.SealYInput = sealY
+	ui.SealWInput = sealW
+	ui.SealHInput = sealH
 	openSealWebBtn := widget.NewButtonWithIcon("Abrir visor PDF en navegador", theme.SearchIcon(), func() {
 		ui.syncSealValuesFromEntries(sealPage, sealX, sealY, sealW, sealH)
 		if !ui.VisibleSeal {
@@ -1023,6 +1056,26 @@ func (ui *FyneUI) syncSealValuesFromEntries(page, x, y, w, h *widget.Entry) {
 	}
 }
 
+func (ui *FyneUI) syncSealEntriesFromValues() {
+	fyne.Do(func() {
+		if ui.SealPageInput != nil {
+			ui.SealPageInput.SetText(fmt.Sprintf("%d", ui.SealPage))
+		}
+		if ui.SealXInput != nil {
+			ui.SealXInput.SetText(fmt.Sprintf("%.4f", ui.SealX))
+		}
+		if ui.SealYInput != nil {
+			ui.SealYInput.SetText(fmt.Sprintf("%.4f", ui.SealY))
+		}
+		if ui.SealWInput != nil {
+			ui.SealWInput.SetText(fmt.Sprintf("%.4f", ui.SealW))
+		}
+		if ui.SealHInput != nil {
+			ui.SealHInput.SetText(fmt.Sprintf("%.4f", ui.SealH))
+		}
+	})
+}
+
 func (ui *FyneUI) buildFynePadesSignatureOptions() map[string]interface{} {
 	if !ui.VisibleSeal {
 		return nil
@@ -1526,6 +1579,11 @@ func (ui *FyneUI) openPadesPreviewInBrowserFyne(filePath string) error {
 	q.Set("token", token)
 	q.Set("w", "595.28")
 	q.Set("h", "841.89")
+	q.Set("x", fmt.Sprintf("%.6f", clamp01(ui.SealX)))
+	q.Set("y", fmt.Sprintf("%.6f", clamp01(ui.SealY)))
+	q.Set("rectw", fmt.Sprintf("%.6f", clamp01(ui.SealW)))
+	q.Set("recth", fmt.Sprintf("%.6f", clamp01(ui.SealH)))
+	q.Set("page", fmt.Sprintf("%d", ui.SealPage))
 	previewURL := ui.PreviewBaseURL + "/pades-preview?" + q.Encode()
 	return openExternal(previewURL)
 }
@@ -1564,8 +1622,13 @@ func (ui *FyneUI) handlePadesPreviewPageFyne(w http.ResponseWriter, r *http.Requ
 	if ratio <= 0 {
 		ratio = 841.89 / 595.28
 	}
+	initX := parseFloatOrDefault(r.URL.Query().Get("x"), ui.SealX)
+	initY := parseFloatOrDefault(r.URL.Query().Get("y"), ui.SealY)
+	initW := parseFloatOrDefault(r.URL.Query().Get("rectw"), ui.SealW)
+	initH := parseFloatOrDefault(r.URL.Query().Get("recth"), ui.SealH)
+	initPage := uint32(parseUintOrDefault(r.URL.Query().Get("page"), uint64(ui.SealPage)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, renderPadesPreviewHTML(token, ratio))
+	_, _ = io.WriteString(w, renderPadesPreviewHTML(token, ratio, initX, initY, initW, initH, initPage))
 }
 
 func (ui *FyneUI) handlePadesPreviewPDFFyne(w http.ResponseWriter, r *http.Request) {
@@ -1610,6 +1673,7 @@ func (ui *FyneUI) handlePadesPreviewSaveFyne(w http.ResponseWriter, r *http.Requ
 	ui.SealW = clamp01(req.W)
 	ui.SealH = clamp01(req.H)
 	ui.SealPage = req.Page
+	ui.syncSealEntriesFromValues()
 	ui.SetStatus(fmt.Sprintf("Área recibida del visor web: x=%.1f%% y=%.1f%% ancho=%.1f%% alto=%.1f%%", ui.SealX*100, ui.SealY*100, ui.SealW*100, ui.SealH*100))
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = io.WriteString(w, `{"ok":true}`)
@@ -1822,4 +1886,50 @@ func fyneResolveHelpManualPath() (string, error) {
 	}
 	sort.Strings(keys)
 	return "", errors.New("no se encontró GUI_AYUDA_EXHAUSTIVA.md en rutas conocidas: " + strings.Join(keys, ", "))
+}
+
+func fyneResolveBrandLogoPath() (string, error) {
+	logoRels := []string{
+		"assets/Logo-Horizontal-Color.png",
+		"assets/Logo-Horizontal-Color.svg",
+	}
+	candidates := make([]string, 0, 12)
+
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		for _, rel := range logoRels {
+			candidates = append(candidates, filepath.Join(wd, rel))
+		}
+	}
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		exeDir := filepath.Dir(exe)
+		for _, rel := range logoRels {
+			candidates = append(candidates, filepath.Join(exeDir, rel))
+			candidates = append(candidates, filepath.Join(exeDir, "..", rel))
+			candidates = append(candidates, filepath.Join(exeDir, "..", "..", rel))
+		}
+	}
+	for _, rel := range logoRels {
+		candidates = append(candidates, filepath.Join("/opt/autofirma-dipgra", rel))
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, p := range candidates {
+		p = filepath.Clean(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return "", errors.New("no se encontró logo horizontal (PNG/SVG) en rutas conocidas: " + strings.Join(keys, ", "))
 }

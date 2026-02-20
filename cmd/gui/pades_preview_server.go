@@ -99,9 +99,14 @@ func (ui *UI) handlePadesPreviewPage(w http.ResponseWriter, r *http.Request) {
 	if ratio <= 0 {
 		ratio = 841.89 / 595.28
 	}
+	initX := parseFloatOrDefault(r.URL.Query().Get("x"), ui.PadesSealX)
+	initY := parseFloatOrDefault(r.URL.Query().Get("y"), ui.PadesSealY)
+	initW := parseFloatOrDefault(r.URL.Query().Get("rectw"), ui.PadesSealW)
+	initH := parseFloatOrDefault(r.URL.Query().Get("recth"), ui.PadesSealH)
+	initPage := uint32(parseUintOrDefault(r.URL.Query().Get("page"), uint64(ui.PadesSealPage)))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, renderPadesPreviewHTML(token, ratio))
+	_, _ = io.WriteString(w, renderPadesPreviewHTML(token, ratio, initX, initY, initW, initH, initPage))
 }
 
 func (ui *UI) handlePadesPreviewPDF(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +188,32 @@ func parseFloatOrDefault(raw string, def float64) float64 {
 	return v
 }
 
-func renderPadesPreviewHTML(token string, ratio float64) string {
+func parseUintOrDefault(raw string, def uint64) uint64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || v == 0 {
+		return def
+	}
+	return v
+}
+
+func renderPadesPreviewHTML(token string, ratio float64, initX, initY, initW, initH float64, initPage uint32) string {
+	initX = clamp01(initX)
+	initY = clamp01(initY)
+	initW = clamp01(initW)
+	initH = clamp01(initH)
+	if initW < 0.01 {
+		initW = 0.01
+	}
+	if initH < 0.01 {
+		initH = 0.01
+	}
+	if initPage == 0 {
+		initPage = 1
+	}
 	pdfURL := "/pades-preview/pdf?token=" + url.QueryEscape(token) + "#page=1&zoom=page-width&view=FitH&toolbar=0&navpanes=0&scrollbar=0"
 	return `<!doctype html>
 <html lang="es">
@@ -239,7 +269,7 @@ body { margin:0; font-family: "Segoe UI", Tahoma, sans-serif; background:var(--b
   const info = document.getElementById('info');
 
   let start = null;
-  let seal = {x:0.62,y:0.04,w:0.34,h:0.12,page:1};
+  let seal = {x:` + fmt.Sprintf("%.6f", initX) + `,y:` + fmt.Sprintf("%.6f", initY) + `,w:` + fmt.Sprintf("%.6f", initW) + `,h:` + fmt.Sprintf("%.6f", initH) + `,page:` + fmt.Sprintf("%d", initPage) + `};
 
   function clamp01(v){ return Math.max(0, Math.min(1, v)); }
   function pxToNorm(x,y){

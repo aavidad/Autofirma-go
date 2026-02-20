@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,6 +16,8 @@ import (
 
 	"fyne.io/fyne/v2"
 )
+
+var errProtocolUserCanceled = errors.New("protocol operation canceled by user")
 
 func (ui *FyneUI) HandleProtocolInit(uriString string) {
 	ui.SetStatus("Iniciando modo protocolo web...")
@@ -134,6 +137,7 @@ func (ui *FyneUI) handleProtocolSelectCertFyne(state *ProtocolState) {
 	chosen, canceled, err := protocolSelectCertDialog(filtered)
 	if canceled {
 		ui.SetStatus("Selección de certificado cancelada.")
+		ui.notifyProtocolCancelAndClose(state, "selectcert")
 		return
 	}
 	if err != nil {
@@ -340,6 +344,11 @@ func (ui *FyneUI) closeProtocolWindowAfterDelay() {
 
 func (ui *FyneUI) runProtocolQuickSign(state *ProtocolState) {
 	if err := ui.selectCertificateForProtocol(state); err != nil {
+		if errors.Is(err, errProtocolUserCanceled) {
+			ui.SetStatus("Operación cancelada por el usuario.")
+			ui.notifyProtocolCancelAndClose(state, "sign")
+			return
+		}
 		ui.SetStatus(err.Error())
 		return
 	}
@@ -348,6 +357,11 @@ func (ui *FyneUI) runProtocolQuickSign(state *ProtocolState) {
 
 func (ui *FyneUI) runProtocolQuickBatch(state *ProtocolState) {
 	if err := ui.selectCertificateForProtocol(state); err != nil {
+		if errors.Is(err, errProtocolUserCanceled) {
+			ui.SetStatus("Operación cancelada por el usuario.")
+			ui.notifyProtocolCancelAndClose(state, "batch")
+			return
+		}
 		ui.SetStatus(err.Error())
 		return
 	}
@@ -371,7 +385,7 @@ func (ui *FyneUI) selectCertificateForProtocol(state *ProtocolState) error {
 	}
 	chosen, canceled, err := protocolSelectCertDialog(filtered)
 	if canceled {
-		return fmt.Errorf("selección de certificado cancelada")
+		return errProtocolUserCanceled
 	}
 	if err != nil {
 		return fmt.Errorf("error en selector de certificado: %w", err)
@@ -390,6 +404,22 @@ func (ui *FyneUI) selectCertificateForProtocol(state *ProtocolState) error {
 		}
 	}
 	return nil
+}
+
+func (ui *FyneUI) notifyProtocolCancelAndClose(state *ProtocolState, action string) {
+	if state == nil {
+		go ui.closeProtocolWindowAfterDelay()
+		return
+	}
+
+	if strings.TrimSpace(state.STServlet) != "" || strings.TrimSpace(state.RTServlet) != "" {
+		if err := state.UploadResultData("CANCEL"); err != nil {
+			log.Printf("[FyneUI][Protocol] no se pudo notificar cancelación (%s): %v", action, err)
+		} else {
+			log.Printf("[FyneUI][Protocol] cancelación notificada al servidor (%s).", action)
+		}
+	}
+	go ui.closeProtocolWindowAfterDelay()
 }
 
 func fyneSetFileLabel(ui *FyneUI, path string) {
