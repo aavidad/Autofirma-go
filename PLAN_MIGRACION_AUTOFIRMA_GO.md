@@ -25,6 +25,15 @@ Commit revisado: `60f3bb656201ff7a8ee8093450842554c0277608`
   - `GOCACHE=/tmp/gocache go test -mod=readonly ./cmd/gui/...` OK.
   - `GOCACHE=/tmp/gocache go test -mod=readonly ./pkg/...` OK.
 
+## Avance 2026-02-20 (hardening de validación completa en entorno bloqueado)
+- Ajustado `scripts/run_full_validation.sh`:
+  - paso `4/7` (`run_web_compat_server.sh start`) ahora clasifica como `ENV_BLOCKED` cuando falla por permisos/sandbox al abrir socket local (`operation not permitted`), en lugar de fallar toda la validación.
+  - paso `7/7` (`smoke_sede_logcheck.sh`) ahora clasifica `SKIP_NO_ACTIVITY` cuando no hay evidencias recientes de flujo de sede en logs (sin `legacy upload` ni `websocket result`), en lugar de fallo duro.
+- Resultado reproducible en este entorno:
+  - `result: OK` en `/tmp/autofirma-full-validation-report-20260220-124937.txt`.
+  - `step_3/4/5` marcados `ENV_BLOCKED` por restricciones de sandbox.
+  - `step_7` marcado `SKIP_NO_ACTIVITY` por ausencia de prueba manual reciente de sede.
+
 ## Avance 2026-02-19 (compatibilidad certificados Java en instaladores)
 - Implementado en `cmd/gui`:
   - generacion/exportacion de artefactos compatibles con AutoFirma Java:

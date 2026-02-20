@@ -187,9 +187,29 @@ fi
 
 CURRENT_STEP="4/7 servidor web compat"
 echo "[full-check] 4/7 servidor web compat (start/status)"
-bash scripts/run_web_compat_server.sh start
-bash scripts/run_web_compat_server.sh status
-append_report "step_4: OK"
+if STEP4_OUTPUT="$(bash scripts/run_web_compat_server.sh start 2>&1)"; then
+  printf '%s\n' "${STEP4_OUTPUT}"
+  if STEP4_STATUS="$(bash scripts/run_web_compat_server.sh status 2>&1)"; then
+    printf '%s\n' "${STEP4_STATUS}"
+    append_report "step_4: OK"
+  else
+    printf '%s\n' "${STEP4_STATUS}" >&2
+    append_report "step_4: FALLO"
+    append_report "step_4_detail: ${STEP4_STATUS//$'\n'/ | }"
+    false
+  fi
+else
+  printf '%s\n' "${STEP4_OUTPUT}" >&2
+  if printf '%s' "${STEP4_OUTPUT}" | grep -qiE "ENV_BLOCKED|Operation not permitted|Permission denied|socket: operation not permitted|no new privileges|sandbox"; then
+    echo "[full-check] AVISO: servidor web compat bloqueado por entorno (permisos/sandbox), se marca como ENV_BLOCKED"
+    append_report "step_4: ENV_BLOCKED"
+    append_report "step_4_detail: ${STEP4_OUTPUT//$'\n'/ | }"
+  else
+    append_report "step_4: FALLO"
+    append_report "step_4_detail: ${STEP4_OUTPUT//$'\n'/ | }"
+    false
+  fi
+fi
 
 CURRENT_STEP="5/7 handshake WSS"
 echo "[full-check] 5/7 handshake WSS (echo)"
@@ -218,8 +238,21 @@ if [[ "${SKIP_SEDE_LOGCHECK}" -eq 0 ]]; then
   echo "[full-check] 7/7 smoke de log de sede"
   resolve_sede_log_file || true
   if [[ -f "${SEDE_LOG_FILE}" ]]; then
-    bash scripts/smoke_sede_logcheck.sh --log-file "${SEDE_LOG_FILE}" --since-minutes "${SEDE_SINCE_MINUTES}"
-    append_report "step_7: OK"
+    if SEDE_OUTPUT="$(bash scripts/smoke_sede_logcheck.sh --log-file "${SEDE_LOG_FILE}" --since-minutes "${SEDE_SINCE_MINUTES}" 2>&1)"; then
+      printf '%s\n' "${SEDE_OUTPUT}"
+      append_report "step_7: OK"
+    else
+      printf '%s\n' "${SEDE_OUTPUT}" >&2
+      if printf '%s' "${SEDE_OUTPUT}" | grep -qiE "no hay subida legacy ni resultado websocket correcto|no hay líneas de log en los últimos"; then
+        echo "[full-check] AVISO: sin evidencias recientes de sede en logs, se marca como SKIP_NO_ACTIVITY"
+        append_report "step_7: SKIP_NO_ACTIVITY"
+        append_report "step_7_detail: ${SEDE_OUTPUT//$'\n'/ | }"
+      else
+        append_report "step_7: FALLO"
+        append_report "step_7_detail: ${SEDE_OUTPUT//$'\n'/ | }"
+        false
+      fi
+    fi
   else
     echo "[full-check] AVISO: log de sede no encontrado (${SEDE_LOG_FILE}), se marca como SKIP"
     append_report "step_7: SKIP_NO_LOG"

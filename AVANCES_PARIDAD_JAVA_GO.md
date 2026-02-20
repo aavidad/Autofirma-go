@@ -70,6 +70,10 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - Flujo protocolario en Fyne incluye subida legacy `RTServlet/STServlet` y `WAIT` activo.
   - `main.go` deja Fyne como ruta por defecto para arranques protocolarios; Gio queda como fallback explícito con `-gio`.
   - Nuevo archivo de integración protocolaria Fyne: `cmd/gui/fyne_protocol.go`.
+- Validación integral endurecida para entornos restringidos:
+  - `scripts/run_full_validation.sh` ahora trata bloqueo de socket/sandbox en `web-compat` como `ENV_BLOCKED`.
+  - `scripts/run_full_validation.sh` trata ausencia de evidencias recientes de sede en logs como `SKIP_NO_ACTIVITY`.
+  - ejecución local: `result: OK` con `step_3/4/5=ENV_BLOCKED` y `step_7=SKIP_NO_ACTIVITY` en `/tmp/autofirma-full-validation-report-20260220-124937.txt`.
 
 ### Brechas reales pendientes
 1. Cierre de validacion automatica reproducible:

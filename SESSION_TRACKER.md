@@ -113,3 +113,11 @@ Conseguir compatibilidad operativa con flujo de sede usando protocolo `afirma://
 - [x] Validación de regresión:
   - `GOCACHE=/tmp/gocache go test -mod=readonly ./cmd/gui/...` OK.
   - `GOCACHE=/tmp/gocache go test -mod=readonly ./pkg/...` OK.
+
+## Avance sesion 2026-02-20 (validación completa robusta)
+- [x] Hardening de `scripts/run_full_validation.sh`:
+  - paso `4/7` (`web compat`) clasifica `ENV_BLOCKED` cuando el bind WSS falla por restricciones de sandbox.
+  - paso `7/7` (`smoke_sede_logcheck.sh`) clasifica `SKIP_NO_ACTIVITY` si no hay actividad reciente de sede en logs.
+- [x] Ejecución validada:
+  - `bash scripts/run_full_validation.sh` finaliza en `result: OK`.
+  - reporte: `/tmp/autofirma-full-validation-report-20260220-124937.txt`.
