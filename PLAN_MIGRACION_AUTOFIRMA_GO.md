@@ -1,8 +1,26 @@
 # PLAN MIGRACION AUTOFIRMA GO (PENDIENTE REAL)
 
-Fecha de revision: 2026-02-17
+Fecha de revision: 2026-02-19
 Repositorio: `work/native-host-src`
 Commit revisado: `60f3bb656201ff7a8ee8093450842554c0277608`
+
+## Avance 2026-02-19 (compatibilidad certificados Java en instaladores)
+- Implementado en `cmd/gui`:
+  - generacion/exportacion de artefactos compatibles con AutoFirma Java:
+    - `autofirma.pfx` (clave `654321`, alias `SocketAutoFirma`, cuando hay `openssl`),
+    - `Autofirma_ROOT.cer` (DER),
+    - `autofirma.cer` (DER).
+  - nuevo flag CLI:
+    - `--exportar-certs-java <directorio>`.
+  - `--install-trust` y `--trust-status` extendidos a macOS.
+  - nickname NSS alineado con Java: `Autofirma ROOT`.
+- Instaladores:
+  - Linux (`packaging/linux/install.sh`) exporta/copia certificados Java al prefijo.
+  - Windows (`packaging/windows/autofirma_windows_installer.nsi`) exporta certificados Java a `$INSTDIR`.
+  - macOS:
+    - nuevo instalador base `packaging/macos/install.sh`,
+    - nuevo script `scripts/macos/install_and_trust_macos.sh`,
+    - nuevo empaquetado `packaging/macos/make_macos_release.sh`.
 
 ## Conclusión de revisión profunda
 El proyecto está bastante más avanzado de lo que refleja el checklist histórico.

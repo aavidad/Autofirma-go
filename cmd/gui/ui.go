@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -130,35 +131,41 @@ type UI struct {
 	BtnExpertLoad       widget.Clickable
 	BtnExpertSave       widget.Clickable
 
-	BtnAbout            widget.Clickable
-	BtnHelp             widget.Clickable
-	BtnCheckUpdates     widget.Clickable
-	BtnViewLogs         widget.Clickable
-	BtnHealthCheck      widget.Clickable
-	BtnFindIssue        widget.Clickable
-	BtnCopyReport       widget.Clickable
-	BtnCopyLastError    widget.Clickable
-	BtnCopyHistory      widget.Clickable
-	BtnSelfTest         widget.Clickable
-	BtnOpenReports      widget.Clickable
-	BtnExportFullDiag   widget.Clickable
-	BtnCopyFullDiag     widget.Clickable
-	BtnRunFullCheck     widget.Clickable
-	BtnOpenSealWeb      widget.Clickable
-	BtnRunSelectedTest  widget.Clickable
-	BtnRunAllTests      widget.Clickable
-	BtnSelectAllTests   widget.Clickable
-	BtnClearAllTests    widget.Clickable
-	BtnOpenCertManager  widget.Clickable
-	BtnGenExportPass    widget.Clickable
-	BtnCopyExportPass   widget.Clickable
-	BtnRefreshWhitelist widget.Clickable
-	BtnAddWhitelist     widget.Clickable
-	ShowAbout           bool
-	ChkVisibleSeal      widget.Bool
-	ChkStrictCompat     widget.Bool
-	ChkAllowInvalidPDF  widget.Bool
-	ChkExpertMode       widget.Bool
+	BtnAbout               widget.Clickable
+	BtnHelp                widget.Clickable
+	BtnCheckUpdates        widget.Clickable
+	BtnViewLogs            widget.Clickable
+	BtnHealthCheck         widget.Clickable
+	BtnFindIssue           widget.Clickable
+	BtnCopyReport          widget.Clickable
+	BtnCopyLastError       widget.Clickable
+	BtnCopyHistory         widget.Clickable
+	BtnSelfTest            widget.Clickable
+	BtnOpenReports         widget.Clickable
+	BtnExportFullDiag      widget.Clickable
+	BtnCopyFullDiag        widget.Clickable
+	BtnRunFullCheck        widget.Clickable
+	BtnOpenSealWeb         widget.Clickable
+	BtnRunSelectedTest     widget.Clickable
+	BtnRunAllTests         widget.Clickable
+	BtnSelectAllTests      widget.Clickable
+	BtnClearAllTests       widget.Clickable
+	BtnOpenCertManager     widget.Clickable
+	BtnGenExportPass       widget.Clickable
+	BtnCopyExportPass      widget.Clickable
+	BtnRefreshWhitelist    widget.Clickable
+	BtnAddWhitelist        widget.Clickable
+	BtnRunTLSDiagnostics   widget.Clickable
+	BtnImportTLSCert       widget.Clickable
+	BtnClearTLSDiagnostics widget.Clickable
+	BtnClearTLSStore       widget.Clickable
+	BtnQuickTLSDiagnostics widget.Clickable
+	BtnQuickTLSInstall     widget.Clickable
+	ShowAbout              bool
+	ChkVisibleSeal         widget.Bool
+	ChkStrictCompat        widget.Bool
+	ChkAllowInvalidPDF     widget.Bool
+	ChkExpertMode          widget.Bool
 
 	ListCerts    widget.List
 	Certs        []protocol.Certificate
@@ -219,6 +226,9 @@ type UI struct {
 	TrustedDomains     []string
 	TrustedDomainBtns  []widget.Clickable
 	TrustedDomainList  widget.List
+	TLSDiagResults     []TLSEndpointDiagResult
+	TLSDiagRunning     bool
+	TLSDiagList        widget.List
 	ShowScriptHelp     bool
 	ScriptHelpName     string
 	ScriptHelpText     string
@@ -272,6 +282,7 @@ func NewUI(w *app.Window) *UI {
 	ui.MessageList.Axis = layout.Vertical
 	ui.TestList.Axis = layout.Vertical
 	ui.TrustedDomainList.Axis = layout.Vertical
+	ui.TLSDiagList.Axis = layout.Vertical
 	ui.TrustedDomainInput.SingleLine = true
 	ui.initScriptTests()
 	ui.refreshTrustedDomains()
@@ -477,6 +488,14 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 
 	// SPECIAL MINIMALIST LAYOUT FOR PROTOCOL MODE OR SERVER MODE
 	if ui.Protocol != nil || ui.IsServerMode {
+		protocolAction := ""
+		if ui.Protocol != nil {
+			protocolAction = normalizeProtocolAction(ui.Protocol.Action)
+		}
+		isSelectCertFlow := protocolAction == "selectcert"
+		isBatchFlow := protocolAction == "batch"
+		requiresDocument := protocolAction == "" || protocolAction == "sign" || protocolAction == "cosign" || protocolAction == "countersign" || protocolAction == "signandsave"
+
 		return layout.Stack{}.Layout(gtx,
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 				paint.Fill(gtx.Ops, color.NRGBA{R: 245, G: 245, B: 245, A: 255})
@@ -487,7 +506,13 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						// Title
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return material.H5(ui.Theme, "Solicitud de Firma").Layout(gtx)
+							title := "Solicitud de Firma"
+							if isSelectCertFlow {
+								title = "Solicitud de Identificación"
+							} else if isBatchFlow {
+								title = "Solicitud de Firma por Lote"
+							}
+							return material.H5(ui.Theme, title).Layout(gtx)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Spacer{Height: unit.Dp(8)}.Layout(gtx)
@@ -495,7 +520,11 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						// Instruction
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							msg := "El sitio web solicita firmar un documento."
-							if ui.InputFile.Text() != "" {
+							if isSelectCertFlow {
+								msg = "El sitio web solicita seleccionar su certificado de identificación."
+							} else if isBatchFlow {
+								msg = "El sitio web solicita procesar una firma por lotes."
+							} else if ui.InputFile.Text() != "" {
 								msg = fmt.Sprintf("Documento listo: %s", filepath.Base(ui.InputFile.Text()))
 							}
 							return material.Body1(ui.Theme, msg).Layout(gtx)
@@ -505,7 +534,7 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// File selector if empty (for local file flows)
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if ui.InputFile.Text() != "" {
+							if !requiresDocument || ui.InputFile.Text() != "" {
 								return layout.Dimensions{}
 							}
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -544,6 +573,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 									}
 									ui.SelectedCert = index
 									ui.Window.Invalidate()
+									if isBatchFlow && ui.Protocol != nil && !ui.IsSigning {
+										go ui.handleProtocolBatch(ui.Protocol)
+									}
 								}
 
 								label := certificateDisplayLabel(ui.Certs[index])
@@ -569,6 +601,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Visible Seal Checkbox (only if PAdES)
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !requiresDocument {
+								return layout.Dimensions{}
+							}
 							isPades := false
 							if ui.Protocol != nil {
 								isPades = normalizeProtocolFormat(ui.Protocol.SignFormat) == "pades" || normalizeProtocolFormat(ui.Protocol.Params.Get("format")) == "pades"
@@ -592,6 +627,39 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Status/Spinner/Sign Button
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if isBatchFlow {
+								if ui.IsSigning {
+									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											gtx.Constraints.Max.X = gtx.Dp(24)
+											gtx.Constraints.Max.Y = gtx.Dp(24)
+											return material.Loader(ui.Theme).Layout(gtx)
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return material.Body2(ui.Theme, "Procesando lote...").Layout(gtx)
+										}),
+									)
+								}
+								if ui.BtnSignProtocol.Clicked(gtx) {
+									if ui.SelectedCert >= 0 && ui.Protocol != nil {
+										go ui.handleProtocolBatch(ui.Protocol)
+									} else {
+										ui.StatusMsg = withSolution("Seleccione un certificado para continuar con el lote.", "Elija un certificado en la lista y pulse 'Procesar lote'.")
+										ui.Window.Invalidate()
+									}
+								}
+								btn := material.Button(ui.Theme, &ui.BtnSignProtocol, "Procesar lote")
+								if ui.SelectedCert < 0 {
+									btn.Background = color.NRGBA{R: 200, G: 200, B: 200, A: 255}
+								} else {
+									btn.Background = color.NRGBA{R: 0, G: 150, B: 0, A: 255}
+								}
+								return btn.Layout(gtx)
+							}
+							if !requiresDocument {
+								return layout.Dimensions{}
+							}
 							if ui.IsSigning {
 								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -619,6 +687,33 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 								btn.Background = color.NRGBA{R: 0, G: 150, B: 0, A: 255}
 							}
 							return btn.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !ui.shouldShowTLSRecoveryActions() {
+								return layout.Dimensions{}
+							}
+							return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									if ui.BtnQuickTLSDiagnostics.Clicked(gtx) && !ui.TLSDiagRunning {
+										go ui.runTLSEndpointDiagnostics()
+									}
+									texto := "Diagnóstico TLS del servicio"
+									if ui.TLSDiagRunning {
+										texto = "Diagnosticando TLS..."
+									}
+									btn := material.Button(ui.Theme, &ui.BtnQuickTLSDiagnostics, texto)
+									btn.Background = color.NRGBA{R: 80, G: 95, B: 140, A: 255}
+									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+								}),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									if ui.BtnQuickTLSInstall.Clicked(gtx) {
+										go ui.importTLSCertificateFromDialog()
+									}
+									btn := material.Button(ui.Theme, &ui.BtnQuickTLSInstall, "Añadir confianza TLS (.crt/.cer)")
+									btn.Background = color.NRGBA{R: 120, G: 90, B: 50, A: 255}
+									return layout.UniformInset(unit.Dp(4)).Layout(gtx, btn.Layout)
+								}),
+							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -1132,6 +1227,12 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 											return layout.Dimensions{}
 										}),
 									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
+										return layout.Dimensions{}
+									}
+									return ui.layoutTLSEndpointManager(gtx)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									if ui.Mode != 0 || !ui.ChkExpertMode.Value {
@@ -1675,6 +1776,20 @@ func withSolution(message string, hint string) string {
 		return message
 	}
 	return message + "\nPosible solución: " + hint
+}
+
+func (ui *UI) shouldShowTLSRecoveryActions() bool {
+	raw := strings.ToLower(strings.TrimSpace(ui.StatusMsg) + " " + strings.TrimSpace(ui.LastErrorCode) + " " + strings.TrimSpace(ui.LastErrorTechnical))
+	if raw == "" {
+		return false
+	}
+	if strings.Contains(raw, "saf_26") && strings.Contains(raw, "tls") {
+		return true
+	}
+	if strings.Contains(raw, "certificate signed by unknown authority") || strings.Contains(raw, "unknown authority") {
+		return true
+	}
+	return false
 }
 
 func (ui *UI) composeMessageLines() []string {
@@ -5205,13 +5320,9 @@ func isNonExportablePrivateKeyMsg(err error) bool {
 }
 
 func certificateDisplayLabel(cert protocol.Certificate) string {
-	label := ""
-	if cn, ok := cert.Subject["CN"]; ok && strings.TrimSpace(cn) != "" {
-		label = strings.TrimSpace(cn)
-	} else if strings.TrimSpace(cert.Nickname) != "" {
-		label = strings.TrimSpace(cert.Nickname)
-	} else {
-		label = cert.ID
+	label := certificateBestDisplayName(cert)
+	if isRepresentationCertificate(cert) {
+		label += " [representación]"
 	}
 	if issuerCN, ok := cert.Issuer["CN"]; ok && strings.TrimSpace(issuerCN) != "" {
 		label = label + " - " + strings.TrimSpace(issuerCN)
@@ -5227,10 +5338,7 @@ func certificateDisplayLabel(cert protocol.Certificate) string {
 }
 
 func certificateCapabilitySummary(cert protocol.Certificate) string {
-	name := strings.TrimSpace(cert.Subject["CN"])
-	if name == "" {
-		name = strings.TrimSpace(cert.Nickname)
-	}
+	name := certificateBestDisplayName(cert)
 	if name == "" {
 		name = applog.MaskID(cert.ID)
 	}
@@ -5271,6 +5379,81 @@ func certificateCapabilitySummary(cert protocol.Certificate) string {
 	return msg
 }
 
+func certificateBestDisplayName(cert protocol.Certificate) string {
+	if cn := subjectValueByKeys(cert.Subject, "CN", "cn", "CommonName", "commonName"); cn != "" {
+		return cn
+	}
+	given := subjectValueByKeys(cert.Subject, "GN", "givenName", "GivenName")
+	surname := subjectValueByKeys(cert.Subject, "SN", "surname", "Surname")
+	fullName := strings.TrimSpace(strings.Join([]string{given, surname}, " "))
+	if fullName != "" {
+		return fullName
+	}
+	if org := subjectValueByKeys(cert.Subject, "O", "organizationName", "Organization"); org != "" {
+		return org
+	}
+	if ou := subjectValueByKeys(cert.Subject, "OU", "organizationalUnitName", "OrganizationalUnit"); ou != "" {
+		return ou
+	}
+	if email := subjectValueByKeys(cert.Subject, "E", "emailAddress", "EMAILADDRESS"); email != "" {
+		return email
+	}
+	if strings.TrimSpace(cert.Nickname) != "" {
+		return strings.TrimSpace(cert.Nickname)
+	}
+	if parsedDisplay := parseCertificateDisplayFromContent(cert.Content); parsedDisplay != "" {
+		return parsedDisplay
+	}
+	if serial := strings.TrimSpace(cert.SerialNumber); serial != "" {
+		return "Certificado serie " + serial
+	}
+	return strings.TrimSpace(cert.ID)
+}
+
+func parseCertificateDisplayFromContent(der []byte) string {
+	if len(der) == 0 {
+		return ""
+	}
+	c, err := x509.ParseCertificate(der)
+	if err != nil || c == nil {
+		return ""
+	}
+	if cn := strings.TrimSpace(c.Subject.CommonName); cn != "" {
+		return cn
+	}
+	if len(c.Subject.Organization) > 0 {
+		if org := strings.TrimSpace(c.Subject.Organization[0]); org != "" {
+			return org
+		}
+	}
+	if len(c.Subject.OrganizationalUnit) > 0 {
+		if ou := strings.TrimSpace(c.Subject.OrganizationalUnit[0]); ou != "" {
+			return ou
+		}
+	}
+	if len(c.EmailAddresses) > 0 {
+		if email := strings.TrimSpace(c.EmailAddresses[0]); email != "" {
+			return email
+		}
+	}
+	if dn := strings.TrimSpace(c.Subject.String()); dn != "" {
+		return dn
+	}
+	return ""
+}
+
+func subjectValueByKeys(subject map[string]string, keys ...string) string {
+	if len(subject) == 0 {
+		return ""
+	}
+	for _, key := range keys {
+		if v, ok := subject[key]; ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 func certValidityStatus(validFrom, validTo string) string {
 	from := strings.TrimSpace(validFrom)
 	to := strings.TrimSpace(validTo)
@@ -5302,6 +5485,31 @@ func containsAnyInsensitive(value string, terms ...string) bool {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	for _, term := range terms {
 		if strings.Contains(lower, strings.ToLower(strings.TrimSpace(term))) {
+			return true
+		}
+	}
+	return false
+}
+
+func isRepresentationCertificate(cert protocol.Certificate) bool {
+	candidates := []string{
+		certificateBestDisplayName(cert),
+		subjectValueByKeys(cert.Subject, "CN", "cn", "CommonName", "commonName"),
+		subjectValueByKeys(cert.Subject, "O", "organizationName", "Organization"),
+		subjectValueByKeys(cert.Subject, "OU", "organizationalUnitName", "OrganizationalUnit"),
+		subjectValueByKeys(cert.Subject, "SERIALNUMBER", "serialNumber"),
+	}
+	representationTerms := []string{
+		"representante",
+		"representacion",
+		"representación",
+		"apoderado",
+		"persona juridica",
+		"persona jurídica",
+		"representative",
+	}
+	for _, c := range candidates {
+		if containsAnyInsensitive(c, representationTerms...) {
 			return true
 		}
 	}

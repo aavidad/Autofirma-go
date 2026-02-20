@@ -40,10 +40,23 @@ Write-Host "[install-trust-win] binario detectado: $appBin"
 Write-Host '[install-trust-win] generando certificados locales...'
 & $appBin '--generate-certs'
 
+Write-Host '[install-trust-win] exportando certificados compatibles de AutoFirma Java...'
+$appDir = Split-Path -Parent $appBin
+& $appBin '--exportar-certs-java' $appDir
+
 Write-Host '[install-trust-win] aplicando trust...'
 & $appBin '--install-trust'
 
 Write-Host '[install-trust-win] estado de trust...'
 & $appBin '--trust-status'
+
+if ($appDir) {
+  $fnmtCert = Join-Path $appDir 'certs\fnmt-accomp.crt'
+  if (Test-Path $fnmtCert) {
+    Write-Host '[install-trust-win] instalando CA FNMT ACCOMP en Root/CA...'
+    certutil -addstore -f Root $fnmtCert | Out-Null
+    certutil -addstore -f CA $fnmtCert | Out-Null
+  }
+}
 
 Write-Host '[install-trust-win] OK'

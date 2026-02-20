@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-const defaultAllowedSigningDomains = "*.gob.es,*.dipgra.es,localhost,127.0.0.1,::1"
+const defaultAllowedSigningDomains = "*.gob.es,*.dipgra.es,*.guadaltel.es,localhost,127.0.0.1,::1"
 
 var confirmFirstDomainUseFunc = protocolConfirmFirstDomainUseDialog
 
@@ -88,8 +88,14 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 		JavaScriptVersion: 1,
 		ProtocolVersion:   1,
 	}
-	if state.Action == "" {
-		state.Action = normalizeProtocolAction(getQueryParam(q, "op", "operation", "action"))
+	queryAction := normalizeProtocolAction(getQueryParam(q, "op", "operation", "action"))
+	if queryAction != "" {
+		if state.Action != "" && state.Action != queryAction {
+			log.Printf("[Protocol] Acción en host/path (%s) distinta de query-op (%s), se prioriza query-op", state.Action, queryAction)
+		}
+		state.Action = queryAction
+	} else if state.Action == "" {
+		state.Action = queryAction
 	}
 	state.MinimumClientVersion = getQueryParam(q, "mcv")
 	jvc := strings.TrimSpace(getQueryParam(q, "jvc"))
@@ -323,6 +329,64 @@ func normalizeProtocolAction(action string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(action))
 	}
+}
+
+func protocolActionLabelES(action string) string {
+	switch normalizeProtocolAction(action) {
+	case "sign":
+		return "firma"
+	case "cosign":
+		return "cofirma"
+	case "countersign":
+		return "contrafirma"
+	case "selectcert":
+		return "identificación (selección de certificado)"
+	case "load":
+		return "carga de fichero"
+	case "save":
+		return "guardado de fichero"
+	case "signandsave":
+		return "firma y guardado"
+	case "batch":
+		return "firma por lotes"
+	case "service":
+		return "servicio fragmentado"
+	case "websocket":
+		return "arranque websocket"
+	default:
+		return "operación desconocida"
+	}
+}
+
+func protocolRequestSummaryES(state *ProtocolState) string {
+	if state == nil {
+		return "solicitud inválida (estado vacío)"
+	}
+	format := normalizeProtocolFormat(state.SignFormat)
+	if format == "" {
+		format = "-"
+	}
+	rt := "no"
+	if strings.TrimSpace(state.RTServlet) != "" {
+		rt = "sí"
+	}
+	st := "no"
+	if strings.TrimSpace(state.STServlet) != "" {
+		st = "sí"
+	}
+	fileID := strings.TrimSpace(state.FileID)
+	if fileID == "" {
+		fileID = "-"
+	}
+	return fmt.Sprintf(
+		"tipo=%s accion=%s formato=%s id=%s rtservlet=%s stservlet=%s",
+		protocolActionLabelES(state.Action),
+		normalizeProtocolAction(state.Action),
+		format,
+		fileID,
+		rt,
+		st,
+	)
 }
 
 func allowedSigningDomainPatterns() []string {
@@ -903,17 +967,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	sendBody := func(label string, body string, withContentType bool) (bool, string, int, error) {
 		u := *reqURL
 		u.RawQuery = ""
-		req, err := http.NewRequest("POST", u.String(), strings.NewReader(body))
-		if err != nil {
-			return false, "", 0, err
-		}
-		if withContentType {
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		}
-		req.Header.Set("User-Agent", "AutoFirma/1.6.5")
-		req.Header.Set("Accept", "*/*")
-
-		resp, err := client.Do(req)
+		resp, err := protocolPostWithTLSFallback(client, u.String(), body, withContentType)
 		if err != nil {
 			return false, "", 0, fmt.Errorf("%s: fallo de subida: %v", label, err)
 		}
@@ -926,7 +980,7 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 		if resp.StatusCode != 200 {
 			return false, bodyText, resp.StatusCode, nil
 		}
-		if strings.EqualFold(bodyText, "OK") || strings.Contains(strings.ToUpper(bodyText), "OK") {
+		if isStorageUploadOKResponse(bodyText) {
 			return true, bodyText, resp.StatusCode, nil
 		}
 		return false, bodyText, resp.StatusCode, nil
@@ -1023,6 +1077,196 @@ func (p *ProtocolState) UploadSignature(signatureB64 string, certB64 string) err
 	return fmt.Errorf("la subida al servidor devolvió cuerpo no-OK: %s", bodyText)
 }
 
+// UploadCertificate sube solo el certificado seleccionado al servlet de almacenamiento.
+// Se usa para flujos de identificación (selectcert) donde no hay firma de documento.
+func (p *ProtocolState) UploadCertificate(certB64 string) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	uploadServlet := p.STServlet
+	if uploadServlet == "" {
+		uploadServlet = p.RTServlet
+		log.Printf("[Protocol] Falta STServlet, usando RTServlet como respaldo para subida de certificado: %s", uploadServlet)
+	} else {
+		log.Printf("[Protocol] Usando STServlet para subida de certificado: %s", uploadServlet)
+	}
+	if err := validateSigningServerURL(uploadServlet, "stservlet/rtservlet"); err != nil {
+		return err
+	}
+	reqURL, err := url.Parse(uploadServlet)
+	if err != nil {
+		return err
+	}
+
+	op := "put"
+	version := "1_0"
+
+	certBytes, err := base64.StdEncoding.DecodeString(certB64)
+	if err != nil {
+		return fmt.Errorf("certificado base64 inválido: %v", err)
+	}
+
+	var payload string
+	if p.Key != "" {
+		keyBytes := []byte(p.Key)
+		encCertVal, err := AutoFirmaEncryptAndFormat(certBytes, keyBytes)
+		if err != nil {
+			return fmt.Errorf("falló el cifrado del certificado: %v", err)
+		}
+		payload = encCertVal
+		log.Printf("[Protocol] Subiendo certificado cifrado: %s", summarizePayloadForLog(payload))
+	} else {
+		payload = base64.URLEncoding.EncodeToString(certBytes)
+		log.Printf("[Protocol] Subiendo certificado en claro")
+	}
+
+	sendBody := func(label string, body string, withContentType bool) (bool, string, int, error) {
+		u := *reqURL
+		u.RawQuery = ""
+		resp, err := protocolPostWithTLSFallback(client, u.String(), body, withContentType)
+		if err != nil {
+			return false, "", 0, fmt.Errorf("%s: fallo de subida: %v", label, err)
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+		bodyText := strings.TrimSpace(string(respBody))
+		log.Printf("[Protocol] %s respuesta de subida estado=%d cuerpo=%q", label, resp.StatusCode, bodyText)
+
+		if resp.StatusCode != 200 {
+			return false, bodyText, resp.StatusCode, nil
+		}
+		if isStorageUploadOKResponse(bodyText) {
+			return true, bodyText, resp.StatusCode, nil
+		}
+		return false, bodyText, resp.StatusCode, nil
+	}
+
+	bodyA := "op=" + op + "&v=" + version + "&id=" + p.FileID + "&dat=" + payload
+	ok, bodyText, statusCode, err := sendBody("java-style-selectcert", bodyA, false)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+
+	legacy := url.Values{}
+	for k, v := range p.Params {
+		for _, vv := range v {
+			legacy.Add(k, vv)
+		}
+	}
+	legacy.Set("op", "put")
+	legacy.Set("v", "1_0")
+	legacy.Set("id", p.FileID)
+	legacy.Set("dat", certB64)
+	legacy.Set("cert", certB64)
+	if p.Key != "" {
+		legacy.Set("key", p.Key)
+	}
+	ok, bodyText, statusCode, err = sendBody("legacy-style-selectcert", legacy.Encode(), true)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if statusCode != 0 {
+		return fmt.Errorf("error HTTP en subida de certificado: %d %s", statusCode, bodyText)
+	}
+	return fmt.Errorf("la subida de certificado devolvió cuerpo no-OK: %s", bodyText)
+}
+
+// UploadResultData sube un resultado textual (base64/urlsafe/etc.) al storage servlet.
+// Se utiliza para operaciones batch/selectcert donde no se sube par cert|firma.
+func (p *ProtocolState) UploadResultData(dat string) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	uploadServlet := strings.TrimSpace(p.STServlet)
+	if uploadServlet == "" {
+		uploadServlet = strings.TrimSpace(p.RTServlet)
+		log.Printf("[Protocol] Falta STServlet, usando RTServlet como respaldo para subida de resultado: %s", uploadServlet)
+	} else {
+		log.Printf("[Protocol] Usando STServlet para subida de resultado: %s", uploadServlet)
+	}
+	if uploadServlet == "" {
+		return fmt.Errorf("no hay servlet de almacenamiento para subir resultado")
+	}
+	if err := validateSigningServerURL(uploadServlet, "stservlet/rtservlet"); err != nil {
+		return err
+	}
+	reqURL, err := url.Parse(uploadServlet)
+	if err != nil {
+		return err
+	}
+
+	fileID := strings.TrimSpace(p.FileID)
+	if fileID == "" {
+		fileID = strings.TrimSpace(p.RequestID)
+	}
+	if fileID == "" {
+		return fmt.Errorf("identificador de solicitud vacío")
+	}
+
+	sendBody := func(label string, body string, withContentType bool) (bool, string, int, error) {
+		u := *reqURL
+		u.RawQuery = ""
+		resp, err := protocolPostWithTLSFallback(client, u.String(), body, withContentType)
+		if err != nil {
+			return false, "", 0, fmt.Errorf("%s: fallo de subida: %v", label, err)
+		}
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+		bodyText := strings.TrimSpace(string(respBody))
+		log.Printf("[Protocol] %s respuesta de subida estado=%d cuerpo=%q", label, resp.StatusCode, bodyText)
+		if resp.StatusCode != 200 {
+			return false, bodyText, resp.StatusCode, nil
+		}
+		if isStorageUploadOKResponse(bodyText) {
+			return true, bodyText, resp.StatusCode, nil
+		}
+		return false, bodyText, resp.StatusCode, nil
+	}
+
+	javaStyle := url.Values{}
+	javaStyle.Set("op", "put")
+	javaStyle.Set("v", "1_0")
+	javaStyle.Set("id", fileID)
+	javaStyle.Set("dat", dat)
+	if strings.TrimSpace(p.Key) != "" {
+		javaStyle.Set("key", p.Key)
+	}
+	ok, bodyText, status, err := sendBody("java-style-result", javaStyle.Encode(), true)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+
+	legacy := url.Values{}
+	for k, v := range p.Params {
+		for _, vv := range v {
+			legacy.Add(k, vv)
+		}
+	}
+	legacy.Set("op", "put")
+	legacy.Set("v", "1_0")
+	legacy.Set("id", fileID)
+	legacy.Set("dat", dat)
+	ok, bodyText, status, err = sendBody("legacy-style-result", legacy.Encode(), true)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	if status != 0 {
+		return fmt.Errorf("error HTTP en subida de resultado: %d %s", status, bodyText)
+	}
+	return fmt.Errorf("la subida de resultado devolvió cuerpo no-OK: %s", bodyText)
+}
+
 func summarizePayloadForLog(payload string) string {
 	payload = strings.TrimSpace(payload)
 	if payload == "" {
@@ -1032,6 +1276,35 @@ func summarizePayloadForLog(payload string) string {
 		return "payload[" + payload + "]"
 	}
 	return fmt.Sprintf("payload[%s...%s len=%d]", payload[:12], payload[len(payload)-8:], len(payload))
+}
+
+func isStorageUploadOKResponse(bodyText string) bool {
+	normalized := strings.TrimSpace(bodyText)
+	normalized = strings.Trim(normalized, "\"'")
+	upper := strings.ToUpper(normalized)
+	switch upper {
+	case "OK", "SAVE_OK", "1", "1)":
+		return true
+	}
+	decoders := []func(string) ([]byte, error){
+		base64.StdEncoding.DecodeString,
+		base64.RawStdEncoding.DecodeString,
+		base64.URLEncoding.DecodeString,
+		base64.RawURLEncoding.DecodeString,
+	}
+	for _, decode := range decoders {
+		decoded, err := decode(normalized)
+		if err != nil {
+			continue
+		}
+		decodedTxt := strings.TrimSpace(string(decoded))
+		decodedTxt = strings.Trim(decodedTxt, "\"'")
+		switch strings.ToUpper(decodedTxt) {
+		case "OK", "SAVE_OK", "1", "1)":
+			return true
+		}
+	}
+	return false
 }
 
 // SendWaitSignal envía marcador WAIT compatible con Java al storage servlet.
@@ -1057,15 +1330,7 @@ func (p *ProtocolState) SendWaitSignal() error {
 
 	postBody := "op=put&v=1_0&id=" + p.RequestID + "&dat=#WAIT"
 	reqURL.RawQuery = ""
-	req, err := http.NewRequest("POST", reqURL.String(), strings.NewReader(postBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "AutoFirma/1.6.5")
-	req.Header.Set("Accept", "*/*")
-
-	resp, err := client.Do(req)
+	resp, err := protocolPostWithTLSFallback(client, reqURL.String(), postBody, true)
 	if err != nil {
 		return err
 	}
@@ -1078,10 +1343,71 @@ func (p *ProtocolState) SendWaitSignal() error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("falló WAIT: %d %s", resp.StatusCode, bodyText)
 	}
-	if !strings.EqualFold(bodyText, "OK") && !strings.Contains(strings.ToUpper(bodyText), "OK") {
+	if !isStorageUploadOKResponse(bodyText) {
 		return fmt.Errorf("WAIT devolvió cuerpo no OK: %s", bodyText)
 	}
 	return nil
+}
+
+func protocolPostWithTLSFallback(client *http.Client, rawURL string, body string, withContentType bool) (*http.Response, error) {
+	buildReq := func() (*http.Request, error) {
+		req, err := http.NewRequest("POST", rawURL, strings.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		if withContentType {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		req.Header.Set("User-Agent", "AutoFirma/1.6.5")
+		req.Header.Set("Accept", "*/*")
+		return req, nil
+	}
+
+	req, err := buildReq()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	if !isTLSUnknownAuthorityError(err) {
+		return nil, err
+	}
+
+	timeout := 30 * time.Second
+	if client != nil && client.Timeout > 0 {
+		timeout = client.Timeout
+	}
+	fallbackClient, loaded, fbErr := buildBatchHTTPFallbackClient(timeout, rawURL)
+	if fbErr == nil && loaded > 0 {
+		log.Printf("[Protocol] fallback TLS activado en subida (unknown authority): certificados extra cargados=%d", loaded)
+		req2, reqErr := buildReq()
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		resp2, err2 := fallbackClient.Do(req2)
+		if err2 == nil {
+			return resp2, nil
+		}
+		err = err2
+	}
+
+	if host, allowed := shouldUseBatchInsecureTLSException(rawURL); allowed {
+		log.Printf("[Protocol] AVISO SEGURIDAD: usando excepción TLS por dominio=%s en subida.", host)
+		insecureClient := buildBatchHTTPInsecureExceptionClient(timeout, host)
+		req3, reqErr := buildReq()
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		resp3, err3 := insecureClient.Do(req3)
+		if err3 == nil {
+			return resp3, nil
+		}
+		err = err3
+	}
+
+	return nil, err
 }
 
 // HandleProtocolInit inicia el flujo desde la UI.
@@ -1097,7 +1423,26 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 	}
 
 	ui.Protocol = state
+	log.Printf("[Protocol] Solicitud web recibida: %s", protocolRequestSummaryES(state))
 	ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(state.SignFormat), "protocol_init")
+
+	// Flujo de identificación: solo selección de certificado (sin fichero PDF).
+	if normalizeProtocolAction(state.Action) == "selectcert" {
+		log.Printf("[Protocol] Flujo de identificación detectado (sin documento): %s", protocolRequestSummaryES(state))
+		ui.StatusMsg = "Solicitud de identificación recibida. Seleccione su certificado."
+		ui.Window.Invalidate()
+		go ui.handleProtocolSelectCert(state)
+		return
+	}
+	// Flujo batch: procesar lote y devolver resultado sin pedir selección de PDF manual.
+	if normalizeProtocolAction(state.Action) == "batch" {
+		log.Printf("[Protocol] Flujo batch detectado (sin selección manual de PDF): %s", protocolRequestSummaryES(state))
+		ui.StatusMsg = "Solicitud de lote recibida. Seleccione certificado y pulse 'Procesar lote'."
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "batch_waiting_cert")
+		ui.Window.Invalidate()
+		return
+	}
+
 	ui.StatusMsg = "Descargando documento del servidor..."
 	ui.Window.Invalidate()
 
@@ -1172,6 +1517,131 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 		ui.Mode = 0 // Asegurar modo Firma
 		ui.Window.Invalidate()
 	}()
+}
+
+func (ui *UI) handleProtocolSelectCert(state *ProtocolState) {
+	if state == nil {
+		ui.StatusMsg = "Error protocolo: estado inválido en selectcert."
+		ui.Window.Invalidate()
+		return
+	}
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil {
+		ui.StatusMsg = "Error cargando certificados para identificación: " + err.Error()
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_error_load")
+		ui.Window.Invalidate()
+		return
+	}
+	filtered, _ := filterSelectCertByDefaultStore(certs, state)
+	if len(filtered) == 0 {
+		filtered = certs
+	}
+	storePref := resolveDefaultKeyStorePreference(state)
+	if strings.TrimSpace(storePref) != "" {
+		log.Printf("[Protocol] SelectCert: almacén solicitado=%s certificados_mostrados=%d total_detectados=%d", storePref, len(filtered), len(certs))
+	}
+	if len(filtered) == 0 {
+		ui.StatusMsg = "No hay certificados disponibles para identificación."
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_empty")
+		ui.Window.Invalidate()
+		return
+	}
+
+	chosen, canceled, err := protocolSelectCertDialog(filtered)
+	if canceled {
+		ui.StatusMsg = "Selección de certificado cancelada."
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_cancel")
+		ui.Window.Invalidate()
+		return
+	}
+	if err != nil {
+		ui.StatusMsg = "Error en selector de certificado: " + err.Error()
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_error_dialog")
+		ui.Window.Invalidate()
+		return
+	}
+	if chosen < 0 || chosen >= len(filtered) || len(filtered[chosen].Content) == 0 {
+		ui.StatusMsg = "Selección de certificado inválida."
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_invalid")
+		ui.Window.Invalidate()
+		return
+	}
+
+	// Reflejar selección en la UI principal si coincide con lista cargada.
+	for idx := range ui.Certs {
+		if ui.Certs[idx].ID == filtered[chosen].ID {
+			ui.SelectedCert = idx
+			break
+		}
+	}
+
+	certB64 := base64.StdEncoding.EncodeToString(filtered[chosen].Content)
+	if strings.TrimSpace(state.STServlet) != "" || strings.TrimSpace(state.RTServlet) != "" {
+		if err := state.UploadCertificate(certB64); err != nil {
+			ui.StatusMsg = "Error enviando certificado a la web: " + err.Error()
+			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_error_upload")
+			ui.Window.Invalidate()
+			return
+		}
+	}
+
+	ui.StatusMsg = "Certificado de identificación enviado correctamente."
+	ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "selectcert_ok")
+	ui.ShouldClose = true
+	ui.Window.Invalidate()
+}
+
+func (ui *UI) handleProtocolBatch(state *ProtocolState) {
+	if state == nil {
+		ui.StatusMsg = "Error protocolo: estado inválido en batch."
+		ui.Window.Invalidate()
+		return
+	}
+	if ui.IsSigning {
+		ui.StatusMsg = "Ya hay una operación en curso. Espere a que termine."
+		ui.Window.Invalidate()
+		return
+	}
+	ui.IsSigning = true
+	ui.Window.Invalidate()
+	defer func() {
+		ui.IsSigning = false
+		ui.Window.Invalidate()
+	}()
+	srv := &WebSocketServer{ui: ui}
+	result := strings.TrimSpace(srv.processBatchRequest(state))
+	upper := strings.ToUpper(result)
+	if strings.HasPrefix(upper, "SAF_") || strings.HasPrefix(upper, "ERR-") || strings.HasPrefix(upper, "ERROR_") {
+		hint := "Reintenta el lote y revisa la conectividad con el servicio remoto."
+		lower := strings.ToLower(result)
+		if strings.Contains(lower, "saf_26") && strings.Contains(lower, "tls") {
+			hint = "La app no confía en la cadena TLS del servicio remoto. Usa 'Diagnóstico TLS del servicio' y, si falta cadena, 'Añadir confianza TLS (.crt/.cer)'."
+		} else if strings.Contains(lower, "saf_26") && strings.Contains(lower, "dns") {
+			hint = "Revisa DNS/red corporativa y vuelve a intentar."
+		}
+		ui.setLastError("ERR_BATCH_REMOTE", "remoto", "batch", fmt.Errorf("%s", result), hint)
+		ui.StatusMsg = "Error procesando lote: " + result
+		ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "batch_error")
+		ui.Window.Invalidate()
+		return
+	}
+
+	if strings.TrimSpace(state.STServlet) != "" || strings.TrimSpace(state.RTServlet) != "" {
+		if err := state.UploadResultData(result); err != nil {
+			ui.StatusMsg = "Lote procesado, pero falló la subida de resultado: " + err.Error()
+			ui.setLastError("ERR_BATCH_UPLOAD", "subida", "batch", err, "Reintenta la operación y revisa STServlet/RTServlet del servicio remoto.")
+			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "batch_error_upload")
+			ui.Window.Invalidate()
+			return
+		}
+	}
+
+	ui.clearLastError()
+	ui.StatusMsg = "Lote procesado y resultado enviado correctamente."
+	ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), "-", "batch_ok")
+	ui.ShouldClose = true
+	ui.Window.Invalidate()
 }
 
 // parseAutoFirmaXML extrae datos reales a firmar y actualiza ProtocolState con parámetros del XML.

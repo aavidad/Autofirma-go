@@ -169,13 +169,19 @@ func isAllowedWebOrigin(origin string) bool {
 	if origin == "" {
 		return true
 	}
+	if strings.EqualFold(origin, "null") {
+		// Algunos navegadores/entornos envían Origin "null" en arranque de integración.
+		return true
+	}
 	u, err := url.Parse(origin)
 	if err != nil {
+		log.Printf("[WebSocket] Origin inválido en comprobación: %q", origin)
 		return false
 	}
 	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
 	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
 	if host == "" {
+		log.Printf("[WebSocket] Origin sin host en comprobación: %q", origin)
 		return false
 	}
 	if scheme == "chrome-extension" || scheme == "moz-extension" {
@@ -185,14 +191,13 @@ func isAllowedWebOrigin(origin string) bool {
 		return scheme == "http" || scheme == "https"
 	}
 	if scheme != "https" {
+		log.Printf("[WebSocket] Origin remoto rechazado por esquema no seguro: origin=%q", origin)
 		return false
 	}
-	for _, pattern := range allowedSigningDomainPatterns() {
-		if isHostAllowedByPattern(host, pattern) {
-			return true
-		}
-	}
-	return false
+	// Compatibilidad: en modo WebSocket de sedes, el origen HTTPS puede no coincidir
+	// con el host de firma final (rt/stservlet). La validación fuerte se aplica
+	// después sobre URLs de firma y lista blanca de dominios de firma.
+	return true
 }
 
 func compatError(code, msg string) string {
@@ -455,6 +460,7 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 		return s.formatError("ERROR_PARSING_URI", err.Error())
 	}
 	action := normalizeProtocolAction(state.Action)
+	log.Printf("[WebSocket] Solicitud web recibida: %s", protocolRequestSummaryES(state))
 	if s.ui != nil {
 		s.ui.updateSessionDiagnostics("websocket", action, getProtocolSessionID(state), normalizeProtocolFormat(state.SignFormat), "request_received")
 	}
@@ -535,7 +541,12 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 	// 5. TRIGGER UI for user selection and signing
 	s.ui.Protocol = state
 	s.ui.InputFile.SetText(filePath)
-	s.ui.StatusMsg = "Solicitud de firma recibida. Seleccione su certificado."
+	if isLocalOnlyWebsocketSignFlow(state) {
+		s.ui.StatusMsg = "Solicitud de firma local recibida. Se firmará en local y no se enviará automáticamente a un servidor de sede."
+		log.Printf("[WebSocket] Aviso: flujo de firma local detectado (sin rtservlet/stservlet ni datos remotos). La descarga posterior en sede puede no estar disponible.")
+	} else {
+		s.ui.StatusMsg = "Solicitud de firma recibida. Seleccione su certificado."
+	}
 	s.ui.Window.Invalidate()
 
 	// Wait for user to finish signing via UI
@@ -1130,6 +1141,21 @@ func buildProtocolExtraInfo(state *ProtocolState, filePath string) []byte {
 		return nil
 	}
 	return raw
+}
+
+func isLocalOnlyWebsocketSignFlow(state *ProtocolState) bool {
+	if state == nil {
+		return false
+	}
+	action := normalizeProtocolAction(state.Action)
+	if action != "sign" && action != "cosign" && action != "countersign" && action != "signandsave" {
+		return false
+	}
+	hasRemoteServlet := strings.TrimSpace(state.RTServlet) != "" || strings.TrimSpace(state.STServlet) != ""
+	hasRemoteData := strings.TrimSpace(state.FileID) != ""
+	// Algunos integradores envían datos en parámetros alternativos del protocolo.
+	hasAltData := strings.TrimSpace(getQueryParam(state.Params, "dat", "ksb64", "data")) != ""
+	return !hasRemoteServlet && !hasRemoteData && !hasAltData
 }
 
 func (s *WebSocketServer) buildResponse(certDER []byte, sigBytes []byte, key string, extraInfo []byte) (string, error) {

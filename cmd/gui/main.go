@@ -7,8 +7,8 @@ package main
 import (
 	"autofirma-host/pkg/applog"
 	"autofirma-host/pkg/version"
-	"fmt"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/url"
@@ -23,8 +23,9 @@ import (
 var (
 	serverModeFlag    = flag.Bool("server", false, "Iniciar como servidor WebSocket en el puerto 63117")
 	generateCertsFlag = flag.Bool("generate-certs", false, "Generar certificados TLS locales y salir")
-	installTrustFlag  = flag.Bool("install-trust", false, "Instalar la CA local en los almacenes de confianza (Linux/Windows)")
-	trustStatusFlag   = flag.Bool("trust-status", false, "Mostrar el estado de confianza de la CA local (Linux/Windows)")
+	installTrustFlag  = flag.Bool("install-trust", false, "Instalar la CA local en los almacenes de confianza (Linux/Windows/macOS)")
+	trustStatusFlag   = flag.Bool("trust-status", false, "Mostrar el estado de confianza de la CA local (Linux/Windows/macOS)")
+	exportJavaCerts   = flag.String("exportar-certs-java", "", "Exportar certificados compatibles con AutoFirma Java al directorio indicado y salir")
 	versionFlag       = flag.Bool("version", false, "Mostrar versión de la aplicación y salir")
 	detailHelpFlag    = flag.Bool("ayuda-detallada", false, "Mostrar ayuda detallada en castellano y salir")
 )
@@ -39,6 +40,7 @@ func main() {
 
 	if *versionFlag {
 		fmt.Printf("AutoFirma Dipgra %s\n", version.CurrentVersion)
+		fmt.Printf("Compilacion: commit=%s fecha=%s\n", version.BuildCommit, version.BuildDate)
 		fmt.Println("Software libre bajo licencia GPLv3.")
 		fmt.Println("Creado por Alberto Avidad Fernandez (Oficina de Software Libre de la Diputacion de Granada).")
 		return
@@ -65,6 +67,18 @@ func main() {
 			os.Exit(1)
 		}
 		log.Printf("Certificados locales listos: cert=%s key=%s", certFile, keyFile)
+		return
+	}
+	if *exportJavaCerts != "" {
+		if _, _, err := ensureLocalTLSCerts(); err != nil {
+			log.Printf("No se pudieron preparar certificados locales: %v", err)
+			os.Exit(1)
+		}
+		if err := exportJavaCompatibilityCerts(*exportJavaCerts); err != nil {
+			log.Printf("Fallo exportando certificados compatibles de AutoFirma Java: %v", err)
+			os.Exit(1)
+		}
+		log.Printf("Certificados compatibles de AutoFirma Java exportados en: %s", *exportJavaCerts)
 		return
 	}
 
@@ -139,8 +153,11 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "  -generate-certs")
 	_, _ = fmt.Fprintln(out, "    Genera certificados TLS locales para el canal HTTPS/WSS en loopback (127.0.0.1).")
 	_, _ = fmt.Fprintln(out, "    Son necesarios para que el navegador confíe en la conexión local con AutoFirma.")
+	_, _ = fmt.Fprintln(out, "  -exportar-certs-java <directorio>")
+	_, _ = fmt.Fprintln(out, "    Exporta archivos de compatibilidad Java: autofirma.pfx, Autofirma_ROOT.cer y autofirma.cer.")
+	_, _ = fmt.Fprintln(out, "    Uso típico: instaladores de sistema para dejar los certificados en el directorio de instalación.")
 	_, _ = fmt.Fprintln(out, "  -install-trust")
-	_, _ = fmt.Fprintln(out, "    Instala la CA local en almacenes de confianza (NSS/sistema) para evitar avisos TLS.")
+	_, _ = fmt.Fprintln(out, "    Instala la CA local en almacenes de confianza (NSS/sistema/keychain) para evitar avisos TLS.")
 	_, _ = fmt.Fprintln(out, "  -trust-status")
 	_, _ = fmt.Fprintln(out, "    Muestra si la CA local está correctamente confiada en los almacenes detectados.")
 	_, _ = fmt.Fprintln(out, "  -server")

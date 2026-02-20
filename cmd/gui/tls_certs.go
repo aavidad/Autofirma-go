@@ -14,8 +14,17 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
+)
+
+const (
+	javaCompatRootCertFilename   = "Autofirma_ROOT.cer"
+	javaCompatServerCertFilename = "autofirma.cer"
+	javaCompatPKCS12Filename     = "autofirma.pfx"
+	javaCompatPKCS12Password     = "654321"
+	javaCompatPKCS12Alias        = "SocketAutoFirma"
 )
 
 func ensureLocalTLSCerts() (string, string, error) {
@@ -33,6 +42,9 @@ func ensureLocalTLSCerts() (string, string, error) {
 	serverCertPath := filepath.Join(dir, "server.crt")
 
 	if fileExists(rootCAKeyPath) && fileExists(rootCACertPath) && fileExists(serverKeyPath) && fileExists(serverCertPath) {
+		if err := writeJavaCompatibilityCertFiles(rootCACertPath, serverCertPath, serverKeyPath, dir); err != nil {
+			return "", "", err
+		}
 		return serverCertPath, serverKeyPath, nil
 	}
 
@@ -48,7 +60,7 @@ func ensureLocalTLSCerts() (string, string, error) {
 	rootTemplate := &x509.Certificate{
 		SerialNumber: rootSerial,
 		Subject: pkix.Name{
-			CommonName:   "Autofirma Dipgra Local Root CA",
+			CommonName:   "Autofirma ROOT",
 			Organization: []string{"Diputacion de Granada"},
 			Country:      []string{"ES"},
 		},
@@ -118,8 +130,100 @@ func ensureLocalTLSCerts() (string, string, error) {
 	if err := writePEMFile(serverCertPath, "CERTIFICATE", serverDER, 0o644); err != nil {
 		return "", "", err
 	}
+	if err := writeJavaCompatibilityCertFiles(rootCACertPath, serverCertPath, serverKeyPath, dir); err != nil {
+		return "", "", err
+	}
 
 	return serverCertPath, serverKeyPath, nil
+}
+
+func exportJavaCompatibilityCerts(targetDir string) error {
+	targetDir = filepath.Clean(targetDir)
+	if targetDir == "" || targetDir == "." {
+		return fmt.Errorf("directorio de exportacion no valido")
+	}
+
+	dir, err := localTLSCertsDir()
+	if err != nil {
+		return err
+	}
+	rootCACertPath := filepath.Join(dir, "rootCA.crt")
+	serverKeyPath := filepath.Join(dir, "server.key")
+	serverCertPath := filepath.Join(dir, "server.crt")
+	if !fileExists(rootCACertPath) || !fileExists(serverKeyPath) || !fileExists(serverCertPath) {
+		if _, _, err := ensureLocalTLSCerts(); err != nil {
+			return err
+		}
+	}
+	return writeJavaCompatibilityCertFiles(rootCACertPath, serverCertPath, serverKeyPath, targetDir)
+}
+
+func writeJavaCompatibilityCertFiles(rootCACertPath string, serverCertPath string, serverKeyPath string, outputDir string) error {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return fmt.Errorf("creando directorio de salida %s: %w", outputDir, err)
+	}
+
+	rootCert, err := loadPEMCertificate(rootCACertPath)
+	if err != nil {
+		return err
+	}
+	serverCert, err := loadPEMCertificate(serverCertPath)
+	if err != nil {
+		return err
+	}
+
+	rootDERPath := filepath.Join(outputDir, javaCompatRootCertFilename)
+	serverDERPath := filepath.Join(outputDir, javaCompatServerCertFilename)
+	if err := os.WriteFile(rootDERPath, rootCert.Raw, 0o644); err != nil {
+		return fmt.Errorf("escribiendo %s: %w", rootDERPath, err)
+	}
+	if err := os.WriteFile(serverDERPath, serverCert.Raw, 0o644); err != nil {
+		return fmt.Errorf("escribiendo %s: %w", serverDERPath, err)
+	}
+
+	pfxPath := filepath.Join(outputDir, javaCompatPKCS12Filename)
+	if err := generatePKCS12WithOpenSSL(serverCertPath, serverKeyPath, rootCACertPath, pfxPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadPEMCertificate(path string) (*x509.Certificate, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("leyendo %s: %w", path, err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("certificado PEM invalido en %s", path)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parseando certificado %s: %w", path, err)
+	}
+	return cert, nil
+}
+
+func generatePKCS12WithOpenSSL(serverCertPath string, serverKeyPath string, rootCACertPath string, outputPath string) error {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		return nil
+	}
+	cmd := exec.Command(
+		"openssl", "pkcs12", "-export",
+		"-inkey", serverKeyPath,
+		"-in", serverCertPath,
+		"-certfile", rootCACertPath,
+		"-name", javaCompatPKCS12Alias,
+		"-passout", "pass:"+javaCompatPKCS12Password,
+		"-out", outputPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("fallo generando %s: %v (%s)", javaCompatPKCS12Filename, err, string(out))
+	}
+	if err := os.Chmod(outputPath, 0o600); err != nil {
+		return fmt.Errorf("ajustando permisos de %s: %w", outputPath, err)
+	}
+	return nil
 }
 
 func localTLSCertsDir() (string, error) {

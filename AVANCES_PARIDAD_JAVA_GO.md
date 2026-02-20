@@ -1,6 +1,6 @@
 # Avances Paridad Java -> Go (AutoFirma)
 
-Ultima actualizacion: 2026-02-17  
+Ultima actualizacion: 2026-02-19  
 Workspace: `/home/alberto/Trabajo/AutoFirma_Dipgra/autofirma_migracion/work/native-host-src`
 
 ## Estado de documentacion (unificado)
@@ -47,6 +47,12 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - rutas candidatas de modulo PKCS#11 ampliadas para Linux/macOS/Windows.
   - fallback PKCS#11 en PKCS#1 acepta aliases de store (`defaultKeyStore/defaultkeystore/...`) y mejora trazabilidad de error cuando fallan exportacion y fallback.
 - Robustez `service` legacy (framing, URL-encoding, errores y limites de memoria).
+- Paridad de certificados locales con Java:
+  - se generan/exportan tambien `autofirma.pfx`, `Autofirma_ROOT.cer` y `autofirma.cer`,
+  - alias/convenciones Java alineadas (`SocketAutoFirma`, `Autofirma ROOT`, password de compatibilidad `654321`),
+  - nuevo flag `--exportar-certs-java <directorio>` para uso en instaladores.
+- Trust local ampliado a macOS (`--install-trust` y `--trust-status`).
+- Instaladores actualizados para desplegar certificados de compatibilidad Java en Linux/Windows y nuevo bloque base para macOS.
 - Validacion automatica mas robusta:
   - `scripts/test_active_go.sh` y `scripts/run_full_validation.sh` usan `GOFLAGS=-mod=readonly` por defecto para evitar falsos negativos por vendor.
   - `run_full_validation.sh` clasifica bloqueo de socket/sandbox de WSS como `ENV_BLOCKED` (no fallo funcional de producto).

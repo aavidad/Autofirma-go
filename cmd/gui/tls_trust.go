@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-const localRootCANickname = "Autofirma Dipgra Local Root CA"
+const localRootCANickname = "Autofirma ROOT"
 
 func installLocalTLSTrust() ([]string, error) {
 	lines := []string{}
@@ -37,9 +37,14 @@ func installLocalTLSTrust() ([]string, error) {
 		lines = append(lines, winLines...)
 		return lines, winErr
 	}
+	if runtime.GOOS == "darwin" {
+		macLines, macErr := installTrustMacOS(rootCAPath)
+		lines = append(lines, macLines...)
+		return lines, macErr
+	}
 
 	if runtime.GOOS != "linux" {
-		lines = append(lines, "[Trust] Instalacion de confianza automatica disponible solo en Linux y Windows.")
+		lines = append(lines, "[Trust] Instalacion de confianza automatica disponible solo en Linux, Windows y macOS.")
 		return lines, nil
 	}
 
@@ -86,9 +91,14 @@ func localTLSTrustStatus() ([]string, error) {
 		lines = append(lines, winLines...)
 		return lines, winErr
 	}
+	if runtime.GOOS == "darwin" {
+		macLines, macErr := localTLSTrustStatusMacOS(rootCAPath)
+		lines = append(lines, macLines...)
+		return lines, macErr
+	}
 
 	if runtime.GOOS != "linux" {
-		lines = append(lines, "[Trust] Comprobacion detallada disponible solo en Linux y Windows.")
+		lines = append(lines, "[Trust] Comprobacion detallada disponible solo en Linux, Windows y macOS.")
 		return lines, nil
 	}
 
@@ -447,4 +457,131 @@ func windowsImportRootCA(scope string, rootCAPath string) error {
 
 func psQuotePS(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+func installTrustMacOS(rootCAPath string) ([]string, error) {
+	lines := []string{}
+	thumb, err := localCAThumbprint(rootCAPath)
+	if err != nil {
+		return lines, err
+	}
+	lines = append(lines, fmt.Sprintf("[Trust] macOS huella CA local: %s", thumb))
+
+	userOK, err := macOSKeychainHasThumbprint(thumb, macOSLoginKeychainPath())
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] macOS login keychain: no verificable (%v).", err))
+	} else if userOK {
+		lines = append(lines, "[Trust] macOS login keychain: ya confiado.")
+	} else {
+		if err := macOSImportRootCA(rootCAPath, macOSLoginKeychainPath()); err != nil {
+			return lines, fmt.Errorf("error instalando en login keychain: %w", err)
+		}
+		lines = append(lines, "[Trust] macOS login keychain: instalado.")
+	}
+
+	if envBool("AUTOFIRMA_TRUST_SKIP_SYSTEM", false) {
+		lines = append(lines, "[Trust] macOS System.keychain omitido por AUTOFIRMA_TRUST_SKIP_SYSTEM=1.")
+		return lines, nil
+	}
+	if os.Geteuid() != 0 {
+		lines = append(lines, "[Trust] macOS System.keychain: omitido (requiere root).")
+		return lines, nil
+	}
+
+	systemPath := "/Library/Keychains/System.keychain"
+	systemOK, err := macOSKeychainHasThumbprint(thumb, systemPath)
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] macOS System.keychain: no verificable (%v).", err))
+		return lines, nil
+	}
+	if systemOK {
+		lines = append(lines, "[Trust] macOS System.keychain: ya confiado.")
+		return lines, nil
+	}
+	if err := macOSImportRootCA(rootCAPath, systemPath); err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] macOS System.keychain: omitido (%v).", err))
+		return lines, nil
+	}
+	lines = append(lines, "[Trust] macOS System.keychain: instalado.")
+	return lines, nil
+}
+
+func localTLSTrustStatusMacOS(rootCAPath string) ([]string, error) {
+	lines := []string{}
+	thumb, err := localCAThumbprint(rootCAPath)
+	if err != nil {
+		return lines, err
+	}
+	lines = append(lines, fmt.Sprintf("[Trust] macOS huella CA local: %s", thumb))
+
+	loginPath := macOSLoginKeychainPath()
+	loginOK, err := macOSKeychainHasThumbprint(thumb, loginPath)
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] macOS login keychain: no verificable (%v).", err))
+	} else if loginOK {
+		lines = append(lines, "[Trust] macOS login keychain: OK.")
+	} else {
+		lines = append(lines, "[Trust] macOS login keychain: FALTA.")
+	}
+
+	systemPath := "/Library/Keychains/System.keychain"
+	systemOK, err := macOSKeychainHasThumbprint(thumb, systemPath)
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("[Trust] macOS System.keychain: no verificable (%v).", err))
+	} else if systemOK {
+		lines = append(lines, "[Trust] macOS System.keychain: OK.")
+	} else {
+		lines = append(lines, "[Trust] macOS System.keychain: FALTA.")
+	}
+	return lines, nil
+}
+
+func macOSLoginKeychainPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "login.keychain-db"
+	}
+	return filepath.Join(home, "Library", "Keychains", "login.keychain-db")
+}
+
+func macOSKeychainHasThumbprint(thumb string, keychainPath string) (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return false, nil
+	}
+	cmd := exec.Command("security", "find-certificate", "-a", "-Z", keychainPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	want := strings.ToUpper(strings.TrimSpace(thumb))
+	for _, line := range strings.Split(string(out), "\n") {
+		up := strings.ToUpper(strings.TrimSpace(line))
+		if strings.HasPrefix(up, "SHA-1 HASH:") {
+			got := strings.TrimSpace(strings.TrimPrefix(up, "SHA-1 HASH:"))
+			got = strings.ReplaceAll(got, " ", "")
+			if got == want {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func macOSImportRootCA(rootCAPath string, keychainPath string) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	cmd := exec.Command(
+		"security",
+		"add-trusted-cert",
+		"-d",
+		"-r", "trustRoot",
+		"-k", keychainPath,
+		rootCAPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

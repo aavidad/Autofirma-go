@@ -84,3 +84,15 @@ Conseguir compatibilidad operativa con flujo de sede usando protocolo `afirma://
   - usuario (`AUTOFIRMA_TRUST_SKIP_SYSTEM=1`)
   - sistema en ejecucion root (`AUTOFIRMA_TRUST_SKIP_NSS=1`)
 - [x] Guia web compat actualizada (`docs/WEB_COMPAT_TEST.md`) con pasos de confianza TLS.
+
+## Avance sesion 2026-02-19
+- [x] Compatibilidad de certificados Java en app Go:
+  - nuevo flag `--exportar-certs-java <dir>`.
+  - exporta `autofirma.pfx`, `Autofirma_ROOT.cer`, `autofirma.cer`.
+- [x] Trust TLS local extendido a macOS (`--install-trust`, `--trust-status`).
+- [x] Linux installer: copia/exporta certificados Java al directorio de instalacion.
+- [x] Windows installer (NSIS): exporta certificados Java en `$INSTDIR`.
+- [x] Nuevos scripts base de instalacion/trust para macOS:
+  - `packaging/macos/install.sh`
+  - `scripts/macos/install_and_trust_macos.sh`
+  - `packaging/macos/make_macos_release.sh`

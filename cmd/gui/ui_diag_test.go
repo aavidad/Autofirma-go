@@ -5,6 +5,7 @@
 package main
 
 import (
+	"autofirma-host/pkg/protocol"
 	"os"
 	"strings"
 	"testing"
@@ -171,6 +172,45 @@ func TestProxyFirewallSolutionByOSDarwin(t *testing.T) {
 	got := proxyFirewallSolutionByOS("darwin", "tcp_blocked")
 	if !strings.Contains(strings.ToLower(got), "macos") {
 		t.Fatalf("se esperaba mensaje específico de macOS, obtenido=%q", got)
+	}
+}
+
+func TestIsRepresentationCertificateByCN(t *testing.T) {
+	cert := protocol.Certificate{
+		Subject: map[string]string{
+			"CN": "REPRESENTANTE DE EMPRESA XYZ",
+		},
+	}
+	if !isRepresentationCertificate(cert) {
+		t.Fatalf("debería detectar certificado de representación por CN")
+	}
+}
+
+func TestIsRepresentationCertificateNegative(t *testing.T) {
+	cert := protocol.Certificate{
+		Subject: map[string]string{
+			"CN": "AVIDAD FERNANDEZ ALBERTO",
+			"O":  "FNMT",
+		},
+	}
+	if isRepresentationCertificate(cert) {
+		t.Fatalf("no debería detectar representación en certificado normal")
+	}
+}
+
+func TestCertificateDisplayLabelAddsRepresentationTag(t *testing.T) {
+	cert := protocol.Certificate{
+		Subject: map[string]string{
+			"CN": "Representación Administración X",
+		},
+		CanSign: true,
+	}
+	got := certificateDisplayLabel(cert)
+	if !strings.Contains(strings.ToLower(got), "representación") {
+		t.Fatalf("se esperaba etiqueta de representación, obtenido=%q", got)
+	}
+	if !strings.Contains(strings.ToLower(got), "apto para firma") {
+		t.Fatalf("se esperaba estado apto para firma, obtenido=%q", got)
 	}
 }
 

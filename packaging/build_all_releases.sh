@@ -9,5 +9,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 "${ROOT_DIR}/packaging/linux/make_linux_release.sh"
 "${ROOT_DIR}/packaging/windows/make_windows_release.sh"
+if [[ "${ENABLE_MACOS_RELEASE:-0}" == "1" ]]; then
+  "${ROOT_DIR}/packaging/macos/make_macos_release.sh"
+fi
 
 echo "All release artifacts generated under ${ROOT_DIR}/release"

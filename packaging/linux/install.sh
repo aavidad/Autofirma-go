@@ -8,6 +8,7 @@ set -euo pipefail
 PREFIX="${1:-/opt/autofirma-dipgra}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SRC="${SCRIPT_DIR}/AutofirmaDipgra"
+FNMT_ACCOMP_CERT="${SCRIPT_DIR}/certs/fnmt-accomp.crt"
 HOST_NAME="${AUTOFIRMA_NATIVE_HOST_NAME:-com.autofirma.native}"
 CHROMIUM_IDS_RAW="${AUTOFIRMA_CHROMIUM_EXTENSION_IDS:-}"
 FIREFOX_IDS_RAW="${AUTOFIRMA_FIREFOX_EXTENSION_IDS:-}"
@@ -17,6 +18,53 @@ USER_HOME=""
 if [[ -n "${USER_NAME}" ]]; then
   USER_HOME="$(getent passwd "${USER_NAME}" | cut -d: -f6 || true)"
 fi
+
+copy_java_compat_certs_to_prefix() {
+  local certs_dir=""
+  if [[ -n "${USER_HOME}" ]]; then
+    certs_dir="${USER_HOME}/.config/AutofirmaDipgra/certs"
+  else
+    certs_dir="${HOME}/.config/AutofirmaDipgra/certs"
+  fi
+  local files=("autofirma.pfx" "Autofirma_ROOT.cer" "autofirma.cer")
+  local f
+  for f in "${files[@]}"; do
+    if [[ -f "${certs_dir}/${f}" ]]; then
+      cp -f "${certs_dir}/${f}" "${PREFIX}/${f}" || true
+    fi
+  done
+}
+
+install_fnmt_accomp_system_ca() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "[install] Aviso: se omite instalación de CA FNMT ACCOMP en sistema (requiere root)."
+    return 0
+  fi
+  if [[ ! -f "${FNMT_ACCOMP_CERT}" ]]; then
+    echo "[install] Aviso: no se encontró certificado FNMT ACCOMP en payload (${FNMT_ACCOMP_CERT})."
+    return 0
+  fi
+  if ! openssl x509 -in "${FNMT_ACCOMP_CERT}" -noout >/dev/null 2>&1; then
+    echo "[install] Aviso: certificado FNMT ACCOMP inválido, se omite instalación."
+    return 0
+  fi
+
+  local target="/usr/local/share/ca-certificates/autofirma-dipgra-fnmt-accomp.crt"
+  cp -f "${FNMT_ACCOMP_CERT}" "${target}"
+  chmod 0644 "${target}"
+  if command -v update-ca-certificates >/dev/null 2>&1; then
+    update-ca-certificates >/dev/null 2>&1 || true
+    echo "[install] CA FNMT ACCOMP instalada/actualizada en trust del sistema."
+  elif command -v update-ca-trust >/dev/null 2>&1; then
+    local rhel_target="/etc/pki/ca-trust/source/anchors/autofirma-dipgra-fnmt-accomp.crt"
+    cp -f "${FNMT_ACCOMP_CERT}" "${rhel_target}"
+    chmod 0644 "${rhel_target}"
+    update-ca-trust >/dev/null 2>&1 || true
+    echo "[install] CA FNMT ACCOMP instalada/actualizada en trust del sistema (update-ca-trust)."
+  else
+    echo "[install] Aviso: no se encontró update-ca-certificates/update-ca-trust para registrar FNMT ACCOMP."
+  fi
+}
 
 stop_running_instances() {
   echo "[install] Checking running Autofirma instances..."
@@ -156,16 +204,21 @@ fi
 
 # Generate local certificates for the installing user (best effort).
 if [[ -n "${USER_NAME}" ]] && command -v runuser >/dev/null 2>&1; then
+  target_user_certs_dir="${USER_HOME:-${HOME}}/.config/AutofirmaDipgra/certs"
   runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
   runuser -u "${USER_NAME}" -- env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+  runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --exportar-certs-java "${target_user_certs_dir}" >/dev/null 2>&1 || true
 else
   "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
   env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+  "${PREFIX}/autofirma-desktop" --exportar-certs-java "${HOME}/.config/AutofirmaDipgra/certs" >/dev/null 2>&1 || true
 fi
+copy_java_compat_certs_to_prefix
 
 # System-wide trust (best effort, needs root)
 if [[ "$(id -u)" -eq 0 ]]; then
   env AUTOFIRMA_TRUST_SKIP_NSS=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+  install_fnmt_accomp_system_ca
 fi
 
 mkdir -p /usr/local/bin

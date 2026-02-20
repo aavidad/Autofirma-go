@@ -44,8 +44,12 @@ Section "Install"
   File /r "${BUNDLE_DIR}/*"
   ; Prepare local TLS certs and trust so WSS works out-of-the-box.
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --generate-certs'
+  ExecWait '"$INSTDIR\autofirma-desktop.exe" --exportar-certs-java "$INSTDIR"'
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --install-trust'
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --trust-status'
+  IfFileExists "$INSTDIR\certs\fnmt-accomp.crt" 0 +3
+    ExecWait 'certutil -addstore -f Root "$INSTDIR\certs\fnmt-accomp.crt"'
+    ExecWait 'certutil -addstore -f CA "$INSTDIR\certs\fnmt-accomp.crt"'
 
   ; Main executable
   WriteRegStr HKLM "Software\${COMPANY}\${APPNAME}" "Install_Dir" "$INSTDIR"

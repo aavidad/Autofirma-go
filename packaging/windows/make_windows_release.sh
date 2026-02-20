@@ -75,6 +75,13 @@ else
   echo "[windows] Warning: icon file not found at ${ICON_FILE}"
 fi
 
+if [[ -f "${ROOT_DIR}/packaging/windows/certs/fnmt-accomp.crt" ]]; then
+  mkdir -p "${BUNDLE_DIR}/certs"
+  cp -f "${ROOT_DIR}/packaging/windows/certs/fnmt-accomp.crt" "${BUNDLE_DIR}/certs/fnmt-accomp.crt"
+else
+  echo "[windows] Warning: cert file not found at packaging/windows/certs/fnmt-accomp.crt"
+fi
+
 echo "[windows] Building NSIS installer..."
 (
   cd "${ROOT_DIR}"

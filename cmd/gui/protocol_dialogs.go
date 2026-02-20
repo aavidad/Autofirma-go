@@ -284,7 +284,17 @@ func protocolLoadDialog(initialPath string, exts string, multi bool) ([]string, 
 
 func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, error) {
 	labels := buildCertificateDialogLabels(certs)
-	args := []string{"--list", "--title=Seleccionar certificado", "--column=IDX", "--column=Certificado", "--hide-column=1", "--print-column=1"}
+	args := []string{
+		"--list",
+		"--title=Seleccionar certificado",
+		"--text=Seleccione un certificado para continuar.",
+		"--ok-label=Aceptar",
+		"--cancel-label=Cancelar",
+		"--column=IDX",
+		"--column=Certificado",
+		"--hide-column=1",
+		"--print-column=1",
+	}
 	for i := range certs {
 		args = append(args, strconv.Itoa(i), labels[i])
 	}

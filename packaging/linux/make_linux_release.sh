@@ -102,11 +102,12 @@ README
 mkdir -p "${PAYLOAD_DIR}/AutofirmaDipgra"
 cp -a "${BUNDLE_DIR}/." "${PAYLOAD_DIR}/AutofirmaDipgra/"
 cp "${ROOT_DIR}/packaging/linux/install.sh" "${PAYLOAD_DIR}/install.sh"
+cp -a "${ROOT_DIR}/packaging/linux/certs" "${PAYLOAD_DIR}/certs"
 chmod +x "${PAYLOAD_DIR}/install.sh"
 
 (
   cd "${PAYLOAD_DIR}"
-  tar -czf payload.tar.gz AutofirmaDipgra install.sh
+  tar -czf payload.tar.gz AutofirmaDipgra install.sh certs
 )
 
 cat > "${ARTIFACT_RUN}" <<'HDR'
@@ -149,7 +150,7 @@ echo "[linux] Installer: ${ARTIFACT_RUN}"
 echo "Intentando registrar CA local en navegadores..."
 CERTS_DIR="$HOME/.config/AutofirmaDipgra/certs"
 if [ -f "$CERTS_DIR/rootCA.crt" ] && command -v certutil >/dev/null 2>&1; then
-    certutil -d "sql:$HOME/.pki/nssdb" -A -t "CT,C,C" -n "Autofirma Dipgra Local Root CA" -i "$CERTS_DIR/rootCA.crt" 2>/dev/null || true
+    certutil -d "sql:$HOME/.pki/nssdb" -A -t "CT,C,C" -n "Autofirma ROOT" -i "$CERTS_DIR/rootCA.crt" 2>/dev/null || true
     echo "CA registrada/intendada en NSS DB (best effort)."
 else
     echo "No se pudo registrar la CA automáticamente (falta certutil o no se ha ejecutado la app aun)."
