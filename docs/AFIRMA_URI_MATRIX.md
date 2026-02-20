@@ -1,5 +1,9 @@
 # Matriz Base de Compatibilidad `afirma://`
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Estado: en construcción (P1)  
 Fecha: 2026-02-16
 

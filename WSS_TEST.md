@@ -1,5 +1,9 @@
 # Prueba del Servidor WSS de AutoFirma
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## 1. El servidor está corriendo
 
 El servidor WSS (WebSocket Secure) está escuchando en `wss://127.0.0.1:63117/`

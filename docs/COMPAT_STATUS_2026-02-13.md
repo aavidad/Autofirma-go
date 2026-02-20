@@ -1,5 +1,9 @@
 # Estado de compatibilidad (2026-02-13)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Entorno de trabajo aislado:
 - `/home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/work/native-host-src`
 

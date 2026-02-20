@@ -1,5 +1,9 @@
 # Timeout y Retry Policy (host)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Umbral de payload grande
 - `> 2 MiB` se considera payload grande.
 

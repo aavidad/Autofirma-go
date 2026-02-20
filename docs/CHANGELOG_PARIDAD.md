@@ -1,5 +1,9 @@
 # Changelog de Paridad Java -> Go
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Actualizado automaticamente el 2026-02-18T23:06:07+01:00
 
 ## Cambio de modelo documental

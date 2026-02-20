@@ -1,5 +1,9 @@
 # Referencia de Paridad Java (clienteafirma-master)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Fecha: 2026-02-17  
 Origen revisado: `/home/alberto/Trabajo/Autofirma-go/clienteafirma-master`
 

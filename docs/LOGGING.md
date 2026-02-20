@@ -1,5 +1,9 @@
 # Logging y trazas
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 La app ahora escribe logs persistentes por proceso:
 
 - GUI: `autofirma-desktop-YYYY-MM-DD.log`

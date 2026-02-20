@@ -1,5 +1,9 @@
 # Session Tracker - Migracion AutoFirma Java -> Go
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Fecha base: 2026-02-13
 Workspace: `AutoFirma_Dipgra/autofirma_migracion/work/native-host-src`
 

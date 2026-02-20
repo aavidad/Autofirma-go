@@ -1,5 +1,9 @@
 # Avances Paridad Java -> Go (AutoFirma)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Ultima actualizacion: 2026-02-19  
 Workspace: `/home/alberto/Trabajo/AutoFirma_Dipgra/autofirma_migracion/work/native-host-src`
 

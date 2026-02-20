@@ -1,5 +1,9 @@
 # Compatibilidad Navegadores (Firefox, Chrome, Edge)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Objetivo
 Permitir invocar la app desde enlaces `afirma://...` en navegadores de escritorio.
 

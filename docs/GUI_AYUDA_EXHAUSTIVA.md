@@ -1,5 +1,9 @@
 # AutoFirma Dipgra - Guía Exhaustiva de Uso y Funcionamiento
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## 1. Objetivo de la aplicación
 AutoFirma Dipgra es un cliente de firma electrónica compatible con flujos `afirma://` (estilo AutoFirma Java), con interfaz gráfica y backend en Go.
 

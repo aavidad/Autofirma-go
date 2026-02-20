@@ -1,5 +1,9 @@
 # Native Host Protocol (JSON over Native Messaging)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Transporte
 - Canal: Native Messaging (stdin/stdout).
 - Framing: 4 bytes little-endian con la longitud del payload JSON.

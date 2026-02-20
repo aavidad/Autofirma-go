@@ -1,85 +1,105 @@
-# Manual de Usuario: AutoFirma-Go
+# Manual de Usuario
 
-Bienvenido a **AutoFirma-Go**, la nueva versión de alta velocidad de la aplicación de firma electrónica. Esta guía le ayudará a instalar y utilizar la aplicación en su equipo.
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 
-## 1. ¿Qué es AutoFirma-Go?
+## 1. Que es AutoFirma Dipgra
+AutoFirma Dipgra es una aplicacion de firma electronica compatible con el ecosistema de AutoFirma (`afirma://`) sin depender de Java.
 
-Es una aplicación que permite firmar documentos electrónicamente en sitios web de la administración pública (Sede Electrónica, Hacienda, Seguridad Social, etc.) sin necesidad de utilizar Java.
+Permite:
+- Identificacion con certificado (`selectcert`).
+- Firma de documentos (CAdES, PAdES, XAdES).
+- Firma por lotes (`batch`).
+- Flujos web por `Native Messaging`, `WSS` y subida legacy.
 
-**Ventajas:**
-*   **Más rápida:** Se abre casi instantáneamente.
-*   **Más ligera:** Consume muy pocos recursos de su ordenador.
-*   **Sin Java:** No necesita instalar ni actualizar Java para funcionar.
+## 2. Requisitos
+- Certificado digital instalado y vigente (persona fisica o representacion).
+- Navegador actualizado.
+- Sistema operativo: Windows, Linux o macOS.
 
----
+## 3. Instalacion
+### Linux
+1. Ejecutar instalador `.run`.
+2. Reiniciar navegador.
 
-## 2. Requisitos Previos
+### Windows
+1. Ejecutar instalador `.exe`.
+2. Reiniciar navegador.
 
-Antes de empezar, asegúrese de cumplir estos requisitos:
+### macOS
+1. Ejecutar instalador del paquete correspondiente.
+2. Conceder permisos necesarios y reiniciar navegador.
 
-1.  **Certificado Digital:** Debe tener su certificado digital (FNMT, DNIe, etc.) ya instalado en su navegador o sistema operativo.
-    *   **Windows:** El certificado debe aparecer en "Opciones de Internet" > "Contenido" > "Certificados".
-    *   **Linux:** El certificado debe estar importado en su navegador (Firefox/Chrome) o configurado en el sistema.
-2.  **Sistema Operativo:** Windows 10/11 o Linux (Ubuntu, Debian, Fedora, etc.).
+## 4. Uso normal (modo simple)
+1. Inicie el tramite en la sede.
+2. Acepte el lanzamiento de la aplicacion cuando el navegador lo solicite.
+3. Seleccione certificado.
+4. Confirme la operacion.
+5. Espere respuesta de la sede.
 
----
+Nota: en flujos de identificacion solo se mostrara seleccion de certificado. En flujos de firma documental se mostraran controles de documento/firma segun el protocolo recibido.
 
-## 3. Instalación
+## 5. Modo experto
+El modo experto expone utilidades avanzadas:
+- Diagnostico de red y TLS.
+- Panel de pruebas con ejecucion de scripts.
+- Gestion de dominios de confianza (lista blanca).
+- Herramientas de certificados y exportacion.
+- Historial y trazas tecnicas.
 
-### En Linux (Recomendado)
-1.  Descargue el instalador de última versión (`AutofirmaDipgra-linux-installer.run`).
-2.  Abra una terminal y dé permisos de ejecución al archivo:
-    ```bash
-    chmod +x AutofirmaDipgra-linux-installer.run
-    ```
-3.  Ejecute el instalador (le pedirá la contraseña de administrador si es necesario):
-    ```bash
-    ./AutofirmaDipgra-linux-installer.run
-    ```
-4.  El instalador configurará automáticamente el protocolo `afirma://` y registrará el conector para sus navegadores instalados (Chrome, Firefox, Brave, Edge).
-5.  Reinicie su navegador para completar la integración.
+## 6. Seguridad integrada
+### Lista blanca de dominios
+Cuando una web no conocida solicita operar con `afirma://`, la app puede pedir confirmacion y registrar el dominio.
 
-### En Windows
-1.  Descargue el instalador `.exe` (ej: `AutofirmaDipgra-windows-installer.exe`).
-2.  Ejecute el archivo descargado y siga las instrucciones del asistente.
-3.  La aplicación se instalará y configurará el sistema automáticamente.
+Incluye:
+- Alta/baja de dominios de confianza.
+- Avisos de riesgo si el dominio no esta en lista blanca.
 
----
+### Diagnostico de red y TLS
+La app puede comprobar:
+- Resolucion DNS.
+- Conectividad TCP/TLS con endpoints.
+- Posible interferencia de proxy/firewall/antivirus.
+- Estado de certificados remotos y de confianza local.
 
-## 4. Uso de la Aplicación
+### Confianza local
+Comandos disponibles:
+- `autofirma-desktop -generate-certs`
+- `autofirma-desktop -install-trust`
+- `autofirma-desktop -trust-status`
 
-AutoFirma-Go está diseñada para ser **invisible**. Usted no necesita abrirla manualmente para firmar.
+## 7. Gestion de certificados
+- La lista muestra certificados aptos para firma.
+- Si se detecta certificado de representacion, se etiqueta como `[representación]`.
+- Si falta un certificado esperado:
+  - Verifique vigencia.
+  - Verifique almacen activo del navegador/sistema.
+  - Revise token/DNIe y controladores.
 
-### 4.1. Firma en Sitios Web Modernos
-1.  Entre en la web donde necesita firmar el trámite.
-2.  Pulse el botón de "Firmar" en la página web.
-3.  Automáticamente aparecerá una ventana emergente del navegador pidiéndole que seleccione su certificado.
-4.  Elija su certificado y pulse "Aceptar".
-5.  El documento se firmará y el trámite continuará automáticamente.
+## 8. Errores y soluciones recomendadas
+### Error de conectividad con sede
+- Ejecute diagnostico rapido.
+- Revise DNS, proxy y firewall.
+- Reintente con navegador reiniciado.
 
-### 4.2. Firma en Sitios Web Antiguos (Modo Compatibilidad)
-Algunas webs antiguas utilizan un método de conexión diferente (WebSocket).
-*   Si la web intenta conectar y no ocurre nada, asegúrese de que la aplicación `autofirma-desktop` esté ejecutándose.
-*   Puede que necesite abrir manualmente la aplicación y dejarla en segundo plano si el sitio no la invoca automáticamente.
+### Error TLS con servicios de prefirma/postfirma
+- Revise mensaje de emisor/certificado reportado por la app.
+- Instale certificados intermedios necesarios (FNMT u organismo emisor) en el almacen del sistema.
+- Reintente tras actualizar confianza.
 
----
+### Error en lote (`SAF_*`)
+- Revise panel de mensajes y diagnostico.
+- Verifique endpoints de pre/post firma.
+- Si la sede funciona con AutoFirma Java pero falla aqui, active diagnostico y guarde reporte para soporte.
 
-## 5. Solución de Problemas
+## 9. Ayuda dentro de la app
+- Boton de ayuda general.
+- Ayuda de scripts de pruebas desde modo experto.
+- Panel de mensajes con scroll para seguimiento de resultados.
 
-### No aparecen mis certificados
-*   Asegúrese de que su certificado no ha caducado.
-*   Compruebe que el certificado está instalado en el almacén personal de su navegador.
-*   Si usa una tarjeta criptográfica o DNIe, asegúrese de que el lector está conectado correctamente antes de intentar firmar.
-
-### La web dice "No se ha podido conectar con AutoFirma"
-1.  Cierre completamente su navegador y vuelva a abrirlo.
-2.  Verifique que no haya un antivirus o firewall bloqueando el puerto `63117`.
-3.  Pruebe a ejecutar manualmente la aplicación `autofirma-desktop` antes de entrar en la web.
-
-### Herramienta de Diagnóstico
-Si persiste el problema, puede usar la página de prueba incluida (`test-autofirma-wss.html`) para verificar la conexión con el servicio de firma.
-
----
-
-**Soporte Técnico**
-Si tiene problemas técnicos, contacte con el soporte de la oficina de administración electrónica correspondiente.
+## 10. Reportes para soporte
+Cuando abra incidencia:
+1. Incluya hora exacta de la prueba.
+2. Adjunte log reciente de `~/.local/state/autofirma-dipgra/logs/` (Linux) o ruta equivalente en su SO.
+3. Adjunte reporte de diagnostico exportado desde la app.

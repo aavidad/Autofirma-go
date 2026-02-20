@@ -1,5 +1,9 @@
 # PLAN MIGRACION AUTOFIRMA GO (PENDIENTE REAL)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Fecha de revision: 2026-02-19
 Repositorio: `work/native-host-src`
 Commit revisado: `60f3bb656201ff7a8ee8093450842554c0277608`

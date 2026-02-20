@@ -1,5 +1,9 @@
 # Seguimiento Diario de Paridad Java -> Go
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Regla de uso
 - En cada sesión, anotar:
   - `Hecho hoy`

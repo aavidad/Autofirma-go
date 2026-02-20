@@ -1,5 +1,9 @@
 # AutoFirma WebSocket Server - Usage Guide
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Starting the WebSocket Server
 
 ```bash

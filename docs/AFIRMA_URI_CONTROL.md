@@ -1,5 +1,9 @@
 # Control de `afirma://` en modo local
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 Sí, se puede controlar el flujo `afirma://` en este entorno aislado.
 
 ## 1) Arrancar servidor de compatibilidad

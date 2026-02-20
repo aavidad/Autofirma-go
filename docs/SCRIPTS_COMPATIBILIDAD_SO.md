@@ -1,5 +1,9 @@
 # Compatibilidad de Scripts por Sistema Operativo
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Objetivo
 Matriz rápida para saber qué script usar en Linux/macOS/Windows y su alternativa equivalente.
 

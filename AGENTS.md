@@ -1,5 +1,9 @@
 # AutoFirma Java -> Go Session Rules
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Contexto del proyecto
 - Proyecto: migracion de AutoFirma desde Java a Go.
 - Objetivo principal: que la app Go haga como minimo todo lo que hace la app Java (`clienteafirma-master`) y, cuando sea posible, lo mejore sin romper compatibilidad.

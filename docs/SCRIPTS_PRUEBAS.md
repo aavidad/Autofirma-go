@@ -1,5 +1,9 @@
 # Scripts de Pruebas y Validación (Castellano)
 
+Licencia: GPLv3.
+Autor: Alberto Avidad Fernandez.
+Organizacion: Oficina de Software Libre de la Diputacion de Granada.
+
 ## Objetivo
 Este documento resume **qué script usar**, **cuándo usarlo** y **qué valida**.
 
