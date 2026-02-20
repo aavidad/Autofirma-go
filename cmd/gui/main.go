@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/op"
@@ -21,15 +22,20 @@ import (
 )
 
 var (
-	serverModeFlag    = flag.Bool("server", false, "Iniciar como servidor WebSocket en el puerto 63117")
-	generateCertsFlag = flag.Bool("generate-certs", false, "Generar certificados TLS locales y salir")
-	installTrustFlag  = flag.Bool("install-trust", false, "Instalar la CA local en los almacenes de confianza (Linux/Windows/macOS)")
-	trustStatusFlag   = flag.Bool("trust-status", false, "Mostrar el estado de confianza de la CA local (Linux/Windows/macOS)")
-	exportJavaCerts   = flag.String("exportar-certs-java", "", "Exportar certificados compatibles con AutoFirma Java al directorio indicado y salir")
-	versionFlag       = flag.Bool("version", false, "Mostrar versión de la aplicación y salir")
-	detailHelpFlag    = flag.Bool("ayuda-detallada", false, "Mostrar ayuda detallada en castellano y salir")
-	fyneFlag          = flag.Bool("fyne", false, "Forzar interfaz gráfica Fyne")
-	gioFlag           = flag.Bool("gio", false, "Forzar interfaz clásica Gio (compatibilidad/protocolo legado)")
+	serverModeFlag     = flag.Bool("server", false, "Iniciar como servidor WebSocket en el puerto 63117")
+	restModeFlag       = flag.Bool("rest", false, "Iniciar servidor API REST local")
+	restAddrFlag       = flag.String("rest-addr", "127.0.0.1:63118", "Dirección del servidor REST local")
+	restTokenFlag      = flag.String("rest-token", "", "Token opcional para autenticar llamadas REST (Bearer/X-API-Token)")
+	restCertFPFlag     = flag.String("rest-cert-fingerprints", "", "Lista de huellas SHA-256 permitidas para login por certificado (csv, opcional)")
+	restSessionTTLFlag = flag.Duration("rest-session-ttl", 10*time.Minute, "Duración de sesión emitida por login de certificado")
+	generateCertsFlag  = flag.Bool("generate-certs", false, "Generar certificados TLS locales y salir")
+	installTrustFlag   = flag.Bool("install-trust", false, "Instalar la CA local en los almacenes de confianza (Linux/Windows/macOS)")
+	trustStatusFlag    = flag.Bool("trust-status", false, "Mostrar el estado de confianza de la CA local (Linux/Windows/macOS)")
+	exportJavaCerts    = flag.String("exportar-certs-java", "", "Exportar certificados compatibles con AutoFirma Java al directorio indicado y salir")
+	versionFlag        = flag.Bool("version", false, "Mostrar versión de la aplicación y salir")
+	detailHelpFlag     = flag.Bool("ayuda-detallada", false, "Mostrar ayuda detallada en castellano y salir")
+	fyneFlag           = flag.Bool("fyne", false, "Forzar interfaz gráfica Fyne")
+	gioFlag            = flag.Bool("gio", false, "Forzar interfaz clásica Gio (compatibilidad/protocolo legado)")
 )
 
 func main() {
@@ -107,6 +113,14 @@ func main() {
 		}
 		if err != nil {
 			log.Printf("Fallo comprobando confianza TLS local: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *restModeFlag {
+		log.Printf("Iniciando en modo servidor REST en %s", strings.TrimSpace(*restAddrFlag))
+		if err := runRESTServer(strings.TrimSpace(*restAddrFlag), strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag)); err != nil {
+			log.Printf("No se pudo iniciar el servidor REST: %v", err)
 			os.Exit(1)
 		}
 		return
@@ -190,6 +204,9 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "    Muestra si la CA local está correctamente confiada en los almacenes detectados.")
 	_, _ = fmt.Fprintln(out, "  -server")
 	_, _ = fmt.Fprintln(out, "    Inicia AutoFirma en modo servicio WebSocket, esperando solicitudes del navegador.")
+	_, _ = fmt.Fprintln(out, "  -rest [-rest-token <token>] [-rest-cert-fingerprints <sha256,sha256>] [-rest-session-ttl 10m]")
+	_, _ = fmt.Fprintln(out, "    Inicia API REST local con token y/o login por certificado (reto firmado).")
+	_, _ = fmt.Fprintln(out, "    Endpoints protegidos: /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs.")
 	_, _ = fmt.Fprintln(out, "  -version")
 	_, _ = fmt.Fprintln(out, "    Muestra la versión actual del binario.")
 	_, _ = fmt.Fprintln(out, "  -ayuda-detallada")
