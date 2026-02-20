@@ -121,3 +121,6 @@ Conseguir compatibilidad operativa con flujo de sede usando protocolo `afirma://
 - [x] Ejecución validada:
   - `bash scripts/run_full_validation.sh` finaliza en `result: OK`.
   - reporte: `/tmp/autofirma-full-validation-report-20260220-124937.txt`.
+- [x] Limpieza de warning de locale en Fyne:
+  - `cmd/gui/fyne_ui.go` fuerza fallback `C.UTF-8` cuando `LANG/LC_ALL` vienen como `C/POSIX`.
+  - evita trazas `Error parsing user locale C` en arranque de GUI.

@@ -101,6 +101,8 @@ type FyneUIPreferences struct {
 func NewFyneUI() *FyneUI {
 	// Fijamos escala visual grande para el nuevo modo Fyne.
 	_ = os.Setenv("FYNE_SCALE", "2.0")
+	// Evita warning de Fyne cuando LANG=C (tag no válido para locale parser).
+	ensureFyneLocale()
 
 	a := app.NewWithID("es.dipgra.autofirma")
 	w := a.NewWindow("AutoFirma - Diputación de Granada")
@@ -131,6 +133,26 @@ func NewFyneUI() *FyneUI {
 	})
 
 	return ui
+}
+
+func ensureFyneLocale() {
+	lang := strings.TrimSpace(os.Getenv("LANG"))
+	lcAll := strings.TrimSpace(os.Getenv("LC_ALL"))
+	active := lcAll
+	if active == "" {
+		active = lang
+	}
+	if active == "" {
+		_ = os.Setenv("LANG", "C.UTF-8")
+		return
+	}
+	if strings.EqualFold(active, "C") || strings.EqualFold(active, "POSIX") {
+		if lcAll != "" {
+			_ = os.Setenv("LC_ALL", "C.UTF-8")
+		} else {
+			_ = os.Setenv("LANG", "C.UTF-8")
+		}
+	}
 }
 
 func (ui *FyneUI) Run() {
