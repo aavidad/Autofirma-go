@@ -16,7 +16,7 @@ rm -f "$OUTPUT_ZIP"
 mkdir -p "$DIST_DIR"
 
 echo "Building Go binary..."
-go build -o "$DIST_DIR/autofirma-desktop" ./cmd/gui
+go build -mod=readonly -o "$DIST_DIR/autofirma-desktop" ./cmd/gui
 
 echo "Copying dependencies..."
 # Copy signers folder

@@ -34,8 +34,8 @@ Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 Requisito: Go 1.22+
 
 ```bash
-go build -o autofirma-host ./cmd/autofirma-host
-go build -o autofirma-desktop ./cmd/gui
+go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
+go build -mod=readonly -o autofirma-desktop ./cmd/gui
 ```
 
 ## Uso CLI de `autofirma-desktop`
