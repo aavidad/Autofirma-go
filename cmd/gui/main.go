@@ -128,6 +128,7 @@ func main() {
 		log.Println("Arrancando en modo Fyne")
 		f := NewFyneUI()
 		if protocolArg != "" {
+			f = NewFyneUIForProtocol()
 			log.Printf("[Main] Solicitud protocolaria delegada a Fyne: %s", protocolArg)
 			f.HandleProtocolInit(protocolArg)
 		}

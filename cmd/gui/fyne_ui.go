@@ -77,6 +77,8 @@ type FyneUI struct {
 	PreviewFile     string
 
 	Protocol *ProtocolState
+	// Modo reducido para invocaciones afirma:// (selector/flujo protocolario).
+	ProtocolQuickMode bool
 
 	Core *CoreService
 	mu   sync.Mutex
@@ -99,6 +101,14 @@ type FyneUIPreferences struct {
 }
 
 func NewFyneUI() *FyneUI {
+	return newFyneUI(false)
+}
+
+func NewFyneUIForProtocol() *FyneUI {
+	return newFyneUI(true)
+}
+
+func newFyneUI(protocolQuickMode bool) *FyneUI {
 	// Fijamos escala visual grande para el nuevo modo Fyne.
 	_ = os.Setenv("FYNE_SCALE", "2.0")
 	// Evita warning de Fyne cuando LANG=C (tag no válido para locale parser).
@@ -106,19 +116,24 @@ func NewFyneUI() *FyneUI {
 
 	a := app.NewWithID("es.dipgra.autofirma")
 	w := a.NewWindow("AutoFirma - Diputación de Granada")
-	w.Resize(fyne.NewSize(1100, 750))
+	if protocolQuickMode {
+		w.Resize(fyne.NewSize(560, 180))
+	} else {
+		w.Resize(fyne.NewSize(1100, 750))
+	}
 
 	ui := &FyneUI{
-		App:             a,
-		Window:          w,
-		Core:            NewCoreService(),
-		ExpertOperation: "sign",
-		VisibleSeal:     false,
-		SealPage:        1,
-		SealX:           0.62,
-		SealY:           0.04,
-		SealW:           0.34,
-		SealH:           0.12,
+		App:               a,
+		Window:            w,
+		ProtocolQuickMode: protocolQuickMode,
+		Core:              NewCoreService(),
+		ExpertOperation:   "sign",
+		VisibleSeal:       false,
+		SealPage:          1,
+		SealX:             0.62,
+		SealY:             0.04,
+		SealW:             0.34,
+		SealH:             0.12,
 	}
 	ui.loadPreferences()
 	ui.initScriptTests()
@@ -185,6 +200,18 @@ func (ui *FyneUI) appendMessage(msg string) {
 
 func (ui *FyneUI) buildUI() {
 	ui.loadCertificates()
+
+	if ui.ProtocolQuickMode {
+		ui.StatusLabel = widget.NewLabel("Procesando solicitud protocolaria...")
+		ui.MessageBox = widget.NewMultiLineEntry()
+		ui.MessageBox.Wrapping = fyne.TextWrapWord
+		ui.MessageBox.Disable()
+		ui.Window.SetContent(container.NewVBox(
+			widget.NewCard("AutoFirma Dipgra", "Modo protocolario", ui.StatusLabel),
+			widget.NewCard("Detalle", "", container.NewVScroll(ui.MessageBox)),
+		))
+		return
+	}
 
 	ui.StatusLabel = widget.NewLabel("Seleccione un PDF y un certificado para firmar.")
 	ui.MessageBox = widget.NewMultiLineEntry()

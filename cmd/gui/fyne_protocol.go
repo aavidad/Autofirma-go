@@ -38,6 +38,11 @@ func (ui *FyneUI) HandleProtocolInit(uriString string) {
 		return
 	}
 	if action == "batch" {
+		if ui.ProtocolQuickMode {
+			ui.SetStatus("Solicitud de lote recibida. Seleccione certificado.")
+			go ui.runProtocolQuickBatch(state)
+			return
+		}
 		ui.SetStatus("Solicitud de lote recibida. Seleccione certificado y pulse 'Procesar lote local'.")
 		return
 	}
@@ -89,10 +94,19 @@ func (ui *FyneUI) HandleProtocolInit(uriString string) {
 			}
 			ui.InputFile = path
 			fyneSetFileLabel(ui, path)
+			if ui.ProtocolQuickMode {
+				ui.SetStatus("Documento descargado. Seleccione certificado para continuar.")
+				go ui.runProtocolQuickSign(state)
+				return
+			}
 			ui.SetStatus("Documento descargado. Seleccione certificado y firme.")
 			return
 		}
 
+		if ui.ProtocolQuickMode {
+			ui.SetStatus("Solicitud protocolaria sin documento descargable. No se puede completar en modo reducido.")
+			return
+		}
 		ui.SetStatus("Iniciado modo firma local web. Seleccione archivo y certificado.")
 	}()
 }
@@ -322,6 +336,60 @@ func (ui *FyneUI) closeProtocolWindowAfterDelay() {
 	fyne.Do(func() {
 		ui.Window.Close()
 	})
+}
+
+func (ui *FyneUI) runProtocolQuickSign(state *ProtocolState) {
+	if err := ui.selectCertificateForProtocol(state); err != nil {
+		ui.SetStatus(err.Error())
+		return
+	}
+	ui.signCurrentProtocolCore(state)
+}
+
+func (ui *FyneUI) runProtocolQuickBatch(state *ProtocolState) {
+	if err := ui.selectCertificateForProtocol(state); err != nil {
+		ui.SetStatus(err.Error())
+		return
+	}
+	ui.handleProtocolBatchFyne()
+}
+
+func (ui *FyneUI) selectCertificateForProtocol(state *ProtocolState) error {
+	if state == nil {
+		return fmt.Errorf("error protocolo: estado inválido")
+	}
+	certs, err := loadCertificatesForState(state)
+	if err != nil {
+		return fmt.Errorf("error cargando certificados: %w", err)
+	}
+	filtered, _ := filterSelectCertByDefaultStore(certs, state)
+	if len(filtered) == 0 {
+		filtered = certs
+	}
+	if len(filtered) == 0 {
+		return fmt.Errorf("no hay certificados disponibles para esta solicitud")
+	}
+	chosen, canceled, err := protocolSelectCertDialog(filtered)
+	if canceled {
+		return fmt.Errorf("selección de certificado cancelada")
+	}
+	if err != nil {
+		return fmt.Errorf("error en selector de certificado: %w", err)
+	}
+	if chosen < 0 || chosen >= len(filtered) {
+		return fmt.Errorf("selección de certificado inválida")
+	}
+
+	chosenCert := filtered[chosen]
+	// Reflejo de estado para operaciones posteriores (firma/batch).
+	ui.SelectedCert = &chosenCert
+	for i := range ui.Certs {
+		if ui.Certs[i].ID == chosenCert.ID {
+			ui.SelectedCert = &ui.Certs[i]
+			break
+		}
+	}
+	return nil
 }
 
 func fyneSetFileLabel(ui *FyneUI, path string) {

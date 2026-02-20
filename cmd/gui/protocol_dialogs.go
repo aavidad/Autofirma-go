@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 func protocolSelectCertDialog(certs []protocol.Certificate) (int, bool, error) {
@@ -347,6 +348,7 @@ func protocolLoadDialog(initialPath string, exts string, multi bool) ([]string, 
 
 func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, error) {
 	labels := buildCertificateDialogLabels(certs)
+	width, height := certificateDialogSize(labels)
 	args := []string{
 		"--list",
 		"--title=Seleccionar certificado",
@@ -357,6 +359,8 @@ func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, err
 		"--column=Certificado",
 		"--hide-column=1",
 		"--print-column=1",
+		"--width=" + strconv.Itoa(width),
+		"--height=" + strconv.Itoa(height),
 	}
 	for i := range certs {
 		args = append(args, strconv.Itoa(i), labels[i])
@@ -383,7 +387,10 @@ func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, err
 		return -1, true, nil
 	}
 
-	kargs := []string{"--menu", "Seleccionar certificado"}
+	kargs := []string{
+		"--menu", "Seleccionar certificado",
+		"--geometry", fmt.Sprintf("%dx%d", width, height),
+	}
 	for i := range certs {
 		kargs = append(kargs, strconv.Itoa(i), labels[i])
 	}
@@ -405,6 +412,39 @@ func protocolSelectCertDialogLinux(certs []protocol.Certificate) (int, bool, err
 		return -1, false, convErr
 	}
 	return idx, false, nil
+}
+
+func certificateDialogSize(labels []string) (int, int) {
+	maxRunes := 0
+	for _, lbl := range labels {
+		n := utf8.RuneCountInString(strings.TrimSpace(lbl))
+		if n > maxRunes {
+			maxRunes = n
+		}
+	}
+
+	// Ancho dinámico para textos largos, con mínimo amplio para certificados.
+	width := 900 + maxRunes*7
+	if width < 1100 {
+		width = 1100
+	}
+	if width > 1900 {
+		width = 1900
+	}
+
+	// Altura para al menos 5 filas visibles (+ cabecera/botones del diálogo).
+	rows := len(labels)
+	if rows < 5 {
+		rows = 5
+	}
+	if rows > 9 {
+		rows = 9
+	}
+	height := 280 + rows*52
+	if height < 540 {
+		height = 540
+	}
+	return width, height
 }
 
 func protocolSelectCertDialogMac(certs []protocol.Certificate) (int, bool, error) {
