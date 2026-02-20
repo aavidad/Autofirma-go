@@ -4,7 +4,7 @@ Licencia: GPLv3.
 Autor: Alberto Avidad Fernandez.
 Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 
-Ultima actualizacion: 2026-02-19  
+Ultima actualizacion: 2026-02-20  
 Workspace: `/home/alberto/Trabajo/AutoFirma_Dipgra/autofirma_migracion/work/native-host-src`
 
 ## Estado de documentacion (unificado)
@@ -65,6 +65,11 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - `go test -mod=readonly ./cmd/gui/... ./pkg/...`.
   - Cobertura actual: `224` tests (`cmd/gui` + `pkg`).
   - ampliada suite unitaria de nucleo con pruebas de enrutado nativo `cosign/countersign` y utilidades XAdES de seleccion de firmas.
+- Cierre de migración GUI `gio` -> `fyne` en ruta protocolaria:
+  - Fyne ya gestiona `afirma://` para `sign/cosign/countersign`, `selectcert` y `batch`.
+  - Flujo protocolario en Fyne incluye subida legacy `RTServlet/STServlet` y `WAIT` activo.
+  - `main.go` deja Fyne como ruta por defecto para arranques protocolarios; Gio queda como fallback explícito con `-gio`.
+  - Nuevo archivo de integración protocolaria Fyne: `cmd/gui/fyne_protocol.go`.
 
 ### Brechas reales pendientes
 1. Cierre de validacion automatica reproducible:

@@ -84,6 +84,69 @@ func protocolConfirmFirstDomainUseDialog(host string) (bool, error) {
 	}
 }
 
+func protocolConfirmOverwriteDialog(path string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, fmt.Errorf("ruta vacía")
+	}
+	title := "Confirmar sobrescritura"
+	msg := "El fichero ya existe:\n" + path + "\n\n¿Deseas sobrescribirlo?"
+
+	switch runtime.GOOS {
+	case "windows":
+		ps := "$ErrorActionPreference='Stop'; " +
+			"Add-Type -AssemblyName PresentationFramework; " +
+			"$r=[System.Windows.MessageBox]::Show('" + psQuote(msg) + "','" + psQuote(title) + "','YesNoCancel','Warning'); " +
+			"if ($r -eq 'Yes') { 'YES' } elseif ($r -eq 'No') { 'NO' } else { 'CANCEL' }"
+		cmd := exec.Command("powershell", "-NoProfile", "-STA", "-NonInteractive", "-Command", ps)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return false, err
+		}
+		v := strings.ToUpper(strings.TrimSpace(string(out)))
+		if v == "YES" {
+			return true, nil
+		}
+		return false, nil
+	case "darwin":
+		script := "display dialog \"" + osaQuote(msg) + "\" with title \"" + osaQuote(title) + "\" buttons {\"No\", \"Sí\"} default button \"No\" with icon caution"
+		cmd := exec.Command("osascript", "-e", script)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			if isDialogCancelErr(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		v := strings.ToLower(strings.TrimSpace(string(out)))
+		if strings.Contains(v, "sí") {
+			return true, nil
+		}
+		return false, nil
+	default:
+		cmd := exec.Command("zenity", "--question", "--title="+title, "--text="+msg, "--ok-label=Sí, sobrescribir", "--cancel-label=No, guardar con otro nombre")
+		configureGUICommand(cmd)
+		err := cmd.Run()
+		if err == nil {
+			return true, nil
+		}
+		if isDialogCancelErr(err) {
+			return false, nil
+		}
+		kcmd := exec.Command("kdialog", "--warningyesnocancel", msg, "--title", title)
+		configureGUICommand(kcmd)
+		if err := kcmd.Run(); err == nil {
+			return true, nil
+		}
+		if isDialogCancelErr(err) {
+			return false, nil
+		}
+		return false, nil
+	}
+}
+
 func protocolSaveDialog(defaultPath string, exts string) (string, bool, error) {
 	defaultPath = strings.TrimSpace(defaultPath)
 	switch runtime.GOOS {

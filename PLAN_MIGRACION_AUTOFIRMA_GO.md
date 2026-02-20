@@ -4,9 +4,26 @@ Licencia: GPLv3.
 Autor: Alberto Avidad Fernandez.
 Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 
-Fecha de revision: 2026-02-19
+Fecha de revision: 2026-02-20
 Repositorio: `work/native-host-src`
 Commit revisado: `60f3bb656201ff7a8ee8093450842554c0277608`
+
+## Avance 2026-02-20 (cierre de migración GUI protocolaria a Fyne)
+- Implementado en `cmd/gui`:
+  - nuevo módulo `fyne_protocol.go` para soportar en Fyne los flujos `afirma://`:
+    - `sign/cosign/countersign` con subida legacy (`RTServlet/STServlet`) y bucle activo `#WAIT`,
+    - `selectcert` con diálogo de selección y subida de certificado,
+    - `batch` protocolario reutilizando el motor existente de lote,
+    - parseo y procesamiento de manifiestos `<sign>` con extracción de `dat`/`format`.
+  - integración de arranque protocolario en `main.go`:
+    - Fyne pasa a ser ruta por defecto también para `afirma://`,
+    - Gio queda como fallback explícito con `-gio`.
+  - conexión de acciones de UI Fyne al protocolo:
+    - botón de firma en Fyne ejecuta flujo protocolario cuando hay estado `Protocol`,
+    - selección de certificado dispara procesamiento batch cuando la acción pendiente es `batch`.
+- Verificación:
+  - `GOCACHE=/tmp/gocache go test -mod=readonly ./cmd/gui/...` OK.
+  - `GOCACHE=/tmp/gocache go test -mod=readonly ./pkg/...` OK.
 
 ## Avance 2026-02-19 (compatibilidad certificados Java en instaladores)
 - Implementado en `cmd/gui`:

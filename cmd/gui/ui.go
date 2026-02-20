@@ -275,7 +275,7 @@ func NewUI(w *app.Window) *UI {
 		IsServerMode:    false, // Default
 	}
 
-	ui.ListCerts.Axis = layout.Vertical
+	ui.ListCerts.Axis = layout.Horizontal
 	ui.InputFile.SingleLine = true
 	ui.InputFile.Submit = true
 	ui.MainScrollList.Axis = layout.Vertical
@@ -558,44 +558,33 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
 						}),
-						// Certificate List
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						// Certificate List (carrusel horizontal)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							carouselH := gtx.Dp(unit.Dp(130))
+							gtx.Constraints.Min.Y = carouselH
+							gtx.Constraints.Max.Y = carouselH
 							return material.List(ui.Theme, &ui.ListCerts).Layout(gtx, len(ui.Certs), func(gtx layout.Context, index int) layout.Dimensions {
-								if ui.CertClicks[index].Clicked(gtx) {
-									if !ui.Certs[index].CanSign {
-										issue := strings.TrimSpace(ui.Certs[index].SignIssue)
-										if issue == "" {
-											issue = "certificado no apto para firma"
-										}
-										ui.StatusMsg = "Error: " + issue
-										ui.Window.Invalidate()
-										return layout.Dimensions{}
-									}
-									ui.SelectedCert = index
-									ui.Window.Invalidate()
-									if isBatchFlow && ui.Protocol != nil && !ui.IsSigning {
-										go ui.handleProtocolBatch(ui.Protocol)
-									}
-								}
-
-								label := certificateDisplayLabel(ui.Certs[index])
-								// Simple card style for certs
-								btn := material.Button(ui.Theme, &ui.CertClicks[index], label)
-								if ui.SelectedCert == index {
-									// Highlight selected
-									btn.Background = color.NRGBA{R: 0, G: 120, B: 180, A: 255}
-									btn.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-								} else if ui.Certs[index].CanSign {
-									btn.Background = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
-									btn.Color = color.NRGBA{A: 255}
-								} else {
-									btn.Background = color.NRGBA{R: 245, G: 230, B: 230, A: 255}
-									btn.Color = color.NRGBA{R: 100, G: 100, B: 100, A: 255}
-								}
-								btn.Inset = layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(12), Left: unit.Dp(16), Right: unit.Dp(16)}
-
+								isSelected := ui.SelectedCert == index
 								return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return btn.Layout(gtx)
+									return ui.CertClicks[index].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										if ui.CertClicks[index].Clicked(gtx) {
+											if !ui.Certs[index].CanSign {
+												issue := strings.TrimSpace(ui.Certs[index].SignIssue)
+												if issue == "" {
+													issue = "certificado no apto para firma"
+												}
+												ui.StatusMsg = "Error: " + issue
+												ui.Window.Invalidate()
+											} else {
+												ui.SelectedCert = index
+												ui.Window.Invalidate()
+												if isBatchFlow && ui.Protocol != nil && !ui.IsSigning {
+													go ui.handleProtocolBatch(ui.Protocol)
+												}
+											}
+										}
+										return ui.layoutCertCardHoriz(gtx, ui.Certs[index], isSelected)
+									})
 								})
 							})
 						}),
@@ -940,78 +929,43 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						return layout.Dimensions{}
 					}),
 
-					// Certificate List (Only in Sign Mode)
+					// Certificate List (Only in Sign Mode) - carrusel horizontal
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if ui.Mode != 0 {
 							return layout.Dimensions{}
 						}
-						return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return layout.Stack{}.Layout(gtx,
-								layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-									// Card-like container for better contrast and separation.
-									panelH := gtx.Dp(unit.Dp(220))
-									if panelH < 160 {
-										panelH = 160
-									}
-									gtx.Constraints.Min.Y = panelH
-									gtx.Constraints.Max.Y = panelH
-
-									paint.FillShape(
-										gtx.Ops,
-										color.NRGBA{R: 248, G: 250, B: 252, A: 255},
-										clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, panelH)}.Op(),
-									)
-									paint.FillShape(gtx.Ops, color.NRGBA{R: 190, G: 198, B: 210, A: 255}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, 1)}.Op())
-									paint.FillShape(gtx.Ops, color.NRGBA{R: 190, G: 198, B: 210, A: 255}, clip.Rect{Min: image.Pt(0, panelH-1), Max: image.Pt(gtx.Constraints.Max.X, panelH)}.Op())
-									paint.FillShape(gtx.Ops, color.NRGBA{R: 190, G: 198, B: 210, A: 255}, clip.Rect{Max: image.Pt(1, panelH)}.Op())
-									paint.FillShape(gtx.Ops, color.NRGBA{R: 190, G: 198, B: 210, A: 255}, clip.Rect{Min: image.Pt(gtx.Constraints.Max.X-1, 0), Max: image.Pt(gtx.Constraints.Max.X, panelH)}.Op())
-									return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, panelH)}
-								}),
-								layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-									panelH := gtx.Dp(unit.Dp(220))
-									if panelH < 160 {
-										panelH = 160
-									}
-									gtx.Constraints.Min.Y = panelH
-									gtx.Constraints.Max.Y = panelH
-									return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return material.List(ui.Theme, &ui.ListCerts).Layout(gtx, len(ui.Certs), func(gtx layout.Context, index int) layout.Dimensions {
-											if ui.CertClicks[index].Clicked(gtx) {
-												if !ui.Certs[index].CanSign {
-													issue := strings.TrimSpace(ui.Certs[index].SignIssue)
-													if issue == "" {
-														issue = "certificado no apto para firma"
-													}
-													ui.StatusMsg = "Error: " + issue
-													ui.Window.Invalidate()
-													return layout.Dimensions{}
+						return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							carouselH := gtx.Dp(unit.Dp(140))
+							gtx.Constraints.Min.Y = carouselH
+							gtx.Constraints.Max.Y = carouselH
+							// Fondo de la banda del carrusel
+							paint.FillShape(gtx.Ops,
+								color.NRGBA{R: 248, G: 250, B: 252, A: 255},
+								clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, carouselH)}.Op())
+							return material.List(ui.Theme, &ui.ListCerts).Layout(gtx, len(ui.Certs), func(gtx layout.Context, index int) layout.Dimensions {
+								isCardSelected := index == ui.SelectedCert
+								return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return ui.CertClicks[index].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										if ui.CertClicks[index].Clicked(gtx) {
+											if !ui.Certs[index].CanSign {
+												issue := strings.TrimSpace(ui.Certs[index].SignIssue)
+												if issue == "" {
+													issue = "certificado no apto para firma"
 												}
+												ui.StatusMsg = "Error: " + issue
+												ui.Window.Invalidate()
+											} else {
 												ui.SelectedCert = index
 												if ui.Protocol != nil {
 													ui.signCurrentFile()
 												}
 												ui.Window.Invalidate()
 											}
-
-											label := certificateDisplayLabel(ui.Certs[index])
-											item := material.Button(ui.Theme, &ui.CertClicks[index], label)
-											if ui.Certs[index].CanSign {
-												item.Background = color.NRGBA{R: 235, G: 243, B: 251, A: 255}
-											} else {
-												item.Background = color.NRGBA{R: 248, G: 226, B: 226, A: 255}
-											}
-											item.Color = color.NRGBA{R: 20, G: 20, B: 20, A: 255}
-											if index == ui.SelectedCert {
-												item.Background = color.NRGBA{R: 178, G: 210, B: 246, A: 255}
-											}
-
-											return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-												return item.Layout(gtx)
-											})
-										})
+										}
+										return ui.layoutCertCardHoriz(gtx, ui.Certs[index], isCardSelected)
 									})
-								}),
-							)
+								})
+							})
 						})
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2868,8 +2822,22 @@ func (ui *UI) signCurrentFile() {
 		if ui.IsServerMode || (ui.Protocol != nil) {
 			saveToDisk = false
 		}
+		renamedOnCollision := false
+		overwriteApproved := false
 
 		if saveToDisk {
+			adjustedPath, changed, overwrite, adjustErr := ensureWritableSignedOutputPath(outPath)
+			if adjustErr != nil {
+				hint := "Comprueba permisos de la carpeta destino y vuelve a intentarlo."
+				ui.setLastError("ERR_SIGN_OUTPUT_PATH", "guardado", opAction, adjustErr, hint)
+				ui.StatusMsg = withSolution("No se pudo preparar la ruta de salida: "+adjustErr.Error(), hint)
+				ui.Window.Invalidate()
+				return
+			}
+			outPath = adjustedPath
+			renamedOnCollision = changed
+			overwriteApproved = overwrite
+
 			if err := os.WriteFile(outPath, signature, 0644); err != nil {
 				hint := "Comprueba permisos de escritura en la carpeta de destino."
 				ui.setLastError("ERR_SIGN_SAVE_FILE", "guardado", opAction, err, hint)
@@ -2957,7 +2925,13 @@ func (ui *UI) signCurrentFile() {
 			return
 		}
 
-		ui.StatusMsg = fmt.Sprintf("¡Firmado con éxito! Formato: %s. Guardado en: %s", strings.ToUpper(effectiveFormat), outPath)
+		if overwriteApproved {
+			ui.StatusMsg = fmt.Sprintf("¡Firmado con éxito! Formato: %s. Se sobrescribió el archivo existente: %s", strings.ToUpper(effectiveFormat), outPath)
+		} else if renamedOnCollision {
+			ui.StatusMsg = fmt.Sprintf("¡Firmado con éxito! Formato: %s. El archivo destino ya existía y se guardó como: %s", strings.ToUpper(effectiveFormat), outPath)
+		} else {
+			ui.StatusMsg = fmt.Sprintf("¡Firmado con éxito! Formato: %s. Guardado en: %s", strings.ToUpper(effectiveFormat), outPath)
+		}
 		ui.appendOperationHistory(opAction, effectiveFormat, "ok", strings.TrimSpace(outPath), "firma guardada correctamente")
 		ui.SignedFile = outPath
 		ui.PendingCadesConfirm = false
@@ -3177,6 +3151,39 @@ func uiMinInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func ensureWritableSignedOutputPath(path string) (resolved string, renamed bool, overwrote bool, err error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false, false, fmt.Errorf("ruta de salida vacía")
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return path, false, false, nil
+		}
+		return "", false, false, err
+	}
+
+	overwrite, askErr := protocolConfirmOverwriteDialog(path)
+	if askErr != nil {
+		log.Printf("[UI] No se pudo mostrar confirmación de sobrescritura: %v (se usará nombre alternativo)", askErr)
+	} else if overwrite {
+		return path, false, true, nil
+	}
+
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	for i := 1; i <= 9999; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", base, i, ext)
+		if _, err := os.Stat(candidate); err != nil {
+			if os.IsNotExist(err) {
+				return candidate, true, false, nil
+			}
+			return "", false, false, err
+		}
+	}
+	return "", false, false, fmt.Errorf("no se encontró nombre libre para guardar el archivo firmado")
 }
 
 func (ui *UI) runExpertSelectCertDialog() {
@@ -5514,6 +5521,340 @@ func isRepresentationCertificate(cert protocol.Certificate) bool {
 		}
 	}
 	return false
+}
+
+// layoutCertCard renderiza un certificado como una card visual con indicadores de tipo y validez.
+// Solo toca el renderizado - no modifica ninguna lógica funcional.
+func (ui *UI) layoutCertCard(gtx layout.Context, cert protocol.Certificate, isSelected bool) layout.Dimensions {
+	isRepr := isRepresentationCertificate(cert)
+
+	// Icono del tipo de certificado
+	iconLabel := "Pers"
+	iconBg := color.NRGBA{R: 63, G: 81, B: 181, A: 255} // Azul para personal
+	if isRepr {
+		iconLabel = "Rep."
+		iconBg = color.NRGBA{R: 103, G: 58, B: 183, A: 255} // Morado para representación
+	}
+
+	// Estado de validez
+	validStatus := certValidityStatus(cert.ValidFrom, cert.ValidTo)
+	isExpired := strings.Contains(validStatus, "caducado") || strings.Contains(validStatus, "no válido")
+	isExpiringSoon := strings.Contains(validStatus, "caduca en")
+	isValid := cert.CanSign && !isExpired
+
+	// Colores de la card
+	cardBg := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	borderCol := color.NRGBA{R: 210, G: 218, B: 230, A: 255}
+	if isSelected {
+		cardBg = color.NRGBA{R: 232, G: 240, B: 254, A: 255}
+		borderCol = color.NRGBA{R: 63, G: 81, B: 181, A: 255}
+	} else if !cert.CanSign || isExpired {
+		cardBg = color.NRGBA{R: 255, G: 247, B: 247, A: 255}
+		borderCol = color.NRGBA{R: 230, G: 200, B: 200, A: 255}
+	}
+
+	// Badge de validez
+	badgeLabel := "OK"
+	badgeBg := color.NRGBA{R: 40, G: 160, B: 80, A: 255} // Verde
+	if !isValid {
+		badgeLabel = "NO"
+		badgeBg = color.NRGBA{R: 190, G: 40, B: 40, A: 255} // Rojo
+	} else if isExpiringSoon {
+		badgeLabel = "!"
+		badgeBg = color.NRGBA{R: 200, G: 130, B: 0, A: 255} // Naranja
+	}
+
+	cardH := gtx.Dp(unit.Dp(76))
+	iconSz := gtx.Dp(unit.Dp(40))
+	badgeSz := gtx.Dp(unit.Dp(26))
+
+	return layout.Stack{}.Layout(gtx,
+		// Fondo de la card
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.Y = cardH
+			gtx.Constraints.Max.Y = cardH
+			paint.FillShape(gtx.Ops, cardBg,
+				clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, cardH)}.Op())
+			// Borde
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, 1)}.Op())
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Min: image.Pt(0, cardH-1), Max: image.Pt(gtx.Constraints.Max.X, cardH)}.Op())
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Max: image.Pt(1, cardH)}.Op())
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Min: image.Pt(gtx.Constraints.Max.X-1, 0), Max: image.Pt(gtx.Constraints.Max.X, cardH)}.Op())
+			// Borde izquierdo destacado para seleccionado
+			if isSelected {
+				paint.FillShape(gtx.Ops, borderCol, clip.Rect{Max: image.Pt(3, cardH)}.Op())
+			}
+			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, cardH)}
+		}),
+		// Contenido
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.Y = cardH
+			gtx.Constraints.Max.Y = cardH
+			return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(10), Right: unit.Dp(10)}.Layout(gtx,
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						// Icono de tipo
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Stack{}.Layout(gtx,
+								layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min = image.Pt(iconSz, iconSz)
+									gtx.Constraints.Max = image.Pt(iconSz, iconSz)
+									paint.FillShape(gtx.Ops, iconBg,
+										clip.Rect{Max: image.Pt(iconSz, iconSz)}.Op())
+									return layout.Dimensions{Size: image.Pt(iconSz, iconSz)}
+								}),
+								layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min = image.Pt(iconSz, iconSz)
+									gtx.Constraints.Max = image.Pt(iconSz, iconSz)
+									return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										lbl := material.Caption(ui.Theme, iconLabel)
+										lbl.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+										return lbl.Layout(gtx)
+									})
+								}),
+							)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Spacer{Width: unit.Dp(10)}.Layout(gtx)
+						}),
+						// Nombre y detalles
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							name := certificateBestDisplayName(cert)
+							if name == "" {
+								name = cert.ID
+							}
+							issuerStr := ""
+							if cn, ok := cert.Issuer["CN"]; ok {
+								issuerStr = strings.TrimSpace(cn)
+							}
+							nameColor := color.NRGBA{R: 20, G: 30, B: 50, A: 255}
+							if !cert.CanSign || isExpired {
+								nameColor = color.NRGBA{R: 130, G: 80, B: 80, A: 255}
+							}
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									lbl := material.Body2(ui.Theme, name)
+									lbl.Color = nameColor
+									return lbl.Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if issuerStr == "" {
+										return layout.Dimensions{}
+									}
+									cap := material.Caption(ui.Theme, "AC: "+issuerStr)
+									cap.Color = color.NRGBA{R: 110, G: 118, B: 135, A: 255}
+									return cap.Layout(gtx)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									cap := material.Caption(ui.Theme, validStatus)
+									if isExpired {
+										cap.Color = color.NRGBA{R: 180, G: 20, B: 20, A: 255}
+									} else if isExpiringSoon {
+										cap.Color = color.NRGBA{R: 160, G: 100, B: 0, A: 255}
+									} else {
+										cap.Color = color.NRGBA{R: 40, G: 130, B: 60, A: 255}
+									}
+									return cap.Layout(gtx)
+								}),
+							)
+						}),
+						// Badge OK/NO
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Stack{}.Layout(gtx,
+								layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min = image.Pt(badgeSz, badgeSz)
+									gtx.Constraints.Max = image.Pt(badgeSz, badgeSz)
+									paint.FillShape(gtx.Ops, badgeBg,
+										clip.Rect{Max: image.Pt(badgeSz, badgeSz)}.Op())
+									return layout.Dimensions{Size: image.Pt(badgeSz, badgeSz)}
+								}),
+								layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min = image.Pt(badgeSz, badgeSz)
+									gtx.Constraints.Max = image.Pt(badgeSz, badgeSz)
+									return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										lbl := material.Caption(ui.Theme, badgeLabel)
+										lbl.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+										return lbl.Layout(gtx)
+									})
+								}),
+							)
+						}),
+					)
+				},
+			)
+		}),
+	)
+}
+
+// layoutCertCardHoriz renderiza un certificado como card vertical compacta para el carrusel horizontal.
+// Ancho fijo de 160dp, altura igual al contenedor (determinada por el carrusel).
+// Solo toca el renderizado — la lógica de clicks queda en el llamador.
+func (ui *UI) layoutCertCardHoriz(gtx layout.Context, cert protocol.Certificate, isSelected bool) layout.Dimensions {
+	isRepr := isRepresentationCertificate(cert)
+
+	iconLabel := "Pers"
+	iconBg := color.NRGBA{R: 63, G: 81, B: 181, A: 255}
+	if isRepr {
+		iconLabel = "Rep."
+		iconBg = color.NRGBA{R: 103, G: 58, B: 183, A: 255}
+	}
+
+	validStatus := certValidityStatus(cert.ValidFrom, cert.ValidTo)
+	isExpired := strings.Contains(validStatus, "caducado") || strings.Contains(validStatus, "no válido")
+	isExpiringSoon := strings.Contains(validStatus, "caduca en")
+	isValid := cert.CanSign && !isExpired
+
+	// Colores de la card
+	cardBg := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	borderCol := color.NRGBA{R: 210, G: 218, B: 230, A: 255}
+	if isSelected {
+		cardBg = color.NRGBA{R: 232, G: 240, B: 254, A: 255}
+		borderCol = color.NRGBA{R: 63, G: 81, B: 181, A: 255}
+	} else if !cert.CanSign || isExpired {
+		cardBg = color.NRGBA{R: 255, G: 247, B: 247, A: 255}
+		borderCol = color.NRGBA{R: 230, G: 200, B: 200, A: 255}
+	}
+
+	// Badge OK/NO
+	badgeLabel := "OK"
+	badgeBg := color.NRGBA{R: 40, G: 160, B: 80, A: 255}
+	if !isValid {
+		badgeLabel = "NO"
+		badgeBg = color.NRGBA{R: 190, G: 40, B: 40, A: 255}
+	} else if isExpiringSoon {
+		badgeLabel = "!"
+		badgeBg = color.NRGBA{R: 200, G: 130, B: 0, A: 255}
+	}
+
+	cardW := gtx.Dp(unit.Dp(160))
+	cardH := gtx.Constraints.Max.Y
+	if cardH < gtx.Dp(unit.Dp(100)) {
+		cardH = gtx.Dp(unit.Dp(100))
+	}
+	iconSz := gtx.Dp(unit.Dp(36))
+	badgeH := gtx.Dp(unit.Dp(20))
+	badgeW := gtx.Dp(unit.Dp(32))
+
+	gtx.Constraints.Min = image.Pt(cardW, cardH)
+	gtx.Constraints.Max = image.Pt(cardW, cardH)
+
+	return layout.Stack{}.Layout(gtx,
+		// Fondo de la card
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			paint.FillShape(gtx.Ops, cardBg,
+				clip.Rect{Max: image.Pt(cardW, cardH)}.Op())
+			// Bordes
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Max: image.Pt(cardW, 1)}.Op())
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Min: image.Pt(0, cardH-1), Max: image.Pt(cardW, cardH)}.Op())
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Max: image.Pt(1, cardH)}.Op())
+			paint.FillShape(gtx.Ops, borderCol, clip.Rect{Min: image.Pt(cardW-1, 0), Max: image.Pt(cardW, cardH)}.Op())
+			// Borde superior destacado si seleccionado
+			if isSelected {
+				paint.FillShape(gtx.Ops, borderCol, clip.Rect{Max: image.Pt(cardW, 3)}.Op())
+			}
+			return layout.Dimensions{Size: image.Pt(cardW, cardH)}
+		}),
+		// Contenido
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx,
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+						// Icono de tipo (centrado arriba)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Stack{}.Layout(gtx,
+									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+										gtx.Constraints.Min = image.Pt(iconSz, iconSz)
+										gtx.Constraints.Max = image.Pt(iconSz, iconSz)
+										paint.FillShape(gtx.Ops, iconBg,
+											clip.Rect{Max: image.Pt(iconSz, iconSz)}.Op())
+										return layout.Dimensions{Size: image.Pt(iconSz, iconSz)}
+									}),
+									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+										gtx.Constraints.Min = image.Pt(iconSz, iconSz)
+										gtx.Constraints.Max = image.Pt(iconSz, iconSz)
+										return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											lbl := material.Caption(ui.Theme, iconLabel)
+											lbl.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+											return lbl.Layout(gtx)
+										})
+									}),
+								)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Spacer{Height: unit.Dp(6)}.Layout(gtx)
+						}),
+						// Nombre del certificado
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							name := certificateBestDisplayName(cert)
+							if name == "" {
+								name = cert.ID
+							}
+							// Truncar nombre para que quepa
+							if len(name) > 22 {
+								name = name[:20] + "…"
+							}
+							nameColor := color.NRGBA{R: 20, G: 30, B: 50, A: 255}
+							if !cert.CanSign || isExpired {
+								nameColor = color.NRGBA{R: 130, G: 80, B: 80, A: 255}
+							}
+							lbl := material.Caption(ui.Theme, name)
+							lbl.Color = nameColor
+							return layout.Center.Layout(gtx, lbl.Layout)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Spacer{Height: unit.Dp(4)}.Layout(gtx)
+						}),
+						// Vigencia (texto corto)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							// Mostrar solo la fecha de expiración de forma compacta
+							shortValidity := validStatus
+							if len(shortValidity) > 20 {
+								shortValidity = shortValidity[:18] + "…"
+							}
+							cap := material.Caption(ui.Theme, shortValidity)
+							if isExpired {
+								cap.Color = color.NRGBA{R: 180, G: 20, B: 20, A: 255}
+							} else if isExpiringSoon {
+								cap.Color = color.NRGBA{R: 160, G: 100, B: 0, A: 255}
+							} else {
+								cap.Color = color.NRGBA{R: 40, G: 130, B: 60, A: 255}
+							}
+							return layout.Center.Layout(gtx, cap.Layout)
+						}),
+						// Espacio flexible para empujar el badge abajo
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
+						}),
+						// Badge OK/NO (abajo a la derecha)
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Stack{}.Layout(gtx,
+									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+										gtx.Constraints.Min = image.Pt(badgeW, badgeH)
+										gtx.Constraints.Max = image.Pt(badgeW, badgeH)
+										paint.FillShape(gtx.Ops, badgeBg,
+											clip.Rect{Max: image.Pt(badgeW, badgeH)}.Op())
+										return layout.Dimensions{Size: image.Pt(badgeW, badgeH)}
+									}),
+									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+										gtx.Constraints.Min = image.Pt(badgeW, badgeH)
+										gtx.Constraints.Max = image.Pt(badgeW, badgeH)
+										return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											lbl := material.Caption(ui.Theme, badgeLabel)
+											lbl.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+											return lbl.Layout(gtx)
+										})
+									}),
+								)
+							})
+						}),
+					)
+				},
+			)
+		}),
+	)
 }
 
 func pickPDFPath(title string) (string, error) {

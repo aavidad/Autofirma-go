@@ -100,3 +100,16 @@ Conseguir compatibilidad operativa con flujo de sede usando protocolo `afirma://
   - `packaging/macos/install.sh`
   - `scripts/macos/install_and_trust_macos.sh`
   - `packaging/macos/make_macos_release.sh`
+
+## Avance sesion 2026-02-20
+- [x] Migración del flujo protocolario `afirma://` a Fyne:
+  - nuevo `cmd/gui/fyne_protocol.go`.
+  - Fyne soporta `sign/cosign/countersign`, `selectcert` y `batch` en modo protocolario.
+  - subida legacy `RTServlet/STServlet` operativa en Fyne.
+  - bucle activo `WAIT` para protocolo durante firma en Fyne.
+- [x] `main.go` actualizado:
+  - Fyne como ruta por defecto también para arranques protocolarios.
+  - Gio queda como fallback explícito mediante `-gio`.
+- [x] Validación de regresión:
+  - `GOCACHE=/tmp/gocache go test -mod=readonly ./cmd/gui/...` OK.
+  - `GOCACHE=/tmp/gocache go test -mod=readonly ./pkg/...` OK.

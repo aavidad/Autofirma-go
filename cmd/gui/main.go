@@ -28,6 +28,8 @@ var (
 	exportJavaCerts   = flag.String("exportar-certs-java", "", "Exportar certificados compatibles con AutoFirma Java al directorio indicado y salir")
 	versionFlag       = flag.Bool("version", false, "Mostrar versión de la aplicación y salir")
 	detailHelpFlag    = flag.Bool("ayuda-detallada", false, "Mostrar ayuda detallada en castellano y salir")
+	fyneFlag          = flag.Bool("fyne", false, "Forzar interfaz gráfica Fyne")
+	gioFlag           = flag.Bool("gio", false, "Forzar interfaz clásica Gio (compatibilidad/protocolo legado)")
 )
 
 func main() {
@@ -117,7 +119,24 @@ func main() {
 		return
 	}
 
-	// Direct Protocol Handler Mode (existing behavior)
+	// UI mode selection:
+	// - Fyne es el modo por defecto para uso interactivo y protocolario.
+	// - Gio queda disponible como fallback explícito con -gio.
+	protocolArg := firstAfirmaProtocolArg(os.Args[1:])
+	useFyne := *fyneFlag || !*gioFlag
+	if useFyne {
+		log.Println("Arrancando en modo Fyne")
+		f := NewFyneUI()
+		if protocolArg != "" {
+			log.Printf("[Main] Solicitud protocolaria delegada a Fyne: %s", protocolArg)
+			f.HandleProtocolInit(protocolArg)
+		}
+		f.Run()
+
+		log.Println("[Main] Ventana Fyne cerrada. Saliendo.")
+		os.Exit(0)
+	}
+
 	go func() {
 		w := new(app.Window)
 		w.Option(app.Title("AutoFirma - Diputación de Granada"), app.Size(unit.Dp(800), unit.Dp(600)))
@@ -166,6 +185,10 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "    Muestra la versión actual del binario.")
 	_, _ = fmt.Fprintln(out, "  -ayuda-detallada")
 	_, _ = fmt.Fprintln(out, "    Muestra esta ayuda ampliada.")
+	_, _ = fmt.Fprintln(out, "  -fyne")
+	_, _ = fmt.Fprintln(out, "    Fuerza el arranque con la interfaz Fyne (por defecto en modo interactivo).")
+	_, _ = fmt.Fprintln(out, "  -gio")
+	_, _ = fmt.Fprintln(out, "    Fuerza la interfaz clásica Gio (compatibilidad para flujos protocolarios legados).")
 }
 
 func runWebSocketServer() {
@@ -245,6 +268,16 @@ func loop(w *app.Window, ui *UI) error {
 		}
 	}
 	return nil
+}
+
+func firstAfirmaProtocolArg(args []string) string {
+	for _, raw := range args {
+		arg := strings.ToLower(strings.Trim(strings.TrimSpace(raw), "\"'"))
+		if strings.HasPrefix(arg, "afirma://") {
+			return strings.Trim(strings.TrimSpace(raw), "\"'")
+		}
+	}
+	return ""
 }
 
 func handleWebSocketLaunch(uriString string, ui *UI) {
