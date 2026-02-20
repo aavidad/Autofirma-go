@@ -121,10 +121,11 @@ func newFyneUI(protocolQuickMode bool) *FyneUI {
 
 	a := app.NewWithID("es.dipgra.autofirma")
 	w := a.NewWindow("AutoFirma - Diputación de Granada")
+	w.SetFixedSize(false)
 	if protocolQuickMode {
 		w.Resize(fyne.NewSize(560, 180))
 	} else {
-		w.Resize(fyne.NewSize(1100, 750))
+		w.Resize(fyne.NewSize(1240, 860))
 	}
 
 	ui := &FyneUI{
@@ -229,15 +230,22 @@ func (ui *FyneUI) buildUI() {
 
 	header := ui.buildHeader()
 
-	tabs := container.NewAppTabs(
+	tabItems := []*container.TabItem{
 		container.NewTabItemWithIcon("Firma", theme.DocumentSaveIcon(), ui.buildSignTab()),
 		container.NewTabItemWithIcon("Verificar", theme.ConfirmIcon(), ui.buildVerifyTab()),
-		container.NewTabItemWithIcon("Diagnóstico", theme.InfoIcon(), ui.buildDiagnosticsTab()),
-		container.NewTabItemWithIcon("Seguridad", theme.WarningIcon(), ui.buildSecurityTab()),
-		container.NewTabItemWithIcon("Pruebas", theme.MediaPlayIcon(), ui.buildTestsTab()),
+	}
+	if ui.ExpertMode {
+		tabItems = append(tabItems,
+			container.NewTabItemWithIcon("Diagnóstico", theme.InfoIcon(), ui.buildDiagnosticsTab()),
+			container.NewTabItemWithIcon("Seguridad", theme.WarningIcon(), ui.buildSecurityTab()),
+			container.NewTabItemWithIcon("Pruebas", theme.MediaPlayIcon(), ui.buildTestsTab()),
+		)
+	}
+	tabItems = append(tabItems,
 		container.NewTabItemWithIcon("Configuración", theme.SettingsIcon(), ui.buildSettingsTab()),
 		container.NewTabItemWithIcon("Ayuda", theme.HelpIcon(), ui.buildHelpTab()),
 	)
+	tabs := container.NewAppTabs(tabItems...)
 	tabs.SetTabLocation(container.TabLocationTop)
 
 	// Panel principal redimensionable: arriba contenido y abajo registro de sesión.
@@ -431,9 +439,7 @@ func (ui *FyneUI) buildSignTab() fyne.CanvasObject {
 		container.NewHBox(openSignedBtn, openFolderBtn, refreshStatusBtn),
 	)
 
-	expertTools := ui.buildExpertToolsSignPanel()
-
-	return container.NewVBox(
+	content := []fyne.CanvasObject{
 		container.NewPadded(dropZone),
 		container.NewPadded(container.NewHBox(widget.NewLabel("Operación:"), opSelect)),
 		container.NewPadded(container.NewHBox(
@@ -457,9 +463,12 @@ func (ui *FyneUI) buildSignTab() fyne.CanvasObject {
 		container.NewPadded(ui.CertScroll),
 		widget.NewSeparator(),
 		container.NewPadded(actionRow),
-		widget.NewSeparator(),
-		container.NewPadded(expertTools),
-	)
+	}
+	if ui.ExpertMode {
+		content = append(content, widget.NewSeparator(), container.NewPadded(ui.buildExpertToolsSignPanel()))
+	}
+
+	return container.NewVScroll(container.NewVBox(content...))
 }
 
 func (ui *FyneUI) buildExpertToolsSignPanel() fyne.CanvasObject {
@@ -886,10 +895,22 @@ func (ui *FyneUI) buildSettingsTab() fyne.CanvasObject {
 	})
 	invalidPDFChk.SetChecked(ui.AllowInvalidPDF)
 
-	expertChk := widget.NewCheck("Modo experto", func(v bool) {
-		ui.ExpertMode = v
-	})
+	expertChk := widget.NewCheck("Modo experto", nil)
 	expertChk.SetChecked(ui.ExpertMode)
+	expertChk.OnChanged = func(v bool) {
+		if ui.ExpertMode == v {
+			return
+		}
+		ui.ExpertMode = v
+		fyne.Do(func() {
+			ui.buildUI()
+			if v {
+				ui.SetStatus("Modo experto activado.")
+				return
+			}
+			ui.SetStatus("Modo experto desactivado.")
+		})
+	}
 
 	saveBtn := widget.NewButtonWithIcon("Guardar preferencias", theme.DocumentSaveIcon(), func() {
 		if err := ui.savePreferences(); err != nil {

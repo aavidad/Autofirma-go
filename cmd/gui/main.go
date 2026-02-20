@@ -112,6 +112,14 @@ func main() {
 		return
 	}
 
+	if isCLIModeRequested() {
+		if err := runCLIMode(); err != nil {
+			log.Printf("Error en modo CLI: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// WebSocket Server Mode
 	if *serverModeFlag {
 		log.Println("Iniciando en modo servidor WebSocket")
@@ -190,6 +198,11 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "    Fuerza el arranque con la interfaz Fyne (por defecto en modo interactivo).")
 	_, _ = fmt.Fprintln(out, "  -gio")
 	_, _ = fmt.Fprintln(out, "    Fuerza la interfaz clásica Gio (compatibilidad para flujos protocolarios legados).")
+	_, _ = fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "Opciones de modo CLI (sin interfaz):")
+	var cliHelp strings.Builder
+	appendCLIDetailedUsage(&cliHelp)
+	_, _ = fmt.Fprint(out, cliHelp.String())
 }
 
 func runWebSocketServer() {
