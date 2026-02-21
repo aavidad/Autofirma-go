@@ -46,11 +46,14 @@ build-qt: $(DIST)  ## Compila el frontend Qt (autofirma-qt)
 	@chmod +x $(DIST)/autofirma-qt
 	@echo "   → $(DIST)/autofirma-qt"
 
-copy-qml: $(DIST)  ## Copia los archivos QML al directorio dist
-	@echo "▶  Copiando QML..."
-	@mkdir -p $(DIST)/qml
+copy-qml: $(DIST)  ## Copia los archivos QML y ASSETS al directorio dist
+	@echo "▶  Copiando QML y Assets..."
+	@mkdir -p $(DIST)/qml $(DIST)/assets
 	@cp -a $(QT_DIR)/qml/. $(DIST)/qml/
+	@[ -d assets ] && cp -a assets/. $(DIST)/assets/ || true
+	@[ -d ../assets ] && cp -a ../assets/. $(DIST)/assets/ || true
 	@echo "   → $(DIST)/qml/"
+	@echo "   → $(DIST)/assets/"
 
 build-host:  ## Compila el native messaging host (si existe)
 	@if [ -d cmd/host ]; then \
@@ -85,6 +88,7 @@ package: build  ## Crea un tarball instalador autónomo
 	@cp dist/autofirma-desktop        release/linux/payload/AutofirmaDipgra/
 	@cp dist/autofirma-qt             release/linux/payload/AutofirmaDipgra/
 	@cp -a dist/qml                   release/linux/payload/AutofirmaDipgra/
+	@cp -a dist/assets                release/linux/payload/AutofirmaDipgra/
 	@[ -f dist/autofirma-host ] && cp dist/autofirma-host release/linux/payload/AutofirmaDipgra/ || true
 	@echo "$(VERSION)" > release/linux/payload/AutofirmaDipgra/VERSION
 	@# Copiar instalador y certificados

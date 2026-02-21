@@ -251,11 +251,12 @@ build() {
   cp "${ROOT_DIR}/cmd/qt_real/qt_real" "${ROOT_DIR}/dist/autofirma-qt"
   ok "Frontend Qt compilado → dist/autofirma-qt"
 
-  # ── 4. Copiar QML ─────────────────────────────────────────────────────────
-  info "Copiando archivos QML..."
-  mkdir -p "${ROOT_DIR}/dist/qml"
+  # ── 4. Copiar QML y Assets ────────────────────────────────────────────────
+  info "Copiando archivos QML y Assets..."
+  mkdir -p "${ROOT_DIR}/dist/qml" "${ROOT_DIR}/dist/assets"
   cp -a "${ROOT_DIR}/cmd/qt_real/qml/." "${ROOT_DIR}/dist/qml/"
-  ok "QML copiado → dist/qml/"
+  [[ -d "${ROOT_DIR}/assets" ]] && cp -a "${ROOT_DIR}/assets/." "${ROOT_DIR}/dist/assets/" || true
+  ok "QML y Assets copiados → dist/"
 
   # ── 5. Escribir VERSION ───────────────────────────────────────────────────
   echo "${VERSION}" > "${ROOT_DIR}/dist/VERSION"
@@ -312,11 +313,12 @@ install_app() {
   fi
   ok "Binarios instalados en ${PREFIX}"
 
-  # Copiar QML
-  info "Instalando archivos QML..."
-  mkdir -p "${QML_DIR}"
+  # Copiar QML y Assets
+  info "Instalando archivos QML y Assets..."
+  mkdir -p "${QML_DIR}" "${ASSETS_DIR}"
   cp -a "${dist_dir}/qml/." "${QML_DIR}/"
-  ok "QML instalado en ${QML_DIR}"
+  [[ -d "${dist_dir}/assets" ]] && cp -a "${dist_dir}/assets/." "${ASSETS_DIR}/" || true
+  ok "QML y Assets instalados en ${PREFIX}"
 
   # VERSION
   echo "${VERSION}" > "${VERSION_FILE}"
