@@ -136,12 +136,30 @@ void IpcBridge::refreshCertificates() {
 
 void IpcBridge::signFile(const QString &inputPath, const QString &outputPath,
                          int certIndex, const QString &format) {
+  QVariantMap options;
+  options["format"] = format;
+  signFileAdvanced(inputPath, outputPath, certIndex, options);
+}
+
+void IpcBridge::signFileAdvanced(const QString &inputPath,
+                                 const QString &outputPath, int certIndex,
+                                 const QVariantMap &options) {
   emit backendLogReceived("⚙ Iniciando firma IPC para: " + inputPath);
   QVariantMap params;
   params["inputPath"] = inputPath;
   params["outputPath"] = outputPath;
   params["certificateIndex"] = certIndex;
-  params["format"] = format;
+  params["format"] = options.value("format").toString();
+  params["action"] = options.value("action", "sign").toString();
+  params["allowInvalidPDF"] = options.value("allowInvalidPDF", false).toBool();
+  params["strictCompat"] = options.value("strictCompat", false).toBool();
+  params["overwrite"] = options.value("overwrite", "rename").toString();
+  params["saveToDisk"] = options.value("saveToDisk", true).toBool();
+  params["returnSignatureB64"] =
+      options.value("returnSignatureB64", false).toBool();
+  if (options.contains("visibleSeal")) {
+    params["visibleSeal"] = options.value("visibleSeal").toMap();
+  }
   sendRequest("sign", params);
 }
 

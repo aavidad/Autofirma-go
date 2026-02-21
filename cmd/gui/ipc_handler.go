@@ -78,12 +78,35 @@ func processIPCRequest(req ipcRequest, core *CoreService) ipcResponse {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return ipcResponse{OK: false, Error: "invalid params"}
 		}
+		normalizeSignRequestAliases(&params)
+		action := strings.ToLower(strings.TrimSpace(params.Action))
+		if action == "" {
+			action = "sign"
+		}
+		if action != "sign" && action != "cosign" && action != "countersign" {
+			return ipcResponse{OK: false, Error: "action no soportada"}
+		}
+		signOpts := buildSignOptionsForREST(params)
+		if params.StrictCompat {
+			effectiveFormat := strings.TrimSpace(params.Format)
+			if normalizeProtocolFormat(effectiveFormat) == "" || strings.EqualFold(effectiveFormat, "auto") {
+				effectiveFormat = detectLocalSignFormat(strings.TrimSpace(params.InputPath))
+			}
+			signOpts = applyStrictCompatDefaults(signOpts, effectiveFormat)
+		}
+		saveToDisk := true
+		if params.SaveToDisk != nil {
+			saveToDisk = *params.SaveToDisk
+		}
 		coreReq := CoreSignRequest{
-			FilePath:        params.InputPath,
-			OutputPath:      params.OutputPath,
-			Format:          params.Format,
-			SaveToDisk:      true,
-			OverwritePolicy: CoreOverwriteForce,
+			FilePath:         strings.TrimSpace(params.InputPath),
+			OutputPath:       strings.TrimSpace(params.OutputPath),
+			Action:           action,
+			Format:           strings.TrimSpace(params.Format),
+			AllowInvalidPDF:  params.AllowInvalidPDF,
+			SaveToDisk:       saveToDisk,
+			OverwritePolicy:  parseOverwritePolicyREST(params.Overwrite),
+			SignatureOptions: signOpts,
 		}
 		if params.CertificateID != "" {
 			coreReq.CertificateID = params.CertificateID

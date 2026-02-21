@@ -167,6 +167,14 @@ void BackendBridge::refreshCertificates() {
 void BackendBridge::signFile(const QString &inputPath,
                              const QString &outputPath, int certIndex,
                              const QString &format) {
+  QVariantMap options;
+  options.insert("format", format);
+  signFileAdvanced(inputPath, outputPath, certIndex, options);
+}
+
+void BackendBridge::signFileAdvanced(const QString &inputPath,
+                                     const QString &outputPath, int certIndex,
+                                     const QVariantMap &options) {
   emit backendLogReceived("⚙ Preparando firma de: " + inputPath);
   QUrl url("http://" + m_addr + "/sign");
   QNetworkRequest req(url);
@@ -178,8 +186,33 @@ void BackendBridge::signFile(const QString &inputPath,
   body.insert("inputPath", inputPath);
   body.insert("outputPath", outputPath);
   body.insert("certificateIndex", certIndex);
-  body.insert("format", format);
-  body.insert("saveToDisk", true);
+  const QString action = options.value("action").toString().trimmed();
+  const QString format = options.value("format").toString().trimmed();
+  const QString overwrite = options.value("overwrite").toString().trimmed();
+  if (!action.isEmpty())
+    body.insert("action", action);
+  if (!format.isEmpty())
+    body.insert("format", format);
+  if (!overwrite.isEmpty())
+    body.insert("overwrite", overwrite);
+  body.insert("allowInvalidPDF", options.value("allowInvalidPDF", false).toBool());
+  body.insert("strictCompat", options.value("strictCompat", false).toBool());
+  body.insert("saveToDisk", options.value("saveToDisk", true).toBool());
+  body.insert("returnSignatureB64",
+              options.value("returnSignatureB64", false).toBool());
+
+  if (options.contains("visibleSeal")) {
+    QVariantMap sealMap = options.value("visibleSeal").toMap();
+    if (!sealMap.isEmpty()) {
+      QJsonObject seal;
+      seal.insert("page", sealMap.value("page", 1).toInt());
+      seal.insert("x", sealMap.value("x", 0.62).toDouble());
+      seal.insert("y", sealMap.value("y", 0.04).toDouble());
+      seal.insert("w", sealMap.value("w", 0.34).toDouble());
+      seal.insert("h", sealMap.value("h", 0.12).toDouble());
+      body.insert("visibleSeal", seal);
+    }
+  }
 
   QByteArray jsonData = QJsonDocument(body).toJson();
   emit backendLogReceived("📤 Enviando petición (JSON): " +

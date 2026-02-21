@@ -66,6 +66,69 @@ Window {
     property int selectedCertIndex: -1
     property string currentFilePath: ""
     property string statusMessage: "Iniciando..."
+    property string signAction: "sign"
+    property string signFormat: ""
+    property bool signAllowInvalidPDF: false
+    property bool signStrictCompat: false
+    property string signOverwrite: "rename"
+    property bool signVisibleSeal: false
+    property int signSealPage: 1
+    property real signSealX: 0.62
+    property real signSealY: 0.04
+    property real signSealW: 0.34
+    property real signSealH: 0.12
+
+    function clamp01(v) {
+        if (isNaN(v)) return 0.0
+        if (v < 0.0) return 0.0
+        if (v > 1.0) return 1.0
+        return v
+    }
+
+    function isCurrentPdf() {
+        if (!window.currentFilePath || window.currentFilePath === "") return false
+        return window.currentFilePath.toLowerCase().endsWith(".pdf")
+    }
+
+    function syncSealFromPreview() {
+        if (pagePreview.width <= 0 || pagePreview.height <= 0) return
+        signSealX = clamp01(sealRect.x / pagePreview.width)
+        signSealW = clamp01(sealRect.width / pagePreview.width)
+        const topY = sealRect.y / pagePreview.height
+        signSealY = clamp01(1.0 - topY - (sealRect.height / pagePreview.height))
+        signSealH = clamp01(sealRect.height / pagePreview.height)
+    }
+
+    function syncPreviewFromSeal() {
+        if (pagePreview.width <= 0 || pagePreview.height <= 0) return
+        sealRect.width = Math.max(20, clamp01(signSealW) * pagePreview.width)
+        sealRect.height = Math.max(20, clamp01(signSealH) * pagePreview.height)
+        sealRect.x = Math.max(0, Math.min(pagePreview.width - sealRect.width, clamp01(signSealX) * pagePreview.width))
+        const topY = (1.0 - clamp01(signSealY) - clamp01(signSealH)) * pagePreview.height
+        sealRect.y = Math.max(0, Math.min(pagePreview.height - sealRect.height, topY))
+    }
+
+    function buildSignPayload() {
+        const body = {
+            action: signAction,
+            format: signFormat,
+            allowInvalidPDF: signAllowInvalidPDF,
+            strictCompat: signStrictCompat,
+            overwrite: signOverwrite,
+            saveToDisk: true,
+            returnSignatureB64: false
+        }
+        if (signVisibleSeal && (signFormat === "pades" || (signFormat === "" && isCurrentPdf()))) {
+            body.visibleSeal = {
+                page: Math.max(1, Number(signSealPage)),
+                x: clamp01(Number(signSealX)),
+                y: clamp01(Number(signSealY)),
+                w: clamp01(Number(signSealW)),
+                h: clamp01(Number(signSealH))
+            }
+        }
+        return body
+    }
 
     // --- DIALOGOS ---
     FileDialog {
@@ -249,26 +312,191 @@ Window {
                             }
                         }
 
-                        RowLayout {
-                             spacing: 15
-                             Layout.fillWidth: true
-                             ColumnLayout {
-                                 Text { text: "Operación"; color: "white"; font.pixelSize: 12 }
-                                 Item {
-                                     width: 150; height: 40
-                                     Rectangle { anchors.fill: parent; color: currentTheme.cardColor; radius: 5; border.color: currentTheme.primaryColor }
-                                     Text { anchors.centerIn: parent; text: "Firmar PAdES"; color: "white" } // Placeholder for actual ComboBox
-                                 }
-                             }
-                             ColumnLayout {
-                                 Layout.fillWidth: true
-                                 CheckBox {
-                                     id: visibleSealChk
-                                     text: "Firma visible"
-                                     palette.windowText: "white"
-                                 }
-                             }
-                         }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 10
+                            color: currentTheme.cardColor
+                            border.color: Qt.rgba(1, 1, 1, currentTheme.borderOpacity)
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 10
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Operación"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        ComboBox {
+                                            Layout.fillWidth: true
+                                            model: [
+                                                { texto: "Firmar", valor: "sign" },
+                                                { texto: "Cofirmar", valor: "cosign" },
+                                                { texto: "Contrafirmar", valor: "countersign" }
+                                            ]
+                                            textRole: "texto"
+                                            onActivated: signAction = model[index].valor
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Formato"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        ComboBox {
+                                            Layout.fillWidth: true
+                                            model: [
+                                                { texto: "Auto", valor: "" },
+                                                { texto: "PAdES", valor: "pades" },
+                                                { texto: "CAdES", valor: "cades" },
+                                                { texto: "XAdES", valor: "xades" }
+                                            ]
+                                            textRole: "texto"
+                                            onActivated: signFormat = model[index].valor
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Sobrescritura"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        ComboBox {
+                                            Layout.fillWidth: true
+                                            model: [
+                                                { texto: "Renombrar", valor: "rename" },
+                                                { texto: "Error si existe", valor: "fail" },
+                                                { texto: "Forzar", valor: "force" }
+                                            ]
+                                            textRole: "texto"
+                                            onActivated: signOverwrite = model[index].valor
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    CheckBox {
+                                        text: "Firma visible (PAdES)"
+                                        checked: signVisibleSeal
+                                        onToggled: signVisibleSeal = checked
+                                    }
+                                    CheckBox {
+                                        text: "Compatibilidad estricta"
+                                        checked: signStrictCompat
+                                        onToggled: signStrictCompat = checked
+                                    }
+                                    CheckBox {
+                                        text: "Permitir PDF inválido"
+                                        checked: signAllowInvalidPDF
+                                        onToggled: signAllowInvalidPDF = checked
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    enabled: signVisibleSeal
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Página"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        SpinBox {
+                                            from: 1
+                                            to: 999
+                                            value: signSealPage
+                                            onValueChanged: signSealPage = value
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "X (0..1)"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        TextField {
+                                            text: Number(signSealX).toFixed(4)
+                                            onEditingFinished: {
+                                                signSealX = clamp01(Number(text))
+                                                text = Number(signSealX).toFixed(4)
+                                                syncPreviewFromSeal()
+                                            }
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Y (0..1)"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        TextField {
+                                            text: Number(signSealY).toFixed(4)
+                                            onEditingFinished: {
+                                                signSealY = clamp01(Number(text))
+                                                text = Number(signSealY).toFixed(4)
+                                                syncPreviewFromSeal()
+                                            }
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Ancho (0..1)"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        TextField {
+                                            text: Number(signSealW).toFixed(4)
+                                            onEditingFinished: {
+                                                signSealW = clamp01(Number(text))
+                                                text = Number(signSealW).toFixed(4)
+                                                syncPreviewFromSeal()
+                                            }
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Alto (0..1)"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        TextField {
+                                            text: Number(signSealH).toFixed(4)
+                                            onEditingFinished: {
+                                                signSealH = clamp01(Number(text))
+                                                text = Number(signSealH).toFixed(4)
+                                                syncPreviewFromSeal()
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: signVisibleSeal ? 220 : 0
+                                    visible: signVisibleSeal
+                                    color: "#ffffff"
+                                    border.color: "#95a5a6"
+                                    radius: 8
+
+                                    Rectangle {
+                                        id: pagePreview
+                                        anchors.centerIn: parent
+                                        width: Math.min(parent.width - 20, 150)
+                                        height: width * (841.89 / 595.28)
+                                        color: "#fafafa"
+                                        border.color: "#34495e"
+                                        border.width: 1
+                                        onWidthChanged: syncPreviewFromSeal()
+                                        onHeightChanged: syncPreviewFromSeal()
+
+                                        Rectangle {
+                                            id: sealRect
+                                            x: Math.max(0, Math.min(parent.width - width, signSealX * parent.width))
+                                            y: Math.max(0, Math.min(parent.height - height, (1.0 - signSealY - signSealH) * parent.height))
+                                            width: Math.max(20, signSealW * parent.width)
+                                            height: Math.max(20, signSealH * parent.height)
+                                            color: "#3498db55"
+                                            border.color: "#2980b9"
+                                            border.width: 2
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                drag.target: parent
+                                                drag.minimumX: 0
+                                                drag.minimumY: 0
+                                                drag.maximumX: pagePreview.width - sealRect.width
+                                                drag.maximumY: pagePreview.height - sealRect.height
+                                                onPositionChanged: {
+                                                    syncSealFromPreview()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         RowLayout {
                             spacing: 10
@@ -278,11 +506,14 @@ Window {
                                 palette.button: currentTheme.primaryColor
                                 palette.buttonText: "white"
                                 enabled: window.currentFilePath !== "" && selectedCertIndex !== -1
-                                onClicked: backend.signFile(window.currentFilePath, "", selectedCertIndex, "pades")
+                                onClicked: backend.signFileAdvanced(window.currentFilePath, "", selectedCertIndex, buildSignPayload())
                             }
                             Button {
                                 text: "Limpiar"
-                                onClicked: window.currentFilePath = ""
+                                onClicked: {
+                                    window.currentFilePath = ""
+                                    signVisibleSeal = false
+                                }
                             }
                         }
                     }

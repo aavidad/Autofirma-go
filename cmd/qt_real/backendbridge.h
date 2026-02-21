@@ -27,6 +27,9 @@ public:
   Q_INVOKABLE void stopBackend();
   Q_INVOKABLE void signFile(const QString &inputPath, const QString &outputPath,
                             int certIndex, const QString &format);
+  Q_INVOKABLE void signFileAdvanced(const QString &inputPath,
+                                    const QString &outputPath, int certIndex,
+                                    const QVariantMap &options);
   Q_INVOKABLE void refreshCertificates();
   Q_INVOKABLE void verifyFile(const QString &inputPath);
   Q_INVOKABLE void updateStatus(const QString &msg) { setStatus(msg); }
