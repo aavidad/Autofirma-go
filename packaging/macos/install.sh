@@ -53,10 +53,16 @@ echo "[install-mac] Estado de confianza local..."
 
 mkdir -p /usr/local/bin
 ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
+cat > /usr/local/bin/autofirma-dipgra-server <<EOF
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" --server "\$@"
+EOF
+chmod 0755 /usr/local/bin/autofirma-dipgra-server
 if [[ -f "${PREFIX}/autofirma-host" ]]; then
   ln -sf "${PREFIX}/autofirma-host" /usr/local/bin/autofirma-host
 fi
 
 echo "[install-mac] Listo"
 echo "[install-mac] Binario: ${PREFIX}/autofirma-desktop"
+echo "[install-mac] Comandos: autofirma-dipgra | autofirma-dipgra-server"
 echo "[install-mac] Certificados Java: ${PREFIX}/autofirma.pfx ${PREFIX}/Autofirma_ROOT.cer ${PREFIX}/autofirma.cer"

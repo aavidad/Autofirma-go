@@ -80,6 +80,7 @@ Section "Install"
 
   CreateDirectory "$SMPROGRAMS\Autofirma Dipgra"
   CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\Autofirma Dipgra.lnk" "$INSTDIR\autofirma-desktop.exe" "" "$INSTDIR\autofirma.ico" 0
+  CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\Servidor AutoFirma.lnk" "$INSTDIR\autofirma-desktop.exe" "--server" "$INSTDIR\autofirma.ico" 0
   CreateShortcut "$DESKTOP\Autofirma Dipgra.lnk" "$INSTDIR\autofirma-desktop.exe" "" "$INSTDIR\autofirma.ico" 0
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -89,6 +90,7 @@ Section "Uninstall"
   SetRegView 64
   Delete "$DESKTOP\Autofirma Dipgra.lnk"
   Delete "$SMPROGRAMS\Autofirma Dipgra\Autofirma Dipgra.lnk"
+  Delete "$SMPROGRAMS\Autofirma Dipgra\Servidor AutoFirma.lnk"
   RMDir "$SMPROGRAMS\Autofirma Dipgra"
 
   DeleteRegKey HKCR "afirma"

@@ -293,7 +293,7 @@ mkdir -p /usr/local/bin
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   # Evita sobrescribir el binario real si existían symlinks legacy
   # (p.ej. /usr/local/bin/autofirma-dipgra -> /opt/.../autofirma-desktop).
-  rm -f /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio /usr/local/bin/autofirma-dipgra-qt
+  rm -f /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio /usr/local/bin/autofirma-dipgra-qt /usr/local/bin/autofirma-dipgra-server
 
   if [[ "${DESKTOP_SUBPROFILE}" == "qt" && ! -x "${PREFIX}/autofirma-desktop-qt-bin" ]]; then
     echo "[install] Aviso: subperfil qt solicitado pero no se encontró ${PREFIX}/autofirma-desktop-qt-bin; se usará fyne."
@@ -336,8 +336,19 @@ exec "${PREFIX}/autofirma-desktop" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
 WRAP
   fi
   chmod 0755 /usr/local/bin/autofirma-dipgra
+
+  cat > /usr/local/bin/autofirma-dipgra-server <<WRAP
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" --server "\$@"
+WRAP
+  chmod 0755 /usr/local/bin/autofirma-dipgra-server
 else
   ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
+  cat > /usr/local/bin/autofirma-dipgra-server <<WRAP
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" --server "\$@"
+WRAP
+  chmod 0755 /usr/local/bin/autofirma-dipgra-server
 fi
 
 if [[ -f "${PREFIX}/autofirma-host" ]]; then
@@ -538,9 +549,10 @@ echo "[install] Command: autofirma-dipgra"
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   echo "[install] Integración de escritorio: habilitada"
   echo "[install] Subperfil escritorio por defecto: ${DESKTOP_SUBPROFILE}"
-  echo "[install] Lanzadores: autofirma-dipgra-fyne | autofirma-dipgra-gio | autofirma-dipgra-qt"
+  echo "[install] Lanzadores: autofirma-dipgra-fyne | autofirma-dipgra-gio | autofirma-dipgra-qt | autofirma-dipgra-server"
 else
   echo "[install] Integración de escritorio: omitida"
+  echo "[install] Lanzador servidor: autofirma-dipgra-server"
 fi
 if [[ -x "${PREFIX}/autofirma-host" ]]; then
   echo "[install] Native host: ${PREFIX}/autofirma-host"

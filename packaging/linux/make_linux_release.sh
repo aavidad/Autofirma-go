@@ -224,6 +224,19 @@ echo "[linux] Building Native Messaging host binary..."
 
 chmod +x "${HOST_BIN_PATH}"
 
+# Qt/QML app resources
+if [[ -d "${ROOT_DIR}/cmd/qt_real/qml" ]]; then
+  mkdir -p "${BUNDLE_DIR}/qml"
+  cp -a "${ROOT_DIR}/cmd/qt_real/qml/." "${BUNDLE_DIR}/qml/"
+elif [[ -d "${ROOT_DIR}/qml" ]]; then
+  mkdir -p "${BUNDLE_DIR}/qml"
+  cp -a "${ROOT_DIR}/qml/." "${BUNDLE_DIR}/qml/"
+fi
+if [[ -d "${ROOT_DIR}/assets" ]]; then
+  mkdir -p "${BUNDLE_DIR}/assets"
+  cp -a "${ROOT_DIR}/assets/." "${BUNDLE_DIR}/assets/"
+fi
+
 cat > "${BUNDLE_DIR}/README.txt" <<README
 Autofirma Dipgra Linux
 

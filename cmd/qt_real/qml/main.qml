@@ -123,7 +123,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 300
                     Image {
-                        source: "../assets/Logo-Horizontal-Color.svg"
+                        source: "../assets/Logo-Horizontal-Color.png"
                         anchors.fill: parent
                         fillMode: Image.PreserveAspectFit
                         anchors.margins: 15

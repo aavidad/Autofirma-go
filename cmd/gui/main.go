@@ -26,6 +26,7 @@ import (
 
 var (
 	serverModeFlag     = flag.Bool("server", false, "Iniciar como servidor WebSocket en el puerto 63117")
+	serverModeKindFlag = flag.String("server-modo", "", "Modo de servidor: websocket|ipc|rest|ambas")
 	restModeFlag       = flag.Bool("rest", false, "Iniciar servidor API REST local")
 	restAddrFlag       = flag.String("rest-addr", "127.0.0.1:63118", "Dirección del servidor REST local")
 	restTokenFlag      = flag.String("rest-token", "", "Token opcional para autenticar llamadas REST (Bearer/X-API-Token)")
@@ -48,6 +49,7 @@ var (
 	restTokenCastFlag     = flag.String("token-rest", "", "Alias de -rest-token")
 	restHuellasCastFlag   = flag.String("huellas-cert-rest", "", "Alias de -rest-cert-fingerprints")
 	restSesionTTLCastFlag = flag.Duration("ttl-sesion-rest", 0, "Alias de -rest-session-ttl")
+	serverModeKindCast    = flag.String("modo-servidor", "", "Alias de -server-modo")
 	restSocketFlag        = flag.String("rest-socket", "", "Ruta del socket Unix para el servidor REST (IPC)")
 	ipcModeFlag           = flag.Bool("ipc", false, "Iniciar en modo IPC binario (Alto rendimiento)")
 	ipcSocketFlag         = flag.String("ipc-socket", "/tmp/autofirma_ipc.sock", "Ruta del socket Unix para el modo IPC")
@@ -68,6 +70,9 @@ func applyRESTSpanishAliases() {
 	}
 	if *restSesionTTLCastFlag > 0 {
 		*restSessionTTLFlag = *restSesionTTLCastFlag
+	}
+	if v := strings.TrimSpace(*serverModeKindCast); v != "" {
+		*serverModeKindFlag = v
 	}
 }
 
@@ -151,6 +156,18 @@ func main() {
 		}
 		return
 	}
+	serverMode := normalizeServerMode(strings.TrimSpace(*serverModeKindFlag))
+	if *serverModeFlag && serverMode == "" {
+		serverMode = "websocket"
+	}
+	if serverMode != "" {
+		if err := runSelectedServerMode(serverMode); err != nil {
+			log.Printf("No se pudo iniciar modo servidor (%s): %v", serverMode, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if *restModeFlag {
 		addr := strings.TrimSpace(*restAddrFlag)
 		sock := strings.TrimSpace(*restSocketFlag)
@@ -398,6 +415,13 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	_, _ = fmt.Fprintln(out, "    Muestra si la CA local está correctamente confiada en los almacenes detectados.")
 	_, _ = fmt.Fprintln(out, "  -server")
 	_, _ = fmt.Fprintln(out, "    Inicia AutoFirma en modo servicio WebSocket, esperando solicitudes del navegador.")
+	_, _ = fmt.Fprintln(out, "  -server-modo websocket|ipc|rest|ambas")
+	_, _ = fmt.Fprintln(out, "    Selecciona el motor de servidor dedicado.")
+	_, _ = fmt.Fprintln(out, "    websocket: servidor WSS + systray.")
+	_, _ = fmt.Fprintln(out, "    ipc: socket Unix binario local.")
+	_, _ = fmt.Fprintln(out, "    rest: API REST local.")
+	_, _ = fmt.Fprintln(out, "    ambas: IPC y REST a la vez en el mismo proceso.")
+	_, _ = fmt.Fprintln(out, "    Alias castellano: -modo-servidor websocket|ipc|rest|ambas.")
 	_, _ = fmt.Fprintln(out, "  -rest [-rest-token <token>] [-rest-cert-fingerprints <sha256,sha256>] [-rest-session-ttl 10m]")
 	_, _ = fmt.Fprintln(out, "    Inicia API REST local con token y/o login por certificado (reto firmado).")
 	_, _ = fmt.Fprintln(out, "    Endpoints protegidos: /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs.")
@@ -419,6 +443,66 @@ func writeSpanishDetailedUsage(out io.Writer, program string) {
 	var cliHelp strings.Builder
 	appendCLIDetailedUsage(&cliHelp)
 	_, _ = fmt.Fprint(out, cliHelp.String())
+}
+
+func normalizeServerMode(in string) string {
+	switch strings.ToLower(strings.TrimSpace(in)) {
+	case "", "ninguno":
+		return ""
+	case "websocket", "ws":
+		return "websocket"
+	case "ipc":
+		return "ipc"
+	case "rest":
+		return "rest"
+	case "ambas", "both", "all":
+		return "ambas"
+	default:
+		return strings.ToLower(strings.TrimSpace(in))
+	}
+}
+
+func runSelectedServerMode(mode string) error {
+	switch normalizeServerMode(mode) {
+	case "websocket":
+		log.Println("Iniciando en modo servidor WebSocket")
+		runWebSocketServer()
+		return nil
+	case "rest":
+		addr := strings.TrimSpace(*restAddrFlag)
+		sock := strings.TrimSpace(*restSocketFlag)
+		if sock != "" {
+			log.Printf("Iniciando en modo servidor REST (IPC) en socket Unix: %s", sock)
+			return runRESTServerOnSocket(sock, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag))
+		}
+		log.Printf("Iniciando en modo servidor REST en %s", addr)
+		return runRESTServer(addr, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag))
+	case "ipc":
+		sock := strings.TrimSpace(*ipcSocketFlag)
+		log.Printf("Iniciando motor IPC en modo headless: %s", sock)
+		return runIPCServer(sock, NewCoreService())
+	case "ambas":
+		errCh := make(chan error, 2)
+		go func() {
+			sock := strings.TrimSpace(*ipcSocketFlag)
+			log.Printf("Iniciando motor IPC en modo headless: %s", sock)
+			errCh <- runIPCServer(sock, NewCoreService())
+		}()
+		go func() {
+			addr := strings.TrimSpace(*restAddrFlag)
+			sock := strings.TrimSpace(*restSocketFlag)
+			if sock != "" {
+				log.Printf("Iniciando en modo servidor REST (IPC) en socket Unix: %s", sock)
+				errCh <- runRESTServerOnSocket(sock, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag))
+				return
+			}
+			log.Printf("Iniciando en modo servidor REST en %s", addr)
+			errCh <- runRESTServer(addr, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag))
+		}()
+		return <-errCh
+	default:
+		return fmt.Errorf("modo no soportado: %s (use websocket|ipc|rest|ambas)", strings.TrimSpace(mode))
+	}
 }
 
 func runWebSocketServer() {

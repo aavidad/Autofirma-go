@@ -84,6 +84,11 @@ else
   echo "[windows] Warning: cert file not found at packaging/windows/certs/fnmt-accomp.crt"
 fi
 
+cat > "${BUNDLE_DIR}/autofirma-dipgra-server.bat" <<'BAT'
+@echo off
+"%~dp0autofirma-desktop.exe" --server %*
+BAT
+
 if [[ -n "${PREBUILT_QT_EXE}" ]]; then
   if [[ ! -f "${PREBUILT_QT_EXE}" ]]; then
     echo "[windows] Error: PREBUILT_QT_EXE no existe: ${PREBUILT_QT_EXE}"
