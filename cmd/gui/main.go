@@ -48,6 +48,9 @@ var (
 	restTokenCastFlag     = flag.String("token-rest", "", "Alias de -rest-token")
 	restHuellasCastFlag   = flag.String("huellas-cert-rest", "", "Alias de -rest-cert-fingerprints")
 	restSesionTTLCastFlag = flag.Duration("ttl-sesion-rest", 0, "Alias de -rest-session-ttl")
+	restSocketFlag        = flag.String("rest-socket", "", "Ruta del socket Unix para el servidor REST (IPC)")
+	ipcModeFlag           = flag.Bool("ipc", false, "Iniciar en modo IPC binario (Alto rendimiento)")
+	ipcSocketFlag         = flag.String("ipc-socket", "/tmp/autofirma_ipc.sock", "Ruta del socket Unix para el modo IPC")
 )
 
 func applyRESTSpanishAliases() {
@@ -149,12 +152,44 @@ func main() {
 		return
 	}
 	if *restModeFlag {
-		log.Printf("Iniciando en modo servidor REST en %s", strings.TrimSpace(*restAddrFlag))
-		if err := runRESTServer(strings.TrimSpace(*restAddrFlag), strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag)); err != nil {
-			log.Printf("No se pudo iniciar el servidor REST: %v", err)
-			os.Exit(1)
+		addr := strings.TrimSpace(*restAddrFlag)
+		sock := strings.TrimSpace(*restSocketFlag)
+		if sock != "" {
+			log.Printf("Iniciando en modo servidor REST (IPC) en socket Unix: %s", sock)
+			if err := runRESTServerOnSocket(sock, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag)); err != nil {
+				log.Printf("No se pudo iniciar el servidor REST sobre IPC: %v", err)
+				os.Exit(1)
+			}
+		} else {
+			log.Printf("Iniciando en modo servidor REST en %s", addr)
+			if err := runRESTServer(addr, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag)); err != nil {
+				log.Printf("No se pudo iniciar el servidor REST: %v", err)
+				os.Exit(1)
+			}
 		}
 		return
+	}
+
+	if *ipcModeFlag {
+		sock := strings.TrimSpace(*ipcSocketFlag)
+		log.Printf("Iniciando motor IPC en: %s", sock)
+		if *frontendFlag != "" || (!*serverModeFlag && !isCLIModeRequested()) {
+			// Si hay frontend o no es modo servidor puro, lanzamos en segundo plano
+			go func() {
+				if err := runIPCServer(sock, NewCoreService()); err != nil {
+					log.Printf("Error en servidor IPC: %v", err)
+				}
+			}()
+			// Pequeña espera para que el socket se cree antes de que el frontend intente conectar
+			time.Sleep(200 * time.Millisecond)
+		} else {
+			// Modo servidor puro (headless)
+			if err := runIPCServer(sock, NewCoreService()); err != nil {
+				log.Printf("No se pudo iniciar el servidor IPC: %v", err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 
 	if isCLIModeRequested() {
@@ -244,8 +279,10 @@ func runQtFrontend(protocolArg string) error {
 		return err
 	}
 	exeDir := filepath.Dir(exePath)
-	candidates := executableCandidates(exeDir, "autofirma-desktop-qt-bin")
-	candidates = append(candidates, "autofirma-desktop-qt-bin")
+	candidates := executableCandidates(exeDir, "autofirma-desktop-qt-real")
+	candidates = append(candidates, executableCandidates(exeDir, "autofirma-desktop-qt-bin")...)
+	candidates = append(candidates, "autofirma-desktop-qt-real", "autofirma-desktop-qt-bin")
+
 	qtBin := ""
 	for _, c := range candidates {
 		if strings.ContainsRune(c, filepath.Separator) {
@@ -261,7 +298,7 @@ func runQtFrontend(protocolArg string) error {
 		}
 	}
 	if qtBin == "" {
-		return fmt.Errorf("autofirma-desktop-qt-bin no encontrado")
+		return fmt.Errorf("frontend Qt (autofirma-desktop-qt-real o -bin) no encontrado")
 	}
 
 	args := make([]string, 0, len(os.Args)-1)
@@ -282,8 +319,14 @@ func runQtFrontend(protocolArg string) error {
 		if strings.HasPrefix(la, "-frontend=") || strings.HasPrefix(la, "--frontend=") {
 			continue
 		}
+		// Traducir -ipc a --ipc para el frontend Qt si es necesario
+		if la == "-ipc" {
+			args = append(args, "--ipc")
+			continue
+		}
 		args = append(args, a)
 	}
+
 	if protocolArg != "" {
 		found := false
 		for _, a := range args {
@@ -301,6 +344,38 @@ func runQtFrontend(protocolArg string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+
+	// Configuración de entorno para librerías Qt empaquetadas (Linux)
+	if runtime.GOOS == "linux" {
+		runtimeDir := os.Getenv("AUTOFIRMA_QT_RUNTIME_DIR")
+		if runtimeDir != "" {
+			libDir := filepath.Join(runtimeDir, "lib")
+			pluginDir := filepath.Join(runtimeDir, "plugins")
+			qmlDir := filepath.Join(runtimeDir, "qml")
+
+			env := os.Environ()
+			// Patch LD_LIBRARY_PATH
+			foundLD := false
+			for i, e := range env {
+				if strings.HasPrefix(e, "LD_LIBRARY_PATH=") {
+					env[i] = "LD_LIBRARY_PATH=" + libDir + ":" + strings.TrimPrefix(e, "LD_LIBRARY_PATH=")
+					foundLD = true
+					break
+				}
+			}
+			if !foundLD {
+				env = append(env, "LD_LIBRARY_PATH="+libDir)
+			}
+
+			// Set QT_PLUGIN_PATH and QML2_IMPORT_PATH
+			env = append(env, "QT_PLUGIN_PATH="+pluginDir)
+			env = append(env, "QML2_IMPORT_PATH="+qmlDir)
+
+			cmd.Env = env
+			log.Printf("[Qt] Usando runtime bundle en: %s", runtimeDir)
+		}
+	}
+
 	return cmd.Run()
 }
 

@@ -34,6 +34,33 @@ echo "[macos] Compilando host nativo..."
 )
 chmod +x "${HOST_BIN_PATH}"
 
+echo "[macos] Compilando frontend Qt nativo..."
+QT_REAL_BIN="${BUNDLE_DIR}/autofirma-desktop-qt-real"
+if [[ -d "${ROOT_DIR}/cmd/qt_real" ]]; then
+    (
+        cd "${ROOT_DIR}/cmd/qt_real"
+        # Intentar qmake6 primero
+        QMAKE_BIN="qmake6"
+        if ! command -v qmake6 >/dev/null 2>&1; then QMAKE_BIN="qmake"; fi
+        
+        $QMAKE_BIN
+        make clean
+        make -j4
+        cp -f qt_real "${QT_REAL_BIN}"
+    )
+    
+    # Despliegue de librerías Qt (macdeployqt)
+    MACDEPLOYQT="$(command -v macdeployqt || echo "/usr/local/opt/qt/bin/macdeployqt")"
+    if [[ -x "$MACDEPLOYQT" ]]; then
+        echo "[macos] Ejecutando macdeployqt..."
+        # Nota: macdeployqt suele trabajar sobre .app, pero puede procesar binarios sueltos con -executable
+        # Aquí lo ideal sería crear un .app real para macOS. Por ahora procesamos el binario.
+        "$MACDEPLOYQT" "${QT_REAL_BIN}" -qmldir="${ROOT_DIR}/cmd/qt_real/qml" -always-overwrite
+    else
+        echo "[macos] Aviso: macdeployqt no encontrado. Las librerías de Qt deberán estar en el sistema."
+    fi
+fi
+
 cat > "${BUNDLE_DIR}/README.txt" <<README
 Autofirma Dipgra macOS
 

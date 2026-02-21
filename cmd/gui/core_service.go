@@ -26,6 +26,7 @@ const (
 
 type CoreSignRequest struct {
 	FilePath         string
+	OutputPath       string
 	CertificateID    string
 	Action           string
 	Format           string
@@ -128,6 +129,9 @@ func (s *CoreService) SignFile(req CoreSignRequest) (*CoreSignResult, error) {
 	}
 
 	outPath := buildLocalSignedOutputPath(filePath, format)
+	if strings.TrimSpace(req.OutputPath) != "" {
+		outPath = req.OutputPath
+	}
 	outPath, renamed, overwrote, err := resolveOutputPathPolicy(outPath, req.OverwritePolicy)
 	if err != nil {
 		return nil, err

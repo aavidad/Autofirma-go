@@ -106,7 +106,18 @@ if [[ -n "${QT_REAL_EXE}" ]]; then
     exit 1
   fi
   cp -f "${QT_REAL_EXE}" "${BUNDLE_DIR}/autofirma-desktop-qt-real.exe"
-  echo "[windows] Frontend Qt nativo incluido: ${QT_REAL_EXE}"
+  echo "[linux] Frontend Qt nativo incluido: ${QT_REAL_EXE}"
+  
+  # Qt Deployment (Solo si estamos en Windows o tenemos windeployqt en PATH)
+  if command -v windeployqt >/dev/null 2>&1; then
+    echo "[windows] Running windeployqt..."
+    windeployqt --no-translations --no-compiler-runtime --qmldir "${ROOT_DIR}/cmd/qt_real/qml" "${BUNDLE_DIR}/autofirma-desktop-qt-real.exe"
+  elif command -v windeployqt.exe >/dev/null 2>&1; then
+    echo "[windows] Running windeployqt.exe..."
+    windeployqt.exe --no-translations --no-compiler-runtime --qmldir "${ROOT_DIR}/cmd/qt_real/qml" "${BUNDLE_DIR}/autofirma-desktop-qt-real.exe"
+  else
+    echo "[windows] Warning: windeployqt no encontrado. Las DLLs de Qt deberán añadirse manualmente al bundle."
+  fi
 fi
 
 echo "[windows] Building NSIS installer..."

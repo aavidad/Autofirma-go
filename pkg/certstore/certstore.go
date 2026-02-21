@@ -122,18 +122,42 @@ func ParseCertificate(cert *x509.Certificate, source string) protocol.Certificat
 		Bytes: cert.Raw,
 	})
 
+	subjectName := cert.Subject.CommonName
+	if subjectName == "" && len(cert.Subject.Organization) > 0 {
+		subjectName = cert.Subject.Organization[0]
+	}
+	if subjectName == "" {
+		subjectName = "Certificado"
+	}
+
+	issuerName := cert.Issuer.CommonName
+	if issuerName == "" && len(cert.Issuer.Organization) > 0 {
+		issuerName = cert.Issuer.Organization[0]
+	}
+
+	status := "Válido"
+	if !canSign {
+		status = signIssue
+		if status == "" {
+			status = "No utilizable"
+		}
+	}
+
 	return protocol.Certificate{
 		ID:           hex.EncodeToString(fingerprint[:16]), // First 16 bytes as ID
 		Subject:      subject,
 		Issuer:       issuer,
 		SerialNumber: fmt.Sprintf("%X", cert.SerialNumber),
 		ValidFrom:    cert.NotBefore.Format("2006-01-02T15:04:05Z"),
-		ValidTo:      cert.NotAfter.Format("2006-01-02T15:04:05Z"),
+		ValidTo:      cert.NotAfter.Format("2006-01-02"), // Simplified for UI
 		Fingerprint:  hex.EncodeToString(fingerprint[:]),
 		Source:       source,
 		PEM:          string(certPEM),
 		CanSign:      canSign,
 		SignIssue:    signIssue,
+		SubjectName:  subjectName,
+		IssuerName:   issuerName,
+		Status:       status,
 		Content:      cert.Raw,
 	}
 }

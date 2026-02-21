@@ -95,22 +95,46 @@ elif [[ "${QT_RUNTIME_FROM_SYSTEM}" == "1" ]]; then
   mkdir -p "${BUNDLE_DIR}/qt-runtime/lib" "${BUNDLE_DIR}/qt-runtime/plugins"
 
   plugin_dir=""
-  for c in /usr/lib/*/qt6/plugins /usr/lib/qt6/plugins /usr/lib64/qt6/plugins; do
+  qml_dir=""
+  for c in /usr/lib/*/qt5/plugins /usr/lib/qt5/plugins /usr/lib/*/qt6/plugins /usr/lib/qt6/plugins; do
     if [[ -d "${c}" ]]; then
       plugin_dir="${c}"
       break
     fi
   done
+  for c in /usr/lib/*/qt5/qml /usr/lib/qt5/qml /usr/lib/*/qt6/qml /usr/lib/qt6/qml; do
+    if [[ -d "${c}" ]]; then
+      qml_dir="${c}"
+      break
+    fi
+  done
+
   if [[ -n "${plugin_dir}" ]]; then
-    # Conjunto mínimo de plugins para Linux/X11 + TLS.
-    declare -a plugin_candidates=(
-      "${plugin_dir}/platforms/libqxcb.so"
-      "${plugin_dir}/platforms/libqminimal.so"
-      "${plugin_dir}/tls/libqopensslbackend.so"
-    )
-    for plugin_file in "${plugin_candidates[@]}"; do
-      if [[ -f "${plugin_file}" ]]; then
-        rel_dir="$(dirname "${plugin_file#${plugin_dir}/}")"
+    echo "[linux] Usando plugins desde: ${plugin_dir}"
+    # Conjunto más completo de plugins para Linux/X11 + TLS + Image Formats.
+    declare -a plugin_groups=("platforms" "tls" "imageformats" "iconengines" "xcbglintegrations")
+    for group in "${plugin_groups[@]}"; do
+      if [[ -d "${plugin_dir}/${group}" ]]; then
+        mkdir -p "${BUNDLE_DIR}/qt-runtime/plugins/${group}"
+        cp -af "${plugin_dir}/${group}/." "${BUNDLE_DIR}/qt-runtime/plugins/${group}/"
+      fi
+    done
+  fi
+
+  if [[ -n "${qml_dir}" ]]; then
+    echo "[linux] Usando QML desde: ${qml_dir}"
+    mkdir -p "${BUNDLE_DIR}/qt-runtime/qml"
+    # Copiamos solo los módulos necesarios para optimizar tamaño (QtQuick, QtQuick.Controls, etc)
+    declare -a qml_modules=("QtQuick" "QtQuick.2" "QtQuick.Controls" "QtQuick.Controls.2" "QtQuick.Layouts" "QtQuick.Templates.2" "QtQuick.Window.2")
+    for mod in "${qml_modules[@]}"; do
+      # Convertimos punto a barra (ej. QtQuick.Controls -> QtQuick/Controls)
+      mod_path="${mod//.//}"
+      if [[ -d "${qml_dir}/${mod_path}" ]]; then
+        mkdir -p "$(dirname "${BUNDLE_DIR}/qt-runtime/qml/${mod_path}")"
+        cp -af "${qml_dir}/${mod_path}" "${BUNDLE_DIR}/qt-runtime/qml/${mod_path}"
+      fi
+    done
+  fi
         mkdir -p "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}"
         cp -f "${plugin_file}" "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}/"
       fi

@@ -56,5 +56,8 @@ type Certificate struct {
 	Nickname     string            `json:"nickname,omitempty"` // NSS nickname for signing
 	CanSign      bool              `json:"canSign"`
 	SignIssue    string            `json:"signIssue,omitempty"`
-	Content      []byte            `json:"-"` // Raw DER content (internal use, not serialized)
+	SubjectName  string            `json:"subjectName"` // UI friendly name
+	IssuerName   string            `json:"issuerName"`  // UI friendly issuer
+	Status       string            `json:"status"`      // e.g. "Válido", "Caducado"
+	Content      []byte            `json:"-"`           // Raw DER content (internal use, not serialized)
 }
