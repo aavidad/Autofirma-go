@@ -5,16 +5,13 @@
 package signer
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,10 +51,9 @@ func (s *windowsStorePadesSigner) Sign(_ io.Reader, digest []byte, opts crypto.S
 	return signDigestWithWindowsStoreKey(s.thumbprint, digest, hashName, s.publicKey)
 }
 
-func signPadesWithGo(inputFile, p12Path, p12Password string, options map[string]interface{}) ([]byte, error) {
-	cert, signer, chains, err := loadP12ForPades(p12Path, p12Password)
-	if err != nil {
-		return nil, err
+func signPadesWithGo(inputFile string, cert *x509.Certificate, signer crypto.Signer, chains [][]*x509.Certificate, options map[string]interface{}) ([]byte, error) {
+	if cert == nil || signer == nil {
+		return nil, fmt.Errorf("certificado y signer son obligatorios para PAdES en memoria")
 	}
 
 	outFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-%d.pdf", time.Now().UnixNano()))
@@ -264,180 +260,6 @@ func verifyPadesWithGo(pdfFile string) (*protocol.VerifyResult, error) {
 		Algorithm:  "sha256WithRSA",
 		Reason:     reason,
 	}, nil
-}
-
-func loadP12ForPades(p12Path, password string) (*x509.Certificate, crypto.Signer, [][]*x509.Certificate, error) {
-	certPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-cert-%d.pem", time.Now().UnixNano()))
-	chainPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-chain-%d.pem", time.Now().UnixNano()))
-	keyPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-key-%d.pem", time.Now().UnixNano()))
-	defer os.Remove(certPEM)
-	defer os.Remove(chainPEM)
-	defer os.Remove(keyPEM)
-
-	passArg := "pass:" + password
-	timeout := time.Duration(getEnvInt("AUTOFIRMA_EXPORT_TIMEOUT_SEC", defaultExportTimeoutSec)) * time.Second
-	retries := getEnvInt("AUTOFIRMA_EXPORT_RETRIES", defaultRetriesSmall)
-
-	if _, err := runCommandWithRetry(
-		[]string{"openssl", "pkcs12", "-in", p12Path, "-passin", passArg, "-clcerts", "-nokeys", "-out", certPEM},
-		timeout,
-		retries,
-		"openssl pades cert",
-	); err != nil {
-		return nil, nil, nil, err
-	}
-	if _, err := runCommandWithRetry(
-		[]string{"openssl", "pkcs12", "-in", p12Path, "-passin", passArg, "-cacerts", "-nokeys", "-out", chainPEM},
-		timeout,
-		retries,
-		"openssl pades chain",
-	); err != nil {
-		log.Printf("[Signer] WARNING: no se pudo extraer cadena de certificados para PAdES: %v", err)
-	}
-	if _, err := runCommandWithRetry(
-		[]string{"openssl", "pkcs12", "-in", p12Path, "-passin", passArg, "-nocerts", "-nodes", "-out", keyPEM},
-		timeout,
-		retries,
-		"openssl pades key",
-	); err != nil {
-		return nil, nil, nil, err
-	}
-
-	certs, err := parsePEMCertificates(certPEM)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if chainCerts, err := parsePEMCertificates(chainPEM); err == nil && len(chainCerts) > 0 {
-		certs = append(certs, chainCerts...)
-	}
-	signer, err := parseSignerFromPEMFile(keyPEM)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	if signer == nil {
-		return nil, nil, nil, fmt.Errorf("no se encontro clave privada en P12")
-	}
-	if len(certs) == 0 {
-		return nil, nil, nil, fmt.Errorf("no se encontro certificado en P12")
-	}
-
-	leaf := selectLeafForSigner(certs, signer)
-	if leaf == nil {
-		leaf = certs[0]
-	}
-
-	var chains [][]*x509.Certificate
-	if ch, err := buildCertChains(leaf, certs); err == nil {
-		chains = ch
-	}
-
-	return leaf, signer, chains, nil
-}
-
-func parseSignerFromPEMFile(path string) (crypto.Signer, error) {
-	pemData, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	for len(pemData) > 0 {
-		var block *pem.Block
-		block, pemData = pem.Decode(pemData)
-		if block == nil {
-			break
-		}
-		signer, err := parseSignerFromPEMBlock(block)
-		if err == nil {
-			return signer, nil
-		}
-	}
-	return nil, fmt.Errorf("no se encontro clave privada compatible en %s", path)
-}
-
-func parseSignerFromPEMBlock(block *pem.Block) (crypto.Signer, error) {
-	if block == nil {
-		return nil, fmt.Errorf("bloque PEM nulo")
-	}
-	if keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		if signer, ok := keyAny.(crypto.Signer); ok {
-			return signer, nil
-		}
-	}
-	if rsaKey, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return rsaKey, nil
-	}
-	if ecKey, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return ecKey, nil
-	}
-	return nil, fmt.Errorf("clave privada no soportada")
-}
-
-func parsePEMCertificates(path string) ([]*x509.Certificate, error) {
-	pemData, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var certs []*x509.Certificate
-	for len(pemData) > 0 {
-		var block *pem.Block
-		block, pemData = pem.Decode(pemData)
-		if block == nil {
-			break
-		}
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err == nil {
-			certs = append(certs, cert)
-		}
-	}
-	if len(certs) == 0 {
-		return nil, fmt.Errorf("no se encontraron certificados PEM en %s", path)
-	}
-	return certs, nil
-}
-
-func selectLeafForSigner(certs []*x509.Certificate, signer crypto.Signer) *x509.Certificate {
-	if len(certs) == 0 || signer == nil {
-		return nil
-	}
-	signerPub, err := x509.MarshalPKIXPublicKey(signer.Public())
-	if err != nil {
-		return nil
-	}
-	for _, c := range certs {
-		certPub, err := x509.MarshalPKIXPublicKey(c.PublicKey)
-		if err == nil && bytes.Equal(certPub, signerPub) {
-			return c
-		}
-	}
-	return nil
-}
-
-func buildCertChains(leaf *x509.Certificate, certs []*x509.Certificate) ([][]*x509.Certificate, error) {
-	if leaf == nil {
-		return nil, fmt.Errorf("falta certificado hoja")
-	}
-	if len(certs) <= 1 {
-		return nil, nil
-	}
-	intermediates := x509.NewCertPool()
-	for _, c := range certs {
-		if c.Equal(leaf) {
-			continue
-		}
-		intermediates.AddCert(c)
-	}
-	chains, err := leaf.Verify(x509.VerifyOptions{
-		Intermediates: intermediates,
-		CurrentTime:   leaf.NotBefore,
-		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return chains, nil
 }
 
 func optionString(options map[string]interface{}, key, def string) string {

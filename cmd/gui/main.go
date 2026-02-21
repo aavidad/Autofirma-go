@@ -434,20 +434,19 @@ func runWebSocketServer() {
 
 	// Start WebSocket server
 	server := NewWebSocketServer([]int{DefaultWebSocketPort}, "", ui)
-	if err := server.Start(); err != nil {
-		log.Fatalf("No se pudo iniciar el servidor WebSocket: %v", err)
-	}
 
-	log.Printf("Servidor WebSocket activo en el puerto %d", DefaultWebSocketPort)
-
-	// Run UI loop (needed for certificate dialogs)
+	// Run UI loop (needed for certificate dialogs) in a goroutine
 	go func() {
 		if err := loop(w, ui); err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	app.Main()
+	// Start Gioui app main loop in a goroutine (may conflict on some OS, but allows Systray on main)
+	go app.Main()
+
+	log.Printf("Iniciando System Tray y Servidor WebSocket...")
+	runSystrayAndServer(server)
 }
 
 func loop(w *app.Window, ui *UI) error {

@@ -4,10 +4,12 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QLocalSocket>
 #include <QObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QString>
+#include <QTcpSocket>
 #include <QUrl>
 
 int main(int argc, char *argv[]) {
@@ -19,6 +21,31 @@ int main(int argc, char *argv[]) {
     if (arg == "--rest" || arg == "-rest")
       useRest = true;
   }
+
+  QString ipcPath;
+#if defined(Q_OS_WIN)
+  ipcPath = "\\\\.\\pipe\\autofirma_ipc";
+#else
+  ipcPath = "/tmp/autofirma_ipc.sock";
+#endif
+
+  if (!useRest) {
+    QLocalSocket testIpc;
+    testIpc.connectToServer(ipcPath);
+    if (testIpc.waitForConnected(200)) {
+      testIpc.disconnectFromServer();
+    } else {
+      QTcpSocket testRest;
+      testRest.connectToHost("127.0.0.1", 63118);
+      if (testRest.waitForConnected(200)) {
+        testRest.disconnectFromHost();
+        qDebug() << "[Init] IPC no responde pero REST si. Fallback a REST "
+                    "automatico.";
+        useRest = true;
+      }
+    }
+  }
+
   bool useIpc = !useRest;
 
   QGuiApplication app(argc, argv);
@@ -44,6 +71,7 @@ int main(int argc, char *argv[]) {
   QQmlApplicationEngine engine;
   engine.rootContext()->setContextProperty("backend", activeBridge);
   engine.rootContext()->setContextProperty("isIpcMode", useIpc);
+  engine.rootContext()->setContextProperty("ipcSocketPath", ipcPath);
 
   // Resolver ruta QML
   QString binDir = QCoreApplication::applicationDirPath();
@@ -72,7 +100,7 @@ int main(int argc, char *argv[]) {
 
   // Arrancar backend automaticamente
   if (useIpc) {
-    ipcBridge.startBackend("/tmp/autofirma_ipc.sock");
+    ipcBridge.startBackend(ipcPath);
   } else {
     restBridge.startBackend("127.0.0.1:63118", "secreto");
   }

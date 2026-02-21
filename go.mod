@@ -10,9 +10,10 @@ require (
 	github.com/digitorus/pdfsign v0.0.0-20260102145623-a2800162ff5c
 	github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352
 	github.com/gorilla/websocket v1.5.3
-	github.com/miekg/pkcs11 v1.1.1
+	github.com/miekg/pkcs11 v1.1.2
 	github.com/russellhaering/goxmldsig v1.5.0
 	golang.org/x/sys v0.39.0
+	software.sslmate.com/src/go-pkcs12 v0.7.0
 )
 
 require (

@@ -20,7 +20,7 @@ import (
 	"autofirma-host/pkg/protocol"
 )
 
-func signXadesWithGo(inputFile, p12Path, p12Password string, options map[string]interface{}) ([]byte, error) {
+func signXadesWithGo(inputFile string, leaf *x509.Certificate, signer crypto.Signer, chains [][]*x509.Certificate, options map[string]interface{}) ([]byte, error) {
 	xmlData, err := os.ReadFile(inputFile)
 	if err != nil {
 		return nil, err
@@ -35,9 +35,8 @@ func signXadesWithGo(inputFile, p12Path, p12Password string, options map[string]
 		return nil, fmt.Errorf("XML sin elemento raiz")
 	}
 
-	leaf, signer, chains, err := loadP12ForPades(p12Path, p12Password)
-	if err != nil {
-		return nil, err
+	if leaf == nil || signer == nil {
+		return nil, fmt.Errorf("certificado y signer obligatorios para xades")
 	}
 
 	certChain := [][]byte{leaf.Raw}
