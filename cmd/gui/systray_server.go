@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"autofirma-host/pkg/applog"
 	"autofirma-host/pkg/version"
@@ -21,8 +22,25 @@ func onSystrayReady(wsServer *WebSocketServer) {
 	systray.SetIcon(applog.LogoRaw)
 	systray.SetTooltip("AutoFirma Go Backend")
 
-	mStatus := systray.AddMenuItem("Puerto activo: "+wsServer.portsStr(), "Estado del socket")
-	mStatus.Disable()
+	status := resolveSystrayServerStatus()
+	mStatusMode := systray.AddMenuItem("Modo servidor: "+status.modeLabel, "Modo activo del servidor")
+	mStatusMode.Disable()
+	mStatusWS := systray.AddMenuItem("WebSocket: activo (puerto "+wsServer.portsStr()+")", "Estado WebSocket")
+	mStatusWS.Disable()
+	if status.ipcEnabled {
+		mIPC := systray.AddMenuItem("IPC: activo ("+status.ipcSocket+")", "Estado IPC")
+		mIPC.Disable()
+	} else {
+		mIPC := systray.AddMenuItem("IPC: desactivado", "Estado IPC")
+		mIPC.Disable()
+	}
+	if status.restEnabled {
+		mREST := systray.AddMenuItem("REST: activo ("+status.restBind+")", "Estado REST")
+		mREST.Disable()
+	} else {
+		mREST := systray.AddMenuItem("REST: desactivado", "Estado REST")
+		mREST.Disable()
+	}
 
 	systray.AddSeparator()
 
@@ -71,6 +89,62 @@ func onSystrayReady(wsServer *WebSocketServer) {
 
 func onSystrayExit() {
 	log.Println("[Systray] Cerrando servidor AutoFirma en segundo plano")
+}
+
+type systrayServerStatus struct {
+	modeLabel  string
+	ipcEnabled bool
+	ipcSocket  string
+	restEnabled bool
+	restBind   string
+}
+
+func resolveSystrayServerStatus() systrayServerStatus {
+	mode := normalizeServerMode(strings.TrimSpace(*serverModeKindFlag))
+	if mode == "" && *serverModeFlag {
+		mode = "websocket"
+	}
+
+	st := systrayServerStatus{
+		modeLabel:   "websocket",
+		ipcEnabled:  false,
+		ipcSocket:   strings.TrimSpace(*ipcSocketFlag),
+		restEnabled: false,
+		restBind:    strings.TrimSpace(*restAddrFlag),
+	}
+	if st.ipcSocket == "" {
+		st.ipcSocket = "/tmp/autofirma_ipc.sock"
+	}
+	if st.restBind == "" {
+		st.restBind = "127.0.0.1:63118"
+	}
+	if sock := strings.TrimSpace(*restSocketFlag); sock != "" {
+		st.restBind = "socket " + sock
+	}
+
+	switch mode {
+	case "ambas":
+		st.modeLabel = "ambas"
+		st.ipcEnabled = true
+		st.restEnabled = true
+	case "websocket":
+		st.modeLabel = "websocket"
+	case "ipc":
+		st.modeLabel = "ipc"
+		st.ipcEnabled = true
+	case "rest":
+		st.modeLabel = "rest"
+		st.restEnabled = true
+	default:
+		if *ipcModeFlag {
+			st.ipcEnabled = true
+		}
+		if *restModeFlag {
+			st.restEnabled = true
+		}
+	}
+
+	return st
 }
 
 func (s *WebSocketServer) portsStr() string {

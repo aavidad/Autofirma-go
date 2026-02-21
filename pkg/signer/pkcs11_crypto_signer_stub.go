@@ -5,11 +5,14 @@ package signer
 
 import (
 	"crypto"
+	"crypto/x509"
 	"fmt"
 	"io"
 )
 
-type cryptoSignerPKCS11 struct{}
+type cryptoSignerPKCS11 struct {
+	cert *x509.Certificate
+}
 
 func (s *cryptoSignerPKCS11) Public() crypto.PublicKey {
 	return nil

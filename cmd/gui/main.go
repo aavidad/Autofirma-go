@@ -499,6 +499,8 @@ func runSelectedServerMode(mode string) error {
 			log.Printf("Iniciando en modo servidor REST en %s", addr)
 			errCh <- runRESTServer(addr, strings.TrimSpace(*restTokenFlag), *restSessionTTLFlag, strings.TrimSpace(*restCertFPFlag))
 		}()
+		log.Println("Iniciando en modo servidor WebSocket (systray) junto con IPC y REST")
+		runWebSocketServer()
 		return <-errCh
 	default:
 		return fmt.Errorf("modo no soportado: %s (use websocket|ipc|rest|ambas)", strings.TrimSpace(mode))

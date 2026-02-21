@@ -119,6 +119,8 @@ elif [[ "${QT_RUNTIME_FROM_SYSTEM}" == "1" ]]; then
         cp -af "${plugin_dir}/${group}/." "${BUNDLE_DIR}/qt-runtime/plugins/${group}/"
       fi
     done
+  else
+    echo "[linux] Aviso: no se encontró carpeta de plugins Qt del sistema."
   fi
 
   if [[ -n "${qml_dir}" ]]; then
@@ -135,14 +137,6 @@ elif [[ "${QT_RUNTIME_FROM_SYSTEM}" == "1" ]]; then
       fi
     done
   fi
-        mkdir -p "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}"
-        cp -f "${plugin_file}" "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}/"
-      fi
-    done
-  else
-    echo "[linux] Aviso: no se encontró carpeta de plugins Qt6 del sistema."
-  fi
-
   if command -v ldd >/dev/null 2>&1; then
     should_skip_core_lib() {
       case "$(basename "$1")" in
