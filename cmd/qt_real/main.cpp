@@ -11,22 +11,25 @@
 #include <QUrl>
 
 int main(int argc, char *argv[]) {
-  bool useIpc = false;
+  // Por defecto: IPC (socket Unix) — más rápido y seguro para comunicación
+  // local. Usa --rest para activar el modo REST HTTP.
+  bool useRest = false;
   for (int i = 1; i < argc; ++i) {
     QString arg = QString::fromLocal8Bit(argv[i]);
-    if (arg == "--ipc" || arg == "-ipc")
-      useIpc = true;
+    if (arg == "--rest" || arg == "-rest")
+      useRest = true;
   }
+  bool useIpc = !useRest;
 
   QGuiApplication app(argc, argv);
-  app.setApplicationName("AutoFirma Dipgra Modern");
+  app.setApplicationName("AutoFirma Dipgra");
   app.setOrganizationName("Diputacion de Granada");
 
   BackendBridge restBridge;
   IpcBridge ipcBridge;
-  QObject *activeBridge = &restBridge;
+  QObject *activeBridge = &ipcBridge; // IPC por defecto
 
-  // Check if expert mode is in args
+  // Check expert mode arg
   for (int i = 1; i < argc; ++i) {
     QString arg = QString::fromLocal8Bit(argv[i]).toLower();
     if (arg == "--experto" || arg == "-experto") {
@@ -35,22 +38,20 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (useIpc)
-    activeBridge = &ipcBridge;
+  if (useRest)
+    activeBridge = &restBridge;
 
   QQmlApplicationEngine engine;
   engine.rootContext()->setContextProperty("backend", activeBridge);
-  // Expose bridge type for UI info
   engine.rootContext()->setContextProperty("isIpcMode", useIpc);
 
-  // Resolve QML path - always prioritize the QML bundled next to the binary
+  // Resolver ruta QML
   QString binDir = QCoreApplication::applicationDirPath();
   QStringList candidates = {
-      binDir + "/qml/main.qml",    // standard: next to binary
-      binDir + "/../qml/main.qml", // one level up
-      QDir::currentPath() +
-          "/cmd/qt_real/qml/main.qml",      // dev: run from source root
-      binDir + "/cmd/qt_real/qml/main.qml", // dev variant
+      binDir + "/qml/main.qml",
+      binDir + "/../qml/main.qml",
+      QDir::currentPath() + "/cmd/qt_real/qml/main.qml",
+      binDir + "/cmd/qt_real/qml/main.qml",
   };
   QString qmlPath;
   for (const auto &c : candidates) {
@@ -60,17 +61,16 @@ int main(int argc, char *argv[]) {
     }
   }
   if (qmlPath.isEmpty()) {
-    qWarning("No se encontró main.qml en ninguna ubicación conocida");
+    qWarning("No se encontro main.qml en ninguna ubicacion conocida");
     return -1;
   }
-  qDebug() << "Cargando QML desde:" << qmlPath;
+  qDebug() << (useIpc ? "[modo IPC]" : "[modo REST]") << "QML:" << qmlPath;
 
   engine.load(QUrl::fromLocalFile(qmlPath));
-
   if (engine.rootObjects().isEmpty())
     return -1;
 
-  // Start backend automatically based on mode
+  // Arrancar backend automaticamente
   if (useIpc) {
     ipcBridge.startBackend("/tmp/autofirma_ipc.sock");
   } else {

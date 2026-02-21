@@ -33,6 +33,12 @@ public:
   Q_INVOKABLE void runTLSDiagnostics();
   Q_INVOKABLE void exportDiagnosticReport();
   Q_INVOKABLE void clearTLSTrustStore();
+  // Service management (via IPC)
+  Q_INVOKABLE void getServiceStatus();
+  Q_INVOKABLE void installService();
+  Q_INVOKABLE void uninstallService();
+  Q_INVOKABLE void startService();
+  Q_INVOKABLE void stopService();
 
   bool expertMode() const { return m_expertMode; }
   void setExpertMode(bool v);
@@ -44,6 +50,9 @@ signals:
   void backendLogReceived(QString log);
   void expertModeChanged();
   void statusChanged();
+  void serviceStatusReceived(bool installed, bool running, QString platform,
+                             QString method);
+  void serviceActionFinished(bool ok, QString message);
 
 private slots:
   void onReadyRead();
@@ -66,6 +75,7 @@ private:
   bool m_expertMode = false;
   QString m_socketPath;
   int m_retryCount = 0;
+  QString m_pendingAction; // ultima accion enviada, para distinguir respuestas
 };
 
 #endif // IPCBRIDGE_H

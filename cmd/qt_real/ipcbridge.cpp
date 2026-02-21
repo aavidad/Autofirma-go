@@ -161,37 +161,53 @@ void IpcBridge::onReadyRead() {
 
     QJsonObject obj = doc.object();
     bool ok = obj.value("ok").toBool();
-    QString err = obj.value("error").toString();
+    QString errMsg = obj.value("error").toString();
+    QJsonValue data = obj.value("data");
+    QString action = m_pendingAction;
+    m_pendingAction.clear();
 
-    if (!ok) {
-      emit backendLogReceived("❌ ERROR IPC: " + err);
-      emit signingFinished(false, err, "");
+    // Respuestas de gestion del servicio
+    if (action.startsWith("service_")) {
+      if (!ok) {
+        emit serviceActionFinished(false, errMsg);
+      } else if (action == "service_status") {
+        // data es un objeto con installed, running, platform, method
+        QJsonObject st = data.toObject();
+        bool installed = st.value("installed").toBool();
+        bool running   = st.value("running").toBool();
+        QString platform = st.value("platform").toString();
+        QString method   = st.value("method").toString();
+        emit serviceStatusReceived(installed, running, platform, method);
+      } else {
+        emit serviceActionFinished(true, data.toString());
+      }
       continue;
     }
 
-    QJsonValue data = obj.value("data");
-    // Aquí discerniríamos por el tipo de respuesta (podríamos añadir 'action'
-    // en la respuesta Go) Por ahora lo hacemos por contenido:
+    if (!ok) {
+      emit backendLogReceived("Error IPC: " + errMsg);
+      emit signingFinished(false, errMsg, "");
+      continue;
+    }
+
+    // Certificados (array)
     if (data.isArray()) {
       QVariantList certs;
       QJsonArray arr = data.toArray();
       for (const auto &v : arr)
         certs << v.toVariant();
       emit certificatesLoaded(certs);
-      setStatus("Certificados cargados vía IPC");
+      setStatus("Certificados cargados");
     } else if (data.isObject()) {
       QJsonObject res = data.toObject();
       if (res.contains("OutputPath")) {
         QString out = res.value("OutputPath").toString();
-        emit backendLogReceived("✅ Firma completada. Archivo: " + out);
-        emit signingFinished(true, "Firma completada con éxito", out);
+        emit backendLogReceived("Firma completada: " + out);
+        emit signingFinished(true, "Firma completada correctamente", out);
       } else if (res.contains("valid")) {
-        // Respuesta de verificación
         bool valid = res.value("valid").toBool();
-        QString msg =
-            valid ? "Firma VÁLIDA"
-                  : "Firma NO VÁLIDA: " + res.value("reason").toString();
-        emit backendLogReceived("🔍 " + msg);
+        QString msg = valid ? "Firma valida"
+                            : "Firma NO valida: " + res.value("reason").toString();
         setStatus(msg);
         emit verificationFinished(true, msg, res.toVariantMap());
       }
@@ -249,4 +265,59 @@ void IpcBridge::exportDiagnosticReport() {
 
 void IpcBridge::clearTLSTrustStore() {
   setStatus("Almacén TLS no gestionado en este modo.");
+}
+
+// ── Gestión del servicio de usuario (via IPC) ─────────────────────────────────
+
+void IpcBridge::getServiceStatus() {
+  emit backendLogReceived("Consultando estado del servicio...");
+  QJsonObject req;
+  req.insert("action", "service_status");
+  req.insert("params", QJsonObject());
+  QByteArray data = QJsonDocument(req).toJson(QJsonDocument::Compact) + "\n";
+  if (!m_socket->isOpen()) {
+    emit serviceActionFinished(false, "Sin conexión con el motor");
+    return;
+  }
+  // La respuesta la procesa onReadyRead → parseServiceResponse
+  m_pendingAction = "service_status";
+  m_socket->write(data);
+}
+
+void IpcBridge::installService() {
+  QJsonObject params;
+  params.insert("ipcSocket", m_socketPath);
+  QJsonObject req;
+  req.insert("action", "service_install");
+  req.insert("params", params);
+  if (!m_socket->isOpen()) { emit serviceActionFinished(false, "Sin conexión"); return; }
+  m_pendingAction = "service_install";
+  m_socket->write(QJsonDocument(req).toJson(QJsonDocument::Compact) + "\n");
+}
+
+void IpcBridge::uninstallService() {
+  QJsonObject req;
+  req.insert("action", "service_uninstall");
+  req.insert("params", QJsonObject());
+  if (!m_socket->isOpen()) { emit serviceActionFinished(false, "Sin conexión"); return; }
+  m_pendingAction = "service_uninstall";
+  m_socket->write(QJsonDocument(req).toJson(QJsonDocument::Compact) + "\n");
+}
+
+void IpcBridge::startService() {
+  QJsonObject req;
+  req.insert("action", "service_start");
+  req.insert("params", QJsonObject());
+  if (!m_socket->isOpen()) { emit serviceActionFinished(false, "Sin conexión"); return; }
+  m_pendingAction = "service_start";
+  m_socket->write(QJsonDocument(req).toJson(QJsonDocument::Compact) + "\n");
+}
+
+void IpcBridge::stopService() {
+  QJsonObject req;
+  req.insert("action", "service_stop");
+  req.insert("params", QJsonObject());
+  if (!m_socket->isOpen()) { emit serviceActionFinished(false, "Sin conexión"); return; }
+  m_pendingAction = "service_stop";
+  m_socket->write(QJsonDocument(req).toJson(QJsonDocument::Compact) + "\n");
 }
