@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -61,6 +62,9 @@ type restCertificate struct {
 	CanSign      bool   `json:"canSign"`
 	SignIssue    string `json:"signIssue,omitempty"`
 	Source       string `json:"source,omitempty"`
+	SubjectName  string `json:"subjectName,omitempty"`
+	IssuerName   string `json:"issuerName,omitempty"`
+	Status       string `json:"status,omitempty"`
 }
 
 type restCertListResponse struct {
@@ -261,6 +265,12 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 	mux.HandleFunc("/tls/estado-confianza", s.withAuth(s.handleTLSTrustStatus))
 	mux.HandleFunc("/tls/instalar-confianza", s.withAuth(s.handleTLSInstallTrust))
 	mux.HandleFunc("/tls/generar-certificados", s.withAuth(s.handleTLSGenerateCerts))
+	// Service management
+	mux.HandleFunc("/service/status", s.withAuth(s.handleServiceStatus))
+	mux.HandleFunc("/service/install", s.withAuth(s.handleServiceInstall))
+	mux.HandleFunc("/service/uninstall", s.withAuth(s.handleServiceUninstall))
+	mux.HandleFunc("/service/start", s.withAuth(s.handleServiceStart))
+	mux.HandleFunc("/service/stop", s.withAuth(s.handleServiceStop))
 
 	log.Printf("[REST] Servidor API REST local activo en http://%s", addr)
 	log.Printf("[REST] Endpoints: / /auth/challenge /auth/verify /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs")
@@ -276,6 +286,58 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 		Addr:    addr,
 		Handler: mux,
 	}).ListenAndServe()
+}
+
+func runRESTServerOnSocket(socketPath string, token string, sessionTTL time.Duration, allowedFingerprintsCSV string) error {
+	socketPath = strings.TrimSpace(socketPath)
+	if socketPath == "" {
+		socketPath = "/tmp/autofirma.sock"
+	}
+	// Limpieza previa del socket si existe
+	os.Remove(socketPath)
+
+	token = strings.TrimSpace(token)
+	if sessionTTL <= 0 {
+		sessionTTL = 10 * time.Minute
+	}
+
+	allowed := parseAllowedFingerprints(allowedFingerprintsCSV)
+	s := &restServer{
+		core:         NewCoreService(),
+		token:        token,
+		sessionTTL:   sessionTTL,
+		allowedCerts: allowed,
+		challenges:   map[string]restChallenge{},
+		sessions:     map[string]restSession{},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRootConsole)
+	mux.HandleFunc("/auth/challenge", s.handleAuthChallenge)
+	mux.HandleFunc("/auth/verify", s.handleAuthVerify)
+	mux.HandleFunc("/health", s.withAuth(s.handleHealth))
+	mux.HandleFunc("/certificates", s.withAuth(s.handleCertificates))
+	mux.HandleFunc("/sign", s.withAuth(s.handleSign))
+	mux.HandleFunc("/verify", s.withAuth(s.handleVerify))
+	// Alias en castellano
+	mux.HandleFunc("/salud", s.withAuth(s.handleHealth))
+	mux.HandleFunc("/certificados", s.withAuth(s.handleCertificates))
+	mux.HandleFunc("/firmar", s.withAuth(s.handleSign))
+	mux.HandleFunc("/verificar", s.withAuth(s.handleVerify))
+
+	log.Printf("[REST-IPC] Servidor API REST activo en socket Unix: %s", socketPath)
+
+	l, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return err
+	}
+	defer l.Close()
+	os.Chmod(socketPath, 0666) // Permitir acceso al socket
+
+	srv := &http.Server{
+		Handler: mux,
+	}
+	return srv.Serve(l)
 }
 
 func (s *restServer) handleRootConsole(w http.ResponseWriter, r *http.Request) {
@@ -498,6 +560,9 @@ func (s *restServer) handleCertificates(w http.ResponseWriter, r *http.Request) 
 			CanSign:      c.CanSign,
 			SignIssue:    c.SignIssue,
 			Source:       c.Source,
+			SubjectName:  c.SubjectName,
+			IssuerName:   c.IssuerName,
+			Status:       c.Status,
 		})
 	}
 	writeJSON(w, http.StatusOK, restCertListResponse{OK: true, Certificates: out})

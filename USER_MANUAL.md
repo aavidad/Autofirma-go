@@ -172,3 +172,90 @@ Ejemplos:
 - `./AutofirmaDipgra-linux-installer.run --perfil escritorio`
 - `./AutofirmaDipgra-linux-installer.run --perfil minimo`
 - `./AutofirmaDipgra-linux-installer.run --perfil escritorio --subperfil-escritorio qt`
+
+## 13. Interfaz gráfica Qt (nuevo frontend)
+
+La aplicación incluye un frontend Qt moderno (`autofirma-qt`) que se lanza automáticamente
+junto al motor de firma. **No necesitas arrancar nada manualmente.** Al abrir
+`autofirma-dipgra`, el motor de firma arranca en segundo plano de forma automática.
+
+### Pestaña Configuración — Panel de servicio de usuario
+
+| Control | Descripción |
+|---------|------------|
+| Modo Experto | Activa funciones avanzadas de diagnóstico |
+| Indicador de estado | Verde = activo · Naranja = instalado/parado · Rojo = no instalado |
+| Instalar servicio | Registra el motor para que arranque al iniciar sesión |
+| Desinstalar servicio | Elimina el registro del arranque automático |
+| Iniciar / Detener | Controla el motor sin reiniciar sesión |
+| Actualizar estado | Refresca el indicador |
+
+> ⚠ El servicio se instala como **servicio de tu usuario** (no del sistema), para que
+> pueda acceder a tus certificados del almacén personal. Los servicios de sistema no
+> tienen acceso al almacén personal de certificados del usuario.
+
+### Mecanismo por plataforma
+
+| Sistema | Mecanismo | Ubicación |
+|---------|-----------|-----------|
+| Linux   | systemd user service | `~/.config/systemd/user/autofirma-backend.service` |
+| macOS   | LaunchAgent | `~/Library/LaunchAgents/es.dipgra.autofirma.backend.plist` |
+| Windows | Task Scheduler (inicio de sesión) | Tarea "AutoFirma Dipgra Backend" |
+
+## 14. Instalación con el nuevo instalador unificado
+
+### Desde código fuente (Linux)
+
+```bash
+git clone https://github.com/aavidad/Autofirma-go.git
+cd Autofirma-go
+
+make build          # Compila Go + Qt + QML → dist/
+sudo make install   # Instala en /opt/autofirma-dipgra y crea symlinks
+```
+
+### Desde el paquete tarball
+
+```bash
+tar xzf AutofirmaDipgra-0.0.2-linux-x64.tar.gz
+sudo ./install.sh [--prefix /opt/autofirma-dipgra]
+```
+
+### Desinstalación limpia
+
+```bash
+sudo make uninstall
+# Elimina: binarios, symlinks, entrada .desktop, manifiestos Native Messaging,
+#          servicio systemd del usuario y certificados instalados por la app.
+```
+
+### Actualización automática
+
+El instalador detecta la versión anterior, para los procesos en ejecución,
+limpia *solo* los binarios y QML (conserva configuración y certificados del usuario),
+e instala la nueva versión.
+
+### Comandos del Makefile
+
+| Comando | Descripción |
+|---------|-------------|
+| `make build` | Compila Go + Qt |
+| `make install` | Compila e instala (requiere sudo) |
+| `make uninstall` | Desinstala completamente (requiere sudo) |
+| `make package` | Crea tarball distribuible |
+| `make clean` | Limpia artefactos de compilación |
+| `make version` | Muestra versión actual |
+| `make bump MSG="texto"` | Sube versión PATCH y actualiza CHANGELOG |
+| `make bump-minor` | Sube versión MINOR |
+| `make bump-major` | Sube versión MAJOR |
+
+## 15. Control de versiones
+
+La versión instalada se puede consultar con:
+
+```bash
+cat /opt/autofirma-dipgra/VERSION
+```
+
+El historial completo de cambios está en `CHANGELOG.md` en el repositorio de GitHub:
+https://github.com/aavidad/Autofirma-go/blob/main/CHANGELOG.md
