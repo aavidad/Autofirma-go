@@ -32,19 +32,31 @@ void IpcBridge::setExpertMode(bool v) {
 void IpcBridge::startBackend(const QString &socketPath) {
   m_socketPath = socketPath;
 
-  // If already connected, do nothing
   if (m_socket->state() == QLocalSocket::ConnectedState)
     return;
 
-  // Check if socket file exists — if not, launch the Go backend
-  if (!QFileInfo::exists(socketPath)) {
-    emit backendLogReceived("Socket no encontrado. Arrancando backend Go...");
-    launchBackendProcess();
+  // Comprobar si el socket esta vivo
+  bool needsLaunch = true;
+  if (QFileInfo::exists(socketPath)) {
+    QLocalSocket testSocket;
+    testSocket.connectToServer(socketPath);
+    if (testSocket.waitForConnected(500)) {
+      testSocket.disconnectFromServer();
+      needsLaunch = false;
+      emit backendLogReceived("Socket activo encontrado. Conectando...");
+    } else {
+      emit backendLogReceived("Socket muerto encontrado. Limpiando y arrancando...");
+      QFile::remove(socketPath);
+    }
   } else {
-    emit backendLogReceived("Socket encontrado. Conectando...");
+    emit backendLogReceived("Socket no encontrado. Arrancando backend Go...");
   }
 
-  // Try to connect, with automatic retry
+  if (needsLaunch) {
+    launchBackendProcess();
+  }
+
+  // Ahora si conectamos el socket definitivo
   tryConnect();
 }
 
