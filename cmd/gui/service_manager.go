@@ -4,13 +4,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"autofirma-host/pkg/version"
 )
 
 // ServiceStatus describes the state of the user-level background service.
@@ -128,6 +132,13 @@ func (m *linuxServiceMgr) Status() ServiceStatus {
 }
 
 func (m *linuxServiceMgr) Install(ipcSocket string) error {
+	finalBin, err := ensureAppInFolder(m.binPath)
+	if err != nil {
+		return fmt.Errorf("error preparando app portable: %v", err)
+	}
+	m.binPath = finalBin
+	WriteUpdaterConfig(version.CurrentVersion)
+
 	unitDir := filepath.Dir(m.unitPath())
 	if err := os.MkdirAll(unitDir, 0755); err != nil {
 		return err
@@ -191,6 +202,13 @@ func (m *macServiceMgr) Status() ServiceStatus {
 }
 
 func (m *macServiceMgr) Install(ipcSocket string) error {
+	finalBin, err := ensureAppInFolder(m.binPath)
+	if err != nil {
+		return fmt.Errorf("error preparando app portable: %v", err)
+	}
+	m.binPath = finalBin
+	WriteUpdaterConfig(version.CurrentVersion)
+
 	agentDir := filepath.Dir(m.plistPath())
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		return err
@@ -248,57 +266,71 @@ func (m *macServiceMgr) Stop() error {
 
 type windowsServiceMgr struct{ binPath string }
 
-const winTaskName = "AutoFirma Backend"
+const runKeyPath = `Software\Microsoft\Windows\CurrentVersion\Run`
+const runKeyName = "AutoFirmaDipgra"
 
 func (m *windowsServiceMgr) Status() ServiceStatus {
-	st := ServiceStatus{Platform: "windows", Method: "taskscheduler", BinPath: m.binPath}
-	out, err := exec.Command("schtasks", "/query", "/tn", winTaskName, "/fo", "LIST").CombinedOutput()
-	if err == nil && strings.Contains(string(out), winTaskName) {
+	st := ServiceStatus{Platform: "windows", Method: "registry", BinPath: m.binPath}
+
+	// Check registry
+	out, err := exec.Command("reg", "query", `HKCU\`+runKeyPath, "/v", runKeyName).CombinedOutput()
+	if err == nil && strings.Contains(string(out), runKeyName) {
 		st.Installed = true
-		st.Running = strings.Contains(string(out), "Running")
+		// Pobre parsing de la salida de reg query para el path del binario
+		lines := strings.Split(string(out), "\n")
+		for _, l := range lines {
+			if strings.Contains(l, runKeyName) {
+				parts := strings.SplitN(l, "REG_SZ", 2)
+				if len(parts) == 2 {
+					val := strings.TrimSpace(parts[1])
+					st.BinPath = strings.Trim(strings.Fields(val)[0], "\"")
+				}
+			}
+		}
 	}
+
+	// Check if running
+	outTaskList, err := exec.Command("tasklist", "/FI", "IMAGENAME eq autofirma-desktop.exe").Output()
+	if err == nil && strings.Contains(string(outTaskList), "autofirma-desktop.exe") {
+		st.Running = true
+	}
+
 	return st
 }
 
 func (m *windowsServiceMgr) Install(ipcSocket string) error {
-	// /sc ONLOGON runs as the current user at logon
-	// /rl LIMITED ensures it does NOT run as administrator
-	cmd := exec.Command("schtasks",
-		"/create",
-		"/tn", winTaskName,
-		"/sc", "ONLOGON",
-		"/rl", "LIMITED",
-		"/tr", fmt.Sprintf(`"%s" --ipc`, m.binPath),
-		"/f",
-	)
-	out, err := cmd.CombinedOutput()
+	finalBin, err := ensureAppInFolder(m.binPath)
 	if err != nil {
-		return fmt.Errorf("schtasks error: %v: %s", err, out)
+		return fmt.Errorf("error preparando app portable: %v", err)
 	}
-	// Start it now too
+	m.binPath = finalBin
+	WriteUpdaterConfig(version.CurrentVersion)
+
+	if ipcSocket == "" {
+		ipcSocket = `\\.\pipe\autofirma_ipc`
+	}
+
+	cmdStr := fmt.Sprintf(`"%s" --ipc`, m.binPath)
+	if err := exec.Command("reg", "add", `HKCU\`+runKeyPath, "/v", runKeyName, "/t", "REG_SZ", "/d", cmdStr, "/f").Run(); err != nil {
+		return fmt.Errorf("error escribiendo registro: %v", err)
+	}
+
 	return m.Start()
 }
 
 func (m *windowsServiceMgr) Uninstall() error {
 	m.Stop()
-	out, err := exec.Command("schtasks", "/delete", "/tn", winTaskName, "/f").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("schtasks delete error: %v: %s", err, out)
-	}
+	exec.Command("reg", "delete", `HKCU\`+runKeyPath, "/v", runKeyName, "/f").Run()
 	return nil
 }
 
 func (m *windowsServiceMgr) Start() error {
-	out, err := exec.Command("schtasks", "/run", "/tn", winTaskName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, out)
-	}
-	return nil
+	cmd := exec.Command(m.binPath, "--ipc")
+	return cmd.Start()
 }
 
 func (m *windowsServiceMgr) Stop() error {
-	// Find and kill the process
-	exec.Command("taskkill", "/f", "/im", filepath.Base(m.binPath)).Run()
+	exec.Command("taskkill", "/f", "/im", "autofirma-desktop.exe").Run()
 	return nil
 }
 
@@ -314,4 +346,92 @@ func WaitForSocket(socketPath string, timeout time.Duration) bool {
 		time.Sleep(300 * time.Millisecond)
 	}
 	return false
+}
+
+// ensureAppInFolder checks if the current executable is running from the permanent
+// application folder. If not, it copies it there and returns the new absolute path.
+func ensureAppInFolder(currentBin string) (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return currentBin, fmt.Errorf("could not get config dir: %v", err)
+	}
+
+	appDir := filepath.Join(configDir, "AutoFirmaDipgra", "bin")
+	if err := os.MkdirAll(appDir, 0755); err != nil {
+		return currentBin, fmt.Errorf("could not create app dir: %v", err)
+	}
+
+	binName := filepath.Base(currentBin)
+	targetBin := filepath.Join(appDir, binName)
+
+	if currentBin == targetBin {
+		return targetBin, nil
+	}
+
+	srcFile, err := os.Open(currentBin)
+	if err != nil {
+		return currentBin, fmt.Errorf("could not open source binary: %v", err)
+	}
+	defer srcFile.Close()
+
+	os.Remove(targetBin)
+
+	dstFile, err := os.OpenFile(targetBin, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return currentBin, fmt.Errorf("could not create target binary: %v", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return currentBin, fmt.Errorf("error copying binary: %v", err)
+	}
+
+	if runtime.GOOS != "windows" {
+		os.Chmod(targetBin, 0755)
+	}
+
+	return targetBin, nil
+}
+
+type UpdaterConfig struct {
+	Version   string `json:"version"`
+	UpdateURL string `json:"updateUrl"`
+	Platform  string `json:"platform"`
+}
+
+const updateCheckURL = "https://autofirma.dipgra.es/version.json"
+
+func WriteUpdaterConfig(version string) error {
+	cfg := UpdaterConfig{
+		Version:   version,
+		UpdateURL: updateCheckURL,
+		Platform:  runtime.GOOS,
+	}
+
+	if runtime.GOOS == "windows" {
+		// Emulamos acceso al registro llamando a reg.exe para no requerir build-tags en este fichero compartido
+		cmd1 := exec.Command("reg", "add", `HKCU\Software\AutoFirmaDipgra`, "/v", "Version", "/t", "REG_SZ", "/d", cfg.Version, "/f")
+		cmd2 := exec.Command("reg", "add", `HKCU\Software\AutoFirmaDipgra`, "/v", "UpdateURL", "/t", "REG_SZ", "/d", cfg.UpdateURL, "/f")
+		err1 := cmd1.Run()
+		err2 := cmd2.Run()
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("error escribiendo registro: %v, %v", err1, err2)
+		}
+		return nil
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	appConfigDir := filepath.Join(configDir, "AutoFirmaDipgra")
+	os.MkdirAll(appConfigDir, 0755)
+
+	file := filepath.Join(appConfigDir, "updater.json")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(file, data, 0644)
 }
