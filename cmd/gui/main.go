@@ -172,24 +172,12 @@ func main() {
 
 	if *ipcModeFlag {
 		sock := strings.TrimSpace(*ipcSocketFlag)
-		log.Printf("Iniciando motor IPC en: %s", sock)
-		if *frontendFlag != "" || (!*serverModeFlag && !isCLIModeRequested()) {
-			// Si hay frontend o no es modo servidor puro, lanzamos en segundo plano
-			go func() {
-				if err := runIPCServer(sock, NewCoreService()); err != nil {
-					log.Printf("Error en servidor IPC: %v", err)
-				}
-			}()
-			// Pequeña espera para que el socket se cree antes de que el frontend intente conectar
-			time.Sleep(200 * time.Millisecond)
-		} else {
-			// Modo servidor puro (headless)
-			if err := runIPCServer(sock, NewCoreService()); err != nil {
-				log.Printf("No se pudo iniciar el servidor IPC: %v", err)
-				os.Exit(1)
-			}
-			return
+		log.Printf("Iniciando motor IPC en modo headless: %s", sock)
+		if err := runIPCServer(sock, NewCoreService()); err != nil {
+			log.Printf("Error en servidor IPC: %v", err)
+			os.Exit(1)
 		}
+		return
 	}
 
 	if isCLIModeRequested() {
