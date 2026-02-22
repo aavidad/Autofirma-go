@@ -11,6 +11,7 @@ Window {
     height: 850
     title: "AutoFirma Dipgra"
     color: currentTheme.backgroundColor
+    property string ipcSocketPath: ""
 
     // --- TEMAS ---
     property int currentThemeIndex: 0
@@ -175,6 +176,7 @@ Window {
     property string activeTab: "firmar"
     property var certificates: []
     property int selectedCertIndex: -1
+    property var selectedCertData: null
     property string currentFilePath: ""
     property string statusMessage: "Iniciando..."
     property string signAction: "sign"
@@ -188,12 +190,14 @@ Window {
     property real signSealY: 0.04
     property real signSealW: 0.34
     property real signSealH: 0.12
+    property int signSealRotation: 0
     property string currentOutputPath: ""
 
     onCurrentFilePathChanged: {
         if (currentFilePath !== "" && (currentOutputPath === "" || currentOutputPath.includes("_firmado"))) {
             suggestOutputPath(currentFilePath)
         }
+        requestPdfPreview()
     }
 
     function suggestOutputPath(inputPath) {
@@ -282,6 +286,28 @@ Window {
         return v
     }
 
+    function requestPdfPreview() {
+        if (!signVisibleSeal || !supportsVisibleSeal() || currentFilePath === "") return;
+        backend.getPdfPreview(currentFilePath, signSealPage);
+    }
+
+    Connections {
+        target: backend
+        function onPdfPreviewReceived(ok, data, width, height) {
+            if (ok) {
+                console.log("QML: Previsualización recibida OK, tamaño:", width, "x", height);
+                if (width && height && width > 0) {
+                    pagePreview.a4Ratio = height / width;
+                } else {
+                    pagePreview.a4Ratio = 841.89 / 595.28;
+                }
+                pdfPageImage.source = "data:image/png;base64," + data;
+            } else {
+                console.log("Error de previsualización: " + data);
+            }
+        }
+    }
+
     function isCurrentPdf() {
         if (!window.currentFilePath || window.currentFilePath === "") return false
         return window.currentFilePath.toLowerCase().endsWith(".pdf")
@@ -325,7 +351,8 @@ Window {
                 x: clamp01(Number(signSealX)),
                 y: clamp01(Number(signSealY)),
                 w: clamp01(Number(signSealW)),
-                h: clamp01(Number(signSealH))
+                h: clamp01(Number(signSealH)),
+                rotation: window.signSealRotation
             }
         }
         return body
@@ -396,15 +423,36 @@ Window {
         }
     }
 
+    Dialog {
+        id: signValidationErrorDialog
+        title: "Atención"
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Ok
+        property string errorMessage: ""
+        ColumnLayout {
+            spacing: 10
+            Text {
+                text: "⚠️ Requisitos faltantes"
+                color: currentTheme.textColor
+                font.bold: true
+            }
+            Text {
+                text: signValidationErrorDialog.errorMessage
+                color: currentTheme.secondaryTextColor
+                wrapMode: Text.WordWrap
+                Layout.preferredWidth: 300
+            }
+        }
+    }
+
     // --- LOGICA DE BACKEND ---
     Connections {
         target: backend
         function onCertificatesLoaded(certs) {
             console.log("QML: Certificados recibidos:", certs.length)
             window.certificates = certs
-            if (certs.length > 0 && selectedCertIndex === -1) {
-                selectedCertIndex = 0
-            }
+            // No preseleccionamos ninguno automáticamente según requerimiento
         }
         function onStatusChanged() {
             window.statusMessage = backend.status
@@ -459,7 +507,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 300
                     Image {
-                        source: "../assets/Logo-Horizontal-Color.png"
+                        source: "../../../assets/Logo-Horizontal-Color.png"
                         anchors.fill: parent
                         fillMode: Image.PreserveAspectFit
                         anchors.margins: 15
@@ -734,8 +782,11 @@ Window {
                                     Layout.fillWidth: true
                                     CheckBox {
                                         text: "Firma visible (PAdES)"
-                                        checked: signVisibleSeal
-                                        onToggled: signVisibleSeal = checked
+                                         checked: signVisibleSeal
+                                         onToggled: {
+                                             signVisibleSeal = checked
+                                             if (checked) requestPdfPreview()
+                                         }
                                         ToolTip.visible: hovered
                                         ToolTip.delay: 500
                                         ToolTip.text: "Inserta un sello gráfico en el PDF indicando que ha sido firmado digitalmente."
@@ -768,8 +819,11 @@ Window {
                                         SpinBox {
                                             from: 1
                                             to: 999
-                                            value: signSealPage
-                                            onValueChanged: signSealPage = value
+                                             value: signSealPage
+                                             onValueChanged: {
+                                                 signSealPage = value
+                                                 requestPdfPreview()
+                                             }
                                         }
                                     }
                                     ColumnLayout {
@@ -822,6 +876,40 @@ Window {
                                     }
                                 }
 
+                                RowLayout {
+                                    visible: signVisibleSeal && supportsVisibleSeal()
+                                    Layout.alignment: Qt.AlignRight
+                                    spacing: 10
+                                    Button {
+                                        text: "↻ Rotar Documento"
+                                        font.pixelSize: 12
+                                        onClicked: {
+                                            pagePreview.a4Ratio = 1.0 / pagePreview.a4Ratio
+                                        }
+                                    }
+                                     Button {
+                                         text: "↶ Rotar Firma"
+                                         font.pixelSize: 12
+                                         onClicked: {
+                                             // Ciclo de rotación: 0 -> 90 -> 180 -> 270 -> 0
+                                             window.signSealRotation = (window.signSealRotation + 90) % 360
+                                             
+                                             // Intercambio de dimensiones relativas manteniendo el centro
+                                             let oldW = signSealW;
+                                             let oldH = signSealH;
+                                             
+                                             signSealW = oldH;
+                                             signSealH = oldW;
+                                             
+                                             // Ajustamos X e Y para que el centro no cambie
+                                             signSealX = clamp01(signSealX + (oldW - signSealW) / 2);
+                                             signSealY = clamp01(signSealY + (oldH - signSealH) / 2);
+                                             
+                                             syncPreviewFromSeal();
+                                         }
+                                     }
+                                }
+
                                 Rectangle {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: signVisibleSeal ? pagePreview.height + 20 : 0
@@ -830,10 +918,18 @@ Window {
                                     border.color: "#95a5a6"
                                     radius: 8
 
-                                    Rectangle {
-                                        id: pagePreview
-                                        anchors.centerIn: parent
-                                        property real a4Ratio: 841.89 / 595.28
+                                     Rectangle {
+                                         id: pagePreview
+                                         anchors.centerIn: parent
+                                         property real a4Ratio: 841.89 / 595.28
+
+                                         Image {
+                                             id: pdfPageImage
+                                             anchors.fill: parent
+                                             fillMode: Image.PreserveAspectFit
+                                             source: ""
+                                             visible: source !== ""
+                                         }
                                         width: Math.min(parent.width - 20, 500 / a4Ratio)
                                         height: width * a4Ratio
                                         color: "#fafafa"
@@ -846,21 +942,89 @@ Window {
                                             id: sealRect
                                             x: Math.max(0, Math.min(parent.width - width, signSealX * parent.width))
                                             y: Math.max(0, Math.min(parent.height - height, (1.0 - signSealY - signSealH) * parent.height))
-                                            width: Math.max(20, signSealW * parent.width)
+                                            width: Math.max(30, signSealW * parent.width)
                                             height: Math.max(20, signSealH * parent.height)
                                             color: "#3498db55"
                                             border.color: "#2980b9"
                                             border.width: 2
+                                            visible: signVisibleSeal && supportsVisibleSeal()
+
+                                            // Contenido del sello (lo que se verá en el PDF)
+                                            Column {
+                                                anchors.centerIn: parent
+                                                // Si hay rotación de 90/270, el ancho disponible es el alto del padre
+                                                width: (window.signSealRotation % 180 === 0) ? (parent.width - 10) : (parent.height - 10)
+                                                spacing: 2
+                                                clip: true
+                                                 rotation: window.signSealRotation // Rotación visual directa (CW)
+                                                Text {
+                                                    text: "✍ FIRMA DIGITAL"
+                                                    font.bold: true
+                                                    font.pixelSize: Math.max(8, Math.min(14, sealRect.height * 0.2))
+                                                    color: "#2980b9"
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                }
+                                                Text {
+                                                    text: (selectedCertIndex !== -1 && window.selectedCertData) 
+                                                          ? (window.selectedCertData.subjectName || (window.selectedCertData.subject && window.selectedCertData.subject.CN) || "Firmante")
+                                                          : "Muestra de Firma"
+                                                    font.pixelSize: Math.max(7, Math.min(12, sealRect.height * 0.15))
+                                                    color: "#34495e"
+                                                    width: parent.width
+                                                    wrapMode: Text.Wrap
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    elide: Text.ElideRight
+                                                    maximumLineCount: 2
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                }
+                                            }
 
                                             MouseArea {
+                                                id: dragArea
                                                 anchors.fill: parent
                                                 drag.target: parent
                                                 drag.minimumX: 0
                                                 drag.minimumY: 0
                                                 drag.maximumX: pagePreview.width - sealRect.width
                                                 drag.maximumY: pagePreview.height - sealRect.height
+                                                cursorShape: Qt.OpenHandCursor
+                                                enabled: !resizeArea.pressed
+                                                onPressed: cursorShape = Qt.ClosedHandCursor
+                                                onReleased: cursorShape = Qt.OpenHandCursor
                                                 onPositionChanged: {
                                                     syncSealFromPreview()
+                                                }
+                                            }
+
+                                            // Manejador de redimensionado (esquina inferior derecha)
+                                            Rectangle {
+                                                width: 16
+                                                height: 16
+                                                color: "#2980b9"
+                                                radius: 8
+                                                anchors.right: parent.right
+                                                anchors.bottom: parent.bottom
+                                                anchors.margins: -8
+                                                z: 10
+                                                border.color: "white"
+                                                border.width: 1
+
+                                                MouseArea {
+                                                    id: resizeArea
+                                                    anchors.centerIn: parent
+                                                    width: 44
+                                                    height: 44
+                                                    cursorShape: Qt.SizeFDiagCursor
+                                                    onPositionChanged: (mouse) => {
+                                                        if (pressed) {
+                                                            let p = mapToItem(pagePreview, mouse.x, mouse.y)
+                                                            let newW = Math.max(40, Math.min(pagePreview.width - sealRect.x, p.x - sealRect.x))
+                                                            let newH = Math.max(25, Math.min(pagePreview.height - sealRect.y, p.y - sealRect.y))
+                                                            sealRect.width = newW
+                                                            sealRect.height = newH
+                                                            syncSealFromPreview()
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -883,8 +1047,21 @@ Window {
                                 font.bold: true
                                 palette.button: currentTheme.primaryColor
                                 palette.buttonText: "white"
-                                enabled: window.currentFilePath !== "" && selectedCertIndex !== -1
-                                onClicked: backend.signFileAdvanced(window.currentFilePath, window.currentOutputPath, selectedCertIndex, buildSignPayload())
+                                 enabled: true
+                                 onClicked: {
+                                     if (window.currentFilePath === "" && selectedCertIndex === -1) {
+                                         signValidationErrorDialog.errorMessage = "Debe cargar un archivo PDF y seleccionar un certificado para poder firmar."
+                                         signValidationErrorDialog.open()
+                                     } else if (window.currentFilePath === "") {
+                                         signValidationErrorDialog.errorMessage = "Debe cargar un archivo PDF antes de realizar la firma."
+                                         signValidationErrorDialog.open()
+                                     } else if (selectedCertIndex === -1) {
+                                         signValidationErrorDialog.errorMessage = "Debe seleccionar un certificado de la lista para poder firmar el documento."
+                                         signValidationErrorDialog.open()
+                                     } else {
+                                         backend.signFileAdvanced(window.currentFilePath, window.currentOutputPath, selectedCertIndex, buildSignPayload())
+                                     }
+                                 }
                             }
                             Button {
                                 text: "Limpiar"
@@ -980,7 +1157,101 @@ Window {
                                             }
                                         }
                                     }
-                                    MouseArea { anchors.fill: parent; onClicked: selectedCertIndex = index }
+                                    MouseArea { 
+                                        anchors.fill: parent; 
+                                        onClicked: { 
+                                            selectedCertIndex = index; 
+                                            window.selectedCertData = modelData;
+                                            console.log("QML: Certificado seleccionado:", modelData.subjectName, "ID:", modelData.id)
+                                        } 
+                                    }
+                                }
+                            }
+
+                            // Subpanel con detalles del certificado seleccionado
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 180
+                                visible: selectedCertIndex !== -1 && window.selectedCertData
+                                color: currentTheme.cardColor
+                                radius: 10
+                                border.color: currentTheme.primaryColor
+                                border.width: 1
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 5
+                                    
+                                    Text {
+                                        text: "Detalles del certificado"
+                                        font.bold: true
+                                        color: "white"
+                                    }
+
+                                    ScrollView {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        clip: true
+
+                                        Column {
+                                            width: parent.width
+                                            spacing: 6
+                                            
+                                            Text { 
+                                                text: "<b>Titular:</b> " + (window.selectedCertData ? (window.selectedCertData.subjectName || "---") : "")
+                                                color: "white"
+                                                font.pixelSize: 11
+                                                wrapMode: Text.Wrap
+                                                width: parent.width
+                                            }
+                                            Text { 
+                                                text: "<b>Emisor:</b> " + (window.selectedCertData ? (window.selectedCertData.issuerName || "---") : "")
+                                                color: "white"
+                                                opacity: 0.8
+                                                font.pixelSize: 11
+                                                wrapMode: Text.Wrap
+                                                width: parent.width
+                                            }
+                                            Text { 
+                                                text: "<b>Nº Serie:</b> " + (window.selectedCertData ? (window.selectedCertData.serialNumber || "") : "")
+                                                color: "white"
+                                                opacity: 0.8
+                                                font.pixelSize: 10
+                                                wrapMode: Text.Wrap
+                                                width: parent.width
+                                            }
+                                            Text { 
+                                                text: "<b>Válido hasta:</b> " + (window.selectedCertData ? (window.selectedCertData.validTo || "") : "")
+                                                color: "white"
+                                                opacity: 0.8
+                                                font.pixelSize: 10
+                                                wrapMode: Text.Wrap
+                                                width: parent.width
+                                            }
+                                            Text { 
+                                                text: "<b>Huella:</b> " + (window.selectedCertData ? (window.selectedCertData.fingerprint || "") : "")
+                                                color: "white"
+                                                opacity: 0.6
+                                                font.pixelSize: 9
+                                                wrapMode: Text.Wrap
+                                                width: parent.width
+                                            }
+                                        }
+                                    }
+
+                                    Button {
+                                        Layout.fillWidth: true
+                                        text: "Validar en VALIDE (Sede Electrónica)"
+                                        background: Rectangle {
+                                            color: "#e67e22"
+                                            radius: 6
+                                        }
+                                        palette.buttonText: "white"
+                                        onClicked: {
+                                            backend.openExternal("https://valide.redsara.es/valide/validarCertificados/paso1.html")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1266,15 +1537,52 @@ Window {
                                     Layout.fillWidth: true
                                     enabled: window.tsaEnabled
                                     opacity: enabled ? 1.0 : 0.5
-                                    Text { text: "URL del servidor TSA:"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
-                                    TextField {
+                                    spacing: 12
+
+                                    ColumnLayout {
                                         Layout.fillWidth: true
-                                        text: window.tsaUrl
-                                        placeholderText: "http://tsa.ejemplo.es"
-                                        onEditingFinished: {
-                                            window.tsaUrl = text
-                                            saveBackendSettings()
+                                        spacing: 4
+                                        Text { text: "Servidor TSA:"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        ComboBox {
+                                            id: tsaCombo
+                                            Layout.fillWidth: true
+                                            editable: true
+                                            model: [
+                                                "http://tsa.fnmt.es/",
+                                                "http://tsa.accv.es/",
+                                                "http://tsa.catcert.net/",
+                                                "http://tsa.camerfirma.com/",
+                                                "http://tsa.izenpe.com/"
+                                            ]
+                                            onActivated: {
+                                                window.tsaUrl = editText
+                                                saveBackendSettings()
+                                            }
+                                            onEditTextChanged: {
+                                                window.tsaUrl = editText
+                                                saveBackendSettings()
+                                            }
+                                            Component.onCompleted: {
+                                                editText = window.tsaUrl
+                                            }
+                                            Connections {
+                                                target: window
+                                                function onTsaUrlChanged() {
+                                                    if (tsaCombo.editText !== window.tsaUrl) {
+                                                        tsaCombo.editText = window.tsaUrl
+                                                    }
+                                                }
+                                            }
                                         }
+                                    }
+
+                                    Button {
+                                        Layout.fillWidth: true
+                                        text: "🛡️ Instalar Certificados Raíz de Administraciones Públicas"
+                                        palette.button: currentTheme.primaryColor; palette.buttonText: "white"
+                                        onClicked: backend.installCamerfirmaCerts()
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Descarga e instala los certificados necesarios para confiar en FNMT, ACCV, Camerfirma, etc."
                                     }
                                 }
                             }

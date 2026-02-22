@@ -73,11 +73,12 @@ type restCertListResponse struct {
 }
 
 type restSignVisibleSeal struct {
-	Page uint32  `json:"page"`
-	X    float64 `json:"x"`
-	Y    float64 `json:"y"`
-	W    float64 `json:"w"`
-	H    float64 `json:"h"`
+	Page     uint32  `json:"page"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	W        float64 `json:"w"`
+	H        float64 `json:"h"`
+	Rotation int     `json:"rotation"`
 }
 
 type restSignRequest struct {
@@ -107,6 +108,8 @@ type restSignRequest struct {
 	ReturnSignatureB64ES  bool                 `json:"devolverFirmaB64"`
 	VisibleSeal           *restSignVisibleSeal `json:"visibleSeal"`
 	VisibleSealES         *restSignVisibleSeal `json:"selloVisible"`
+	TSAURL                string               `json:"tsaURL"`
+	TSAURLES              string               `json:"urlTSA"`
 }
 
 type restSignResponse struct {
@@ -259,8 +262,10 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 	mux.HandleFunc("/tls/trust-status", s.withAuth(s.handleTLSTrustStatus))
 	mux.HandleFunc("/tls/install-trust", s.withAuth(s.handleTLSInstallTrust))
 	mux.HandleFunc("/tls/generate-certs", s.withAuth(s.handleTLSGenerateCerts))
+	mux.HandleFunc("/trust/install-public-roots", s.withAuth(s.handleInstallPublicRoots))
 	mux.HandleFunc("/diagnostico/informe", s.withAuth(s.handleDiagnosticsReport))
 	mux.HandleFunc("/seguridad/dominios", s.withAuth(s.handleSecurityDomains))
+	mux.HandleFunc("/confianza/instalar-raices-publicas", s.withAuth(s.handleInstallPublicRoots))
 	mux.HandleFunc("/tls/limpiar-almacen", s.withAuth(s.handleTLSClearStore))
 	mux.HandleFunc("/tls/estado-confianza", s.withAuth(s.handleTLSTrustStatus))
 	mux.HandleFunc("/tls/instalar-confianza", s.withAuth(s.handleTLSInstallTrust))
@@ -271,6 +276,14 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 	mux.HandleFunc("/service/uninstall", s.withAuth(s.handleServiceUninstall))
 	mux.HandleFunc("/service/start", s.withAuth(s.handleServiceStart))
 	mux.HandleFunc("/service/stop", s.withAuth(s.handleServiceStop))
+
+	// User settings
+	mux.HandleFunc("/settings", s.withAuth(s.handleSettings))
+	mux.HandleFunc("/configuracion", s.withAuth(s.handleSettings))
+
+	// PDF Helpers
+	mux.HandleFunc("/pdf/preview", s.withAuth(s.handlePdfPreview))
+	mux.HandleFunc("/pdf/previsualizar", s.withAuth(s.handlePdfPreview))
 
 	log.Printf("[REST] Servidor API REST local activo en http://%s", addr)
 	log.Printf("[REST] Endpoints: / /auth/challenge /auth/verify /health /certificates /sign /verify /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs")
@@ -324,6 +337,10 @@ func runRESTServerOnSocket(socketPath string, token string, sessionTTL time.Dura
 	mux.HandleFunc("/certificados", s.withAuth(s.handleCertificates))
 	mux.HandleFunc("/firmar", s.withAuth(s.handleSign))
 	mux.HandleFunc("/verificar", s.withAuth(s.handleVerify))
+
+	// User settings
+	mux.HandleFunc("/settings", s.withAuth(s.handleSettings))
+	mux.HandleFunc("/configuracion", s.withAuth(s.handleSettings))
 
 	log.Printf("[REST-IPC] Servidor API REST activo en socket Unix: %s", socketPath)
 
@@ -667,6 +684,32 @@ func (s *restServer) handleSign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *restServer) handlePdfPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, restError{OK: false, Error: "method not allowed"})
+		return
+	}
+	var params struct {
+		Path string `json:"path"`
+		Page int    `json:"page"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "invalid request body"})
+		return
+	}
+	b64, width, height, err := s.core.GeneratePdfPreview(params.Path, params.Page)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":     true,
+		"data":   b64,
+		"width":  width,
+		"height": height,
+	})
+}
+
 func (s *restServer) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, restError{OK: false, Error: "method not allowed"})
@@ -774,6 +817,33 @@ func (s *restServer) handleDiagnosticsReport(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *restServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, struct {
+			OK       bool         `json:"ok"`
+			Settings UserSettings `json:"settings"`
+		}{OK: true, Settings: LoadUserSettings()})
+		return
+	}
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+		var req UserSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "json inválido"})
+			return
+		}
+		if err := SaveUserSettings(req); err != nil {
+			writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK       bool         `json:"ok"`
+			Settings UserSettings `json:"settings"`
+		}{OK: true, Settings: req})
+		return
+	}
+	writeJSON(w, http.StatusMethodNotAllowed, restError{OK: false, Error: "method not allowed"})
+}
+
 func (s *restServer) handleSecurityDomains(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -858,6 +928,19 @@ func (s *restServer) handleTLSInstallTrust(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	lines, err := installLocalTLSTrust()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, restTLSTrustStatusResponse{OK: true, Lines: lines})
+}
+
+func (s *restServer) handleInstallPublicRoots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, restError{OK: false, Error: "method not allowed"})
+		return
+	}
+	lines, err := installPublicAdminRoots()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
 		return
@@ -1002,17 +1085,34 @@ func selectCertificateForREST(certs []protocol.Certificate, req restSignRequest)
 func buildSignOptionsForREST(req restSignRequest) map[string]interface{} {
 	opts := map[string]interface{}{}
 	if req.VisibleSeal != nil {
-		opts["visibleSeal"] = true
-		opts["visibleSealRectX"] = clamp01(req.VisibleSeal.X) * 595.28
-		opts["visibleSealRectY"] = clamp01(req.VisibleSeal.Y) * 841.89
-		opts["visibleSealRectW"] = clamp01(req.VisibleSeal.W) * 595.28
-		opts["visibleSealRectH"] = clamp01(req.VisibleSeal.H) * 841.89
+		opts["visibleSignature"] = true
 		page := req.VisibleSeal.Page
 		if page == 0 {
 			page = 1
 		}
-		opts["page"] = page
+
+		// Obtener dimensiones reales para el escalado
+		pageW, pageH := 595.28, 841.89
+		if req.InputPath != "" {
+			if w, h, err := signer.GetPadesPageSize(req.InputPath, page); err == nil && w > 0 && h > 0 {
+				pageW, pageH = w, h
+				log.Printf("[REST] Dimensiones PDF detectadas: %.2f x %.2f", pageW, pageH)
+			}
+		}
+
+		opts["x"] = clamp01(req.VisibleSeal.X) * pageW
+		opts["y"] = clamp01(req.VisibleSeal.Y) * pageH
+		opts["width"] = clamp01(req.VisibleSeal.W) * pageW
+		opts["height"] = clamp01(req.VisibleSeal.H) * pageH
+		opts["page"] = int(page)
+		opts["rotation"] = req.VisibleSeal.Rotation
 	}
+	if req.TSAURL != "" {
+		opts["tsaURL"] = req.TSAURL
+	} else if req.TSAURLES != "" {
+		opts["tsaURL"] = req.TSAURLES
+	}
+
 	if len(opts) == 0 {
 		return nil
 	}

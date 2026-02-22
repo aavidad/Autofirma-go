@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/digitorus/pdf"
 	pdfsign "github.com/digitorus/pdfsign/sign"
 	pdfverify "github.com/digitorus/pdfsign/verify"
 
@@ -210,6 +211,72 @@ func signDigestWithWindowsStoreKey(thumbprint string, digest []byte, hashName st
 	return sig, nil
 }
 
+// GetPadesPageSize extrae el tamaño de una página específica de un PDF en puntos
+func GetPadesPageSize(pdfPath string, pageNum uint32) (float64, float64, error) {
+	if pageNum == 0 {
+		pageNum = 1
+	}
+	r, err := pdf.Open(pdfPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	if r.NumPage() < int(pageNum) {
+		return 0, 0, fmt.Errorf("página %d no encontrada", pageNum)
+	}
+
+	p := r.Page(int(pageNum))
+	if p.V.IsNull() {
+		return 0, 0, fmt.Errorf("página %d no válida", pageNum)
+	}
+
+	box := inheritedPageBox(p.V, "CropBox")
+	if box.IsNull() {
+		box = inheritedPageBox(p.V, "MediaBox")
+	}
+	if box.IsNull() || box.Len() < 4 {
+		return 0, 0, fmt.Errorf("no se pudo obtener dimensiones de la página %d", pageNum)
+	}
+
+	llx := box.Index(0).Float64()
+	lly := box.Index(1).Float64()
+	urx := box.Index(2).Float64()
+	ury := box.Index(3).Float64()
+	w := urx - llx
+	h := ury - lly
+
+	// Respetar la rotación intrínseca de la página para el escalado visual
+	rotate := inheritedPageInt(p.V, "Rotate")
+	if rotate == 90 || rotate == 270 || rotate == -90 || rotate == -270 {
+		w, h = h, w
+	}
+
+	if w <= 0 || h <= 0 {
+		return 0, 0, fmt.Errorf("dimensiones de página inválidas: %f x %f", w, h)
+	}
+
+	return w, h, nil
+}
+
+func inheritedPageInt(v pdf.Value, key string) int64 {
+	for !v.IsNull() {
+		if val := v.Key(key); !val.IsNull() {
+			return val.Int64()
+		}
+		v = v.Key("Parent")
+	}
+	return 0
+}
+
+func inheritedPageBox(v pdf.Value, key string) pdf.Value {
+	for !v.IsNull() {
+		if box := v.Key(key); !box.IsNull() {
+			return box
+		}
+		v = v.Key("Parent")
+	}
+	return pdf.Value{}
+}
+
 func verifyPadesWithGo(pdfFile string) (*protocol.VerifyResult, error) {
 	f, err := os.Open(pdfFile)
 	if err != nil {
@@ -395,18 +462,24 @@ func applyPadesAppearanceOptions(signData *pdfsign.SignData, options map[string]
 	y := optionFloat64(options, "y", 0)
 	w := optionFloat64(options, "width", 0)
 	h := optionFloat64(options, "height", 0)
+	rotation := optionInt(options, "rotation", 0)
 
 	if w <= 0 || h <= 0 {
 		return
 	}
 
+	if rotation != 0 {
+		fmt.Printf("[Signer] Rotación de firma solicitada: %d grados\n", rotation)
+	}
+
+	signData.Appearance.Rotation = rotation
 	signData.Appearance.Visible = true
 	signData.Appearance.Page = page
 	signData.Appearance.LowerLeftX = x
 	signData.Appearance.LowerLeftY = y
 	signData.Appearance.UpperRightX = x + w
 	signData.Appearance.UpperRightY = y + h
-	signData.Appearance.Text = buildPadesVisibleSignatureText(cert, signingTime)
+	signData.Appearance.Text = buildPadesVisibleSignatureText(options, cert, signingTime)
 }
 
 func buildCertificateLabel(options map[string]interface{}) string {
@@ -424,12 +497,68 @@ func buildCertificateLabel(options map[string]interface{}) string {
 	}
 }
 
-func buildPadesVisibleSignatureText(cert *x509.Certificate, signingTime time.Time) string {
-	cn := "Desconocido"
-	if cert != nil {
-		if v := strings.TrimSpace(cert.Subject.CommonName); v != "" {
-			cn = v
+func buildPadesVisibleSignatureText(options map[string]interface{}, cert *x509.Certificate, signingTime time.Time) string {
+	signerName := optionString(options, "signerName", "")
+	if signerName == "" && cert != nil {
+		signerName = cert.Subject.CommonName
+	}
+	if signerName == "" {
+		signerName = "Desconocido"
+	}
+
+	signerDNI := optionString(options, "signerDNI", "")
+	issuerName := optionString(options, "issuerName", "")
+	issuerOrg := optionString(options, "issuerOrg", "")
+
+	text := "Firmado digitalmente por:\n" + signerName
+	if signerDNI != "" {
+		text += "\nID: " + signerDNI
+	}
+
+	issuerLabel := ""
+	if issuerName != "" && issuerOrg != "" {
+		issuerLabel = issuerOrg + " (" + issuerName + ")"
+	} else if issuerName != "" {
+		issuerLabel = issuerName
+	} else if issuerOrg != "" {
+		issuerLabel = issuerOrg
+	}
+
+	if issuerLabel != "" {
+		text += "\nEmitido por: " + issuerLabel
+	} else {
+		text += "\nEmitido por un certificado cualificado"
+	}
+
+	text += "\nFecha: " + signingTime.Format("02/01/2006 15:04:05")
+	return text
+}
+
+func optionInt(options map[string]interface{}, key string, def int) int {
+	if options == nil {
+		return def
+	}
+	v, ok := options[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		s := strings.TrimSpace(n)
+		if s == "" {
+			return def
+		}
+		if parsed, err := strconv.Atoi(s); err == nil {
+			return parsed
 		}
 	}
-	return "CN=" + cn + "\nFirmado el " + signingTime.Format("02/01/2006 15:04:05") + " por un certificado de la FNMT"
+	return def
 }
