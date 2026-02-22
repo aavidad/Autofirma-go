@@ -101,12 +101,12 @@ void IpcBridge::launchBackendProcess() {
   // Find autofirma-desktop binary
   QString appDir = QCoreApplication::applicationDirPath();
   QStringList candidates = {
-      QDir(appDir).filePath("autofirma-host"),
       QDir(appDir).filePath("autofirma-desktop"),
-      QDir(appDir).filePath("../autofirma-host"),
       QDir(appDir).filePath("../autofirma-desktop"),
-      QStandardPaths::findExecutable("autofirma-host"),
       QStandardPaths::findExecutable("autofirma-desktop"),
+      QDir(appDir).filePath("autofirma-host"),
+      QDir(appDir).filePath("../autofirma-host"),
+      QStandardPaths::findExecutable("autofirma-host"),
   };
   QString bin;
   for (const auto &c : candidates) {
