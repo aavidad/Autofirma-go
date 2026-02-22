@@ -1,8 +1,10 @@
 #include "backendbridge.h"
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -31,7 +33,8 @@ void BackendBridge::setStatus(const QString &s) {
   }
 }
 
-void BackendBridge::startBackend(const QString &addr, const QString &token) {
+void BackendBridge::startBackend(const QString &addr, const QString &token,
+                                 const QString &mode) {
   m_addr = addr;
   m_token = token;
 
@@ -47,7 +50,7 @@ void BackendBridge::startBackend(const QString &addr, const QString &token) {
   m_process->setProgram(desktopBin);
 
   QStringList args;
-  args << "--rest" << "--rest-addr" << m_addr;
+  args << "--server" << "--server-modo" << mode << "--rest-addr" << m_addr;
   if (!m_token.isEmpty())
     args << "--rest-token" << m_token;
 
@@ -86,6 +89,12 @@ void BackendBridge::onBackendReadyRead() {
     emit backendLogReceived(out);
   if (!err.isEmpty())
     emit backendLogReceived(err);
+}
+
+void BackendBridge::openExternal(const QString &path) {
+  if (path.isEmpty())
+    return;
+  QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 void BackendBridge::verifyFile(const QString &inputPath) {
@@ -195,7 +204,8 @@ void BackendBridge::signFileAdvanced(const QString &inputPath,
     body.insert("format", format);
   if (!overwrite.isEmpty())
     body.insert("overwrite", overwrite);
-  body.insert("allowInvalidPDF", options.value("allowInvalidPDF", false).toBool());
+  body.insert("allowInvalidPDF",
+              options.value("allowInvalidPDF", false).toBool());
   body.insert("strictCompat", options.value("strictCompat", false).toBool());
   body.insert("saveToDisk", options.value("saveToDisk", true).toBool());
   body.insert("returnSignatureB64",
@@ -273,7 +283,7 @@ void BackendBridge::signFileAdvanced(const QString &inputPath,
 }
 
 void BackendBridge::onNetworkReplyFinished(QNetworkReply *reply) {
-  // General handler if needed
+  Q_UNUSED(reply);
 }
 
 void BackendBridge::openCertManager() {
@@ -303,19 +313,109 @@ void BackendBridge::openHelpManual() {
 }
 
 void BackendBridge::checkCertificates() {
-  refreshCertificates(); // Basic check
+  emit backendLogReceived("⚙ Realizando chequeo exhaustivo de certificados...");
+  QUrl url("http://" + m_addr + "/certificates?check=true");
+  QNetworkRequest req(url);
+  if (!m_token.isEmpty())
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+
+  QNetworkReply *reply = m_nam->get(req);
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (reply->error() == QNetworkReply::NoError) {
+      QByteArray data = reply->readAll();
+      QJsonDocument doc = QJsonDocument::fromJson(data);
+      QJsonArray certs = doc.object().value("certificates").toArray();
+      QVariantList list;
+      for (const auto &c : certs)
+        list << c.toVariant();
+      emit certificatesLoaded(list);
+      setStatus("Chequeo de certificados finalizado.");
+      emit backendLogReceived(
+          "ℹ️ Chequeo exhaustivo de certificados completado.");
+    } else {
+      emit backendLogReceived("Error en chequeo: " + reply->errorString());
+      setStatus("Error en chequeo certificados");
+    }
+    reply->deleteLater();
+  });
 }
 
 void BackendBridge::runTLSDiagnostics() {
-  setStatus("Diagnóstico TLS no disponible en este modo.");
+  emit backendLogReceived("⚙ Obteniendo diagnóstico TLS...");
+  QUrl url("http://" + m_addr + "/tls/trust-status");
+  QNetworkRequest req(url);
+  if (!m_token.isEmpty())
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+
+  QNetworkReply *reply = m_nam->get(req);
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (reply->error() == QNetworkReply::NoError) {
+      QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+      QJsonArray lines = doc.object().value("lines").toArray();
+      QString msg = "Diagnóstico TLS:\n";
+      for (const auto &v : lines)
+        msg += v.toString() + "\n";
+      emit backendLogReceived(msg);
+      setStatus("Diagnóstico TLS finalizado");
+    } else {
+      emit backendLogReceived("Error al obtener diagnóstico: " +
+                              reply->errorString());
+    }
+    reply->deleteLater();
+  });
 }
 
 void BackendBridge::exportDiagnosticReport() {
-  setStatus("Exportación de diagnóstico no implementada.");
+  emit backendLogReceived("⚙ Generando reporte de diagnóstico completo...");
+  QUrl url("http://" + m_addr + "/diagnostics/report");
+  QNetworkRequest req(url);
+  if (!m_token.isEmpty())
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+
+  QNetworkReply *reply = m_nam->get(req);
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (reply->error() == QNetworkReply::NoError) {
+      QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+      QJsonObject res = doc.object();
+      emit backendLogReceived(
+          QString("Diagnóstico: %1 certs encontrados, %2 válidos para "
+                  "firmar.\nAlmacén de confianza: %3 certificados instalados "
+                  "en %4.\nRegistro de confianza TLS:\n%5")
+              .arg(res.value("certificateCount").toInt())
+              .arg(res.value("canSignCount").toInt())
+              .arg(res.value("endpointStoreCount").toInt())
+              .arg(res.value("endpointStoreDir").toString())
+              .arg(res.value("trustStatusLines").toString()));
+      setStatus("Diagnóstico completo generado en el log.");
+    } else {
+      emit backendLogReceived("Error al obtener reporte: " +
+                              reply->errorString());
+    }
+    reply->deleteLater();
+  });
 }
 
 void BackendBridge::clearTLSTrustStore() {
-  setStatus("Almacén TLS no gestionado en este modo.");
+  emit backendLogReceived("⚙ Vaciando almacén TLS de confianza...");
+  QUrl url("http://" + m_addr + "/tls/clear-store");
+  QNetworkRequest req(url);
+  if (!m_token.isEmpty())
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+
+  QNetworkReply *reply = m_nam->post(req, QByteArray());
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (reply->error() == QNetworkReply::NoError) {
+      QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+      int removed = doc.object().value("removed").toInt();
+      emit backendLogReceived(
+          QString("Certificados eliminados del almacén: %1").arg(removed));
+      setStatus("Almacén TLS limpiado.");
+    } else {
+      emit backendLogReceived("Error al vaciar almacén: " +
+                              reply->errorString());
+    }
+    reply->deleteLater();
+  });
 }
 
 // ─── Service management helpers ──────────────────────────────────────────────
@@ -394,6 +494,38 @@ void BackendBridge::stopService() {
     QString msg =
         ok ? obj.value("message").toString() : obj.value("error").toString();
     emit serviceActionFinished(ok, msg);
+    reply->deleteLater();
+  });
+}
+
+void BackendBridge::getSettings() {
+  auto req = BackendBridgeMakeReq(m_addr, m_token, "/settings");
+  QNetworkReply *reply = m_nam->get(req);
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (reply->error() == QNetworkReply::NoError) {
+      QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+      // El backend devuelve { "ok": true, "settings": { ... } }
+      emit settingsLoaded(obj.value("settings").toObject().toVariantMap());
+    } else {
+      emit backendLogReceived("Error al obtener ajustes: " +
+                              reply->errorString());
+    }
+    reply->deleteLater();
+  });
+}
+
+void BackendBridge::saveSettings(const QVariantMap &settings) {
+  auto req = BackendBridgeMakeReq(m_addr, m_token, "/settings");
+  QByteArray data = QJsonDocument::fromVariant(settings).toJson();
+  QNetworkReply *reply = m_nam->post(req, data);
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    if (reply->error() == QNetworkReply::NoError) {
+      emit backendLogReceived("Ajustes guardados correctamente");
+      setStatus("Ajustes guardados");
+    } else {
+      emit backendLogReceived("Error al guardar ajustes: " +
+                              reply->errorString());
+    }
     reply->deleteLater();
   });
 }

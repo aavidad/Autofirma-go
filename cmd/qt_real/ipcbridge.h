@@ -1,10 +1,16 @@
 #ifndef IPCBRIDGE_H
 #define IPCBRIDGE_H
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLocalSocket>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -20,7 +26,8 @@ public:
 
   QString status() const { return m_status; }
 
-  Q_INVOKABLE void startBackend(const QString &socketPath);
+  Q_INVOKABLE void startBackend(const QString &addr, const QString &token = "",
+                                const QString &mode = "ipc");
   Q_INVOKABLE void stopBackend();
   Q_INVOKABLE void refreshCertificates();
   Q_INVOKABLE void signFile(const QString &inputPath, const QString &outputPath,
@@ -29,6 +36,8 @@ public:
                                     const QString &outputPath, int certIndex,
                                     const QVariantMap &options);
   Q_INVOKABLE void verifyFile(const QString &inputPath);
+  Q_INVOKABLE void updateStatus(const QString &msg) { setStatus(msg); }
+  Q_INVOKABLE void openExternal(const QString &path);
   Q_INVOKABLE void openCertManager();
   Q_INVOKABLE void openLogFolder();
   Q_INVOKABLE void openHelpManual();
@@ -42,6 +51,8 @@ public:
   Q_INVOKABLE void uninstallService();
   Q_INVOKABLE void startService();
   Q_INVOKABLE void stopService();
+  Q_INVOKABLE void getSettings();
+  Q_INVOKABLE void saveSettings(const QVariantMap &settings);
 
   bool expertMode() const { return m_expertMode; }
   void setExpertMode(bool v);
@@ -56,6 +67,7 @@ signals:
   void serviceStatusReceived(bool installed, bool running, QString platform,
                              QString method);
   void serviceActionFinished(bool ok, QString message);
+  void settingsLoaded(QVariantMap settings);
 
 private slots:
   void onReadyRead();
@@ -73,10 +85,14 @@ private:
   }
 
   QLocalSocket *m_socket;
+  QNetworkAccessManager *m_nam = nullptr;
   QProcess *m_process = nullptr;
   QString m_status = "Iniciando IPC...";
   bool m_expertMode = false;
-  QString m_socketPath;
+  QString m_addr;
+  QString m_token;
+  QString m_socketPath; // For socket connection
+  QString m_serverMode = "ipc";
   int m_retryCount = 0;
   QString m_pendingAction; // ultima accion enviada, para distinguir respuestas
 };

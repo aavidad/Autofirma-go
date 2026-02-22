@@ -1,6 +1,7 @@
 #include "backendbridge.h"
 #include "ipcbridge.h"
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -8,6 +9,7 @@
 #include <QObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QStandardPaths>
 #include <QString>
 #include <QTcpSocket>
 #include <QUrl>
@@ -22,35 +24,30 @@ int main(int argc, char *argv[]) {
       useRest = true;
   }
 
-  QString ipcPath;
-#if defined(Q_OS_WIN)
-  ipcPath = "\\\\.\\pipe\\autofirma_ipc";
-#else
-  ipcPath = "/tmp/autofirma_ipc.sock";
-#endif
-
-  if (!useRest) {
-    QLocalSocket testIpc;
-    testIpc.connectToServer(ipcPath);
-    if (testIpc.waitForConnected(200)) {
-      testIpc.disconnectFromServer();
-    } else {
-      QTcpSocket testRest;
-      testRest.connectToHost("127.0.0.1", 63118);
-      if (testRest.waitForConnected(200)) {
-        testRest.disconnectFromHost();
-        qDebug() << "[Init] IPC no responde pero REST si. Fallback a REST "
-                    "automatico.";
-        useRest = true;
-      }
-    }
-  }
-
   bool useIpc = !useRest;
 
   QGuiApplication app(argc, argv);
   app.setApplicationName("AutoFirma Dipgra");
   app.setOrganizationName("Diputacion de Granada");
+
+  QString userName = QDir::home().dirName();
+  if (userName.isEmpty())
+    userName = "default";
+
+  QString ipcPath;
+#if defined(Q_OS_WIN)
+  ipcPath = "\\\\.\\pipe\\autofirma_ipc_" + userName;
+#else
+  // Usar /run/user/UID (XDG_RUNTIME_DIR) para mayor seguridad si está
+  // disponible
+  QString runtimeDir =
+      QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+  if (runtimeDir.isEmpty())
+    runtimeDir = QDir::tempPath();
+  ipcPath =
+      QDir(runtimeDir).absoluteFilePath("autofirma_ipc_" + userName + ".sock");
+#endif
+  qDebug() << "[Main] Ruta IPC sugerida:" << ipcPath;
 
   BackendBridge restBridge;
   IpcBridge ipcBridge;

@@ -1,6 +1,9 @@
 #ifndef BACKENDBRIDGE_H
 #define BACKENDBRIDGE_H
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QObject>
@@ -23,7 +26,8 @@ public:
   bool expertMode() const { return m_expertMode; }
   void setExpertMode(bool v);
 
-  Q_INVOKABLE void startBackend(const QString &addr, const QString &token);
+  Q_INVOKABLE void startBackend(const QString &addr, const QString &token,
+                                const QString &mode = "rest");
   Q_INVOKABLE void stopBackend();
   Q_INVOKABLE void signFile(const QString &inputPath, const QString &outputPath,
                             int certIndex, const QString &format);
@@ -33,6 +37,7 @@ public:
   Q_INVOKABLE void refreshCertificates();
   Q_INVOKABLE void verifyFile(const QString &inputPath);
   Q_INVOKABLE void updateStatus(const QString &msg) { setStatus(msg); }
+  Q_INVOKABLE void openExternal(const QString &path);
   Q_INVOKABLE void openCertManager();
   Q_INVOKABLE void openLogFolder();
   Q_INVOKABLE void openHelpManual();
@@ -46,6 +51,8 @@ public:
   Q_INVOKABLE void uninstallService();
   Q_INVOKABLE void startService();
   Q_INVOKABLE void stopService();
+  Q_INVOKABLE void getSettings();
+  Q_INVOKABLE void saveSettings(const QVariantMap &settings);
 
 signals:
   void statusChanged();
@@ -57,6 +64,7 @@ signals:
   void serviceStatusReceived(bool installed, bool running, QString platform,
                              QString method);
   void serviceActionFinished(bool ok, QString message);
+  void settingsLoaded(QVariantMap settings);
 
 private slots:
   void onBackendReadyRead();

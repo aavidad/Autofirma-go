@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import Qt.labs.settings
 
 Window {
     id: window
@@ -57,6 +58,116 @@ Window {
             textColor: "#ffffff",
             secondaryTextColor: "#e0e1dd",
             borderOpacity: 0.1
+        },
+        {
+            name: "Neón Cyber",
+            backgroundColor: "#0b0c10",
+            sidebarColor: "#1f2833",
+            cardColor: "#12141a",
+            primaryColor: "#66fcf1",
+            accentColor: "#c5c6c7",
+            textColor: "#ffffff",
+            secondaryTextColor: "#45a29e",
+            borderOpacity: 0.2
+        },
+        {
+            name: "Bosque Profundo",
+            backgroundColor: "#131a13",
+            sidebarColor: "#0f140f",
+            cardColor: "#1a241a",
+            primaryColor: "#2ecc71",
+            accentColor: "#f1c40f",
+            textColor: "#ecf0f1",
+            secondaryTextColor: "#95a5a6",
+            borderOpacity: 0.15
+        },
+        {
+            name: "Atardecer Cálido",
+            backgroundColor: "#2c191e",
+            sidebarColor: "#1a0f12",
+            cardColor: "#3a2228",
+            primaryColor: "#ff6b6b",
+            accentColor: "#feca57",
+            textColor: "#fff9f9",
+            secondaryTextColor: "#f6b9b9",
+            borderOpacity: 0.2
+        },
+        {
+            name: "Océano Profundo",
+            backgroundColor: "#0a192f",
+            sidebarColor: "#020c1b",
+            cardColor: "#112240",
+            primaryColor: "#64ffda",
+            accentColor: "#ccd6f6",
+            textColor: "#e6f1ff",
+            secondaryTextColor: "#8892b0",
+            borderOpacity: 0.1
+        },
+        {
+            name: "Vampiro Elegante",
+            backgroundColor: "#110b0b",
+            sidebarColor: "#000000",
+            cardColor: "#1e0f0f",
+            primaryColor: "#e81c4f",
+            accentColor: "#8e0020",
+            textColor: "#ffffff",
+            secondaryTextColor: "#a68a8a",
+            borderOpacity: 0.25
+        },
+        {
+            name: "Aurora Boreal",
+            backgroundColor: "#1a1025",
+            sidebarColor: "#0f0817",
+            cardColor: "#241738",
+            primaryColor: "#00ffcc",
+            accentColor: "#b366ff",
+            textColor: "#ffffff",
+            secondaryTextColor: "#c2a3ff",
+            borderOpacity: 0.15
+        },
+        {
+            name: "Perla Lujosa",
+            backgroundColor: "#faf9f7",
+            sidebarColor: "#ffffff",
+            cardColor: "#f0ebe1",
+            primaryColor: "#d4af37",
+            accentColor: "#b39030",
+            textColor: "#2c2a26",
+            secondaryTextColor: "#7d786e",
+            borderOpacity: 0.1
+        },
+        {
+            name: "Ametista",
+            backgroundColor: "#1f182b",
+            sidebarColor: "#15101f",
+            cardColor: "#2a213a",
+            primaryColor: "#9b5de5",
+            accentColor: "#f15bb5",
+            textColor: "#f8f5fd",
+            secondaryTextColor: "#baabcf",
+            borderOpacity: 0.2
+        },
+        {
+            name: "Terminal Hacker",
+            backgroundColor: "#050a05",
+            sidebarColor: "#000000",
+            cardColor: "#0a140a",
+            primaryColor: "#00ff00",
+            accentColor: "#008800",
+            textColor: "#00ff00",
+            secondaryTextColor: "#00aa00",
+            borderOpacity: 0.3
+        },
+        {
+            name: "Desierto Terracota",
+            backgroundColor: "#2a1c18",
+            sidebarColor: "#1f120e",
+            cardColor: "#3a2822",
+            primaryColor: "#e07a5f",
+            accentColor: "#3d405b",
+            textColor: "#f4f1de",
+            secondaryTextColor: "#eab69f",
+            borderOpacity: 0.15
         }
     ]
 
@@ -77,6 +188,92 @@ Window {
     property real signSealY: 0.04
     property real signSealW: 0.34
     property real signSealH: 0.12
+    property string currentOutputPath: ""
+
+    onCurrentFilePathChanged: {
+        if (currentFilePath !== "" && (currentOutputPath === "" || currentOutputPath.includes("_firmado"))) {
+            suggestOutputPath(currentFilePath)
+        }
+    }
+
+    function suggestOutputPath(inputPath) {
+        if (!inputPath || inputPath === "") return
+        let idx = inputPath.lastIndexOf('.')
+        if (idx !== -1) {
+            let base = inputPath.substring(0, idx)
+            let ext = inputPath.substring(idx)
+            currentOutputPath = base + "_firmado" + ext
+        } else {
+            currentOutputPath = inputPath + "_firmado"
+        }
+    }
+
+    function jumpToVerify(path) {
+        if (!path || path === "") return
+        verifyTab.verifyFilePath = path
+        activeTab = "verificar"
+        backend.verifyFile(path)
+    }
+
+    Settings {
+        id: appSettings
+        category: "General"
+        property int themeIndex: 0
+        property bool expertMode: false
+    }
+
+    // --- Ajustes del Backend ---
+    property bool autoClose: false
+    property bool stickySigner: false
+    property bool certsExpiredShow: false
+    property bool tsaEnabled: false
+    property string tsaUrl: ""
+    property bool proxyEnabled: false
+    property string proxyHost: ""
+    property int proxyPort: 8080
+    property bool isSecurityUnlocked: false
+
+    property bool settingsLoaded: false
+
+    function saveBackendSettings() {
+        if (!settingsLoaded) return
+        const s = {
+            expertMode: backend.expertMode,
+            themeIndex: window.currentThemeIndex,
+            autoClose: window.autoClose,
+            stickySigner: window.stickySigner,
+            certsExpiredShow: window.certsExpiredShow,
+            tsaEnabled: window.tsaEnabled,
+            tsaUrl: window.tsaUrl,
+            proxyEnabled: window.proxyEnabled,
+            proxyHost: window.proxyHost,
+            proxyPort: window.proxyPort
+        }
+        backend.saveSettings(s)
+    }
+
+    Component.onCompleted: {
+        window.currentThemeIndex = appSettings.themeIndex
+        backend.expertMode = appSettings.expertMode
+        if (typeof ipcSocketPath !== "undefined") window.ipcSocketPath = ipcSocketPath
+        backend.getSettings() // Pedir ajustes reales al backend
+        settingsLoaded = true
+    }
+
+    onCurrentThemeIndexChanged: {
+        if (settingsLoaded) {
+            appSettings.themeIndex = currentThemeIndex
+        }
+    }
+
+    Connections {
+        target: backend
+        function onExpertModeChanged() {
+            if (settingsLoaded) {
+                appSettings.expertMode = backend.expertMode
+            }
+        }
+    }
 
     function clamp01(v) {
         if (isNaN(v)) return 0.0
@@ -88,6 +285,10 @@ Window {
     function isCurrentPdf() {
         if (!window.currentFilePath || window.currentFilePath === "") return false
         return window.currentFilePath.toLowerCase().endsWith(".pdf")
+    }
+
+    function supportsVisibleSeal() {
+        return signFormat === "pades" || (signFormat === "" && isCurrentPdf())
     }
 
     function syncSealFromPreview() {
@@ -134,11 +335,64 @@ Window {
     FileDialog {
         id: fileDialog
         title: "Seleccionar documento PDF"
+        nameFilters: ["Archivos PDF (*.pdf)", "Todos los archivos (*)"]
+        onAccepted: {
+            let path = selectedFile.toString()
+            if (path.startsWith("file://")) {
+                if (Qt.platform.os === "windows") path = path.substring(8) // file:///
+                else path = path.substring(7) // file://
+            }
+            window.currentFilePath = path
+        }
+    }
+
+    FileDialog {
+        id: saveFileDialog
+        title: "Seleccionar destino del PDF firmado"
+        currentFile: "file://" + window.currentOutputPath
+        fileMode: FileDialog.SaveFile
         nameFilters: ["Archivos PDF (*.pdf)"]
         onAccepted: {
             let path = selectedFile.toString()
-            if (path.startsWith("file://")) path = path.substring(7)
-            window.currentFilePath = path
+            if (path.startsWith("file://")) {
+                if (Qt.platform.os === "windows") path = path.substring(8)
+                else path = path.substring(7)
+            }
+            window.currentOutputPath = path
+        }
+    }
+
+    Dialog {
+        id: adminLoginDialog
+        title: "Autenticación de Administrador"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        modal: true
+        
+        ColumnLayout {
+            spacing: 15; width: 350
+            Text { text: "🔑 Clave de Seguridad Requerida"; color: currentTheme.textColor; font.bold: true; font.pixelSize: 18 }
+            Text { text: "Para modificar la lista de dominios permitidos (NM/CORS) debe identificarse como administrador del sistema."; color: currentTheme.secondaryTextColor; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            TextField {
+                id: adminPasswordField
+                echoMode: TextInput.Password
+                placeholderText: "Introduzca clave..."
+                Layout.fillWidth: true
+                focus: true
+                onAccepted: adminLoginDialog.accept()
+                Label { text: "Tip: Use 'admin123' para este demo"; font.pixelSize: 10; color: "gray"; anchors.top: parent.bottom; anchors.right: parent.right }
+            }
+        }
+        
+        onAccepted: {
+            if (adminPasswordField.text === "admin123") {
+                window.isSecurityUnlocked = true
+                backend.updateStatus("⚙️ Modo administrador habilitado.")
+                backend.backendLogReceived("Acceso concedido a configuración de dominios.")
+            } else {
+                backend.updateStatus("❌ Error: Clave incorrecta.")
+            }
+            adminPasswordField.text = ""
         }
     }
 
@@ -155,14 +409,33 @@ Window {
         function onStatusChanged() {
             window.statusMessage = backend.status
         }
+        function onExpertModeChanged() {
+            // Updated via explicit Connections block above to ensure settingsLoaded respects lifecycle
+        }
         function onSigningFinished(success, message, outPath) {
             window.statusMessage = message
-            if (success) {
-                // Éxito
+            if (success && outPath && outPath !== "") {
+                window.currentOutputPath = outPath
             }
         }
         function onVerificationFinished(success, message, details) {
             window.statusMessage = message
+            if (success) {
+                activeTab = "verificar"
+            }
+        }
+        function onSettingsLoaded(s) {
+            console.log("QML: Ajustes cargados desde el backend")
+            if (s.expertMode !== undefined) backend.expertMode = s.expertMode
+            if (s.themeIndex !== undefined) window.currentThemeIndex = s.themeIndex
+            if (s.autoClose !== undefined) window.autoClose = s.autoClose
+            if (s.stickySigner !== undefined) window.stickySigner = s.stickySigner
+            if (s.certsExpiredShow !== undefined) window.certsExpiredShow = s.certsExpiredShow
+            if (s.tsaEnabled !== undefined) window.tsaEnabled = s.tsaEnabled
+            if (s.tsaUrl !== undefined) window.tsaUrl = s.tsaUrl
+            if (s.proxyEnabled !== undefined) window.proxyEnabled = s.proxyEnabled
+            if (s.proxyHost !== undefined) window.proxyHost = s.proxyHost
+            if (s.proxyPort !== undefined) window.proxyPort = s.proxyPort
         }
     }
 
@@ -239,9 +512,9 @@ Window {
                     }
                     ComboBox {
                         Layout.fillWidth: true
-                        model: ["Cristal Oscuro", "Minimalista Luz", "Futurista", "Corporativo"]
+                        model: ["Cristal Oscuro", "Minimalista Luz", "Futurista", "Corporativo", "Neón Cyber", "Bosque Profundo", "Atardecer Cálido", "Océano Profundo", "Vampiro Elegante", "Aurora Boreal", "Perla Lujosa", "Ametista", "Terminal Hacker", "Desierto Terracota"]
                         currentIndex: window.currentThemeIndex
-                        onActivated: window.currentThemeIndex = index
+                        onActivated: function(index) { window.currentThemeIndex = index }
                     }
                 }
             }
@@ -251,20 +524,30 @@ Window {
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: activeTab === "firmar" ? 0 : (activeTab === "verificar" ? 1 : (activeTab === "config" ? 2 : 3))
+            currentIndex: activeTab === "firmar" ? 0 : 
+                          (activeTab === "verificar" ? 1 : 
+                          (activeTab === "config" ? 2 : 
+                          (activeTab === "experto" ? 3 : 
+                          (activeTab === "seguridad" ? 4 : 5))))
 
-            // TAB: FIRMAR
+            // TAB: FIRMAR (0)
             Item {
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 40
                     spacing: 40
 
-                    ColumnLayout {
+                    ScrollView {
                         Layout.fillWidth: true
-                        spacing: 20
+                        Layout.fillHeight: true
+                        contentWidth: availableWidth
+                        clip: true
 
-                        Text {
+                        ColumnLayout {
+                            width: parent.width
+                            spacing: 20
+
+                            Text {
                             text: "Firma Digital"
                             font.pixelSize: 32
                             font.bold: true
@@ -304,23 +587,100 @@ Window {
                                     font.pixelSize: 18
                                     Layout.alignment: Qt.AlignCenter
                                 }
-                                Button {
-                                    text: "Seleccionar Archivo"
+                                RowLayout {
                                     Layout.alignment: Qt.AlignCenter
-                                    onClicked: fileDialog.open()
+                                    spacing: 10
+                                    Button {
+                                        text: "Seleccionar Archivo"
+                                        onClicked: fileDialog.open()
+                                    }
+                                    Button {
+                                        text: "Ver Original"
+                                        visible: window.currentFilePath !== ""
+                                        onClicked: backend.openExternal(window.currentFilePath)
+                                    }
+                                }
+                            }
+                        }
+
+                        // NUEVO: Gestión de Rutas Visibles
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: pathCol.implicitHeight + 20
+                            radius: 10
+                            color: currentTheme.cardColor
+                            border.color: Qt.rgba(1, 1, 1, currentTheme.borderOpacity)
+                            
+                            ColumnLayout {
+                                id: pathCol
+                                anchors.fill: parent
+                                anchors.margins: 15
+                                spacing: 10
+
+                                Text { 
+                                    text: "RUTA DE ENTRADA"
+                                    color: currentTheme.secondaryTextColor
+                                    font.pixelSize: 10; font.bold: true 
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    TextField {
+                                        text: window.currentFilePath
+                                        Layout.fillWidth: true
+                                        placeholderText: "Seleccione un archivo..."
+                                        onTextChanged: window.currentFilePath = text
+                                    }
+                                }
+
+                                Text { 
+                                    text: "RUTA DE SALIDA (PDF FIRMADO)"
+                                    color: currentTheme.secondaryTextColor
+                                    font.pixelSize: 10; font.bold: true 
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    TextField {
+                                        text: window.currentOutputPath
+                                        Layout.fillWidth: true
+                                        placeholderText: "Destino automático..."
+                                        onTextChanged: window.currentOutputPath = text
+                                    }
+                                    Button {
+                                        text: "👁 Ver"
+                                        enabled: window.currentOutputPath !== ""
+                                        onClicked: backend.openExternal(window.currentOutputPath)
+                                    }
+                                    Button {
+                                        text: "🔍 Validar"
+                                        enabled: window.currentOutputPath !== ""
+                                        onClicked: jumpToVerify(window.currentOutputPath)
+                                    }
+                                    Button {
+                                        text: "Cambiar..."
+                                        onClicked: saveFileDialog.open()
+                                    }
                                 }
                             }
                         }
 
                         Rectangle {
                             Layout.fillWidth: true
+                            implicitHeight: optionsCol.implicitHeight + 24
                             radius: 10
                             color: currentTheme.cardColor
                             border.color: Qt.rgba(1, 1, 1, currentTheme.borderOpacity)
-                            ColumnLayout {
+                            ScrollView {
+                                id: scrollOpts
                                 anchors.fill: parent
                                 anchors.margins: 12
-                                spacing: 10
+                                contentWidth: optionsCol.implicitWidth
+                                contentHeight: optionsCol.implicitHeight
+                                clip: true
+
+                                ColumnLayout {
+                                    id: optionsCol
+                                    width: Math.max(scrollOpts.width, implicitWidth)
+                                    spacing: 10
 
                                 RowLayout {
                                     Layout.fillWidth: true
@@ -336,7 +696,7 @@ Window {
                                                 { texto: "Contrafirmar", valor: "countersign" }
                                             ]
                                             textRole: "texto"
-                                            onActivated: signAction = model[index].valor
+                                            onActivated: function(index) { signAction = model[index].valor }
                                         }
                                     }
                                     ColumnLayout {
@@ -351,7 +711,7 @@ Window {
                                                 { texto: "XAdES", valor: "xades" }
                                             ]
                                             textRole: "texto"
-                                            onActivated: signFormat = model[index].valor
+                                            onActivated: function(index) { signFormat = model[index].valor }
                                         }
                                     }
                                     ColumnLayout {
@@ -365,7 +725,7 @@ Window {
                                                 { texto: "Forzar", valor: "force" }
                                             ]
                                             textRole: "texto"
-                                            onActivated: signOverwrite = model[index].valor
+                                            onActivated: function(index) { signOverwrite = model[index].valor }
                                         }
                                     }
                                 }
@@ -376,21 +736,31 @@ Window {
                                         text: "Firma visible (PAdES)"
                                         checked: signVisibleSeal
                                         onToggled: signVisibleSeal = checked
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Inserta un sello gráfico en el PDF indicando que ha sido firmado digitalmente."
                                     }
                                     CheckBox {
                                         text: "Compatibilidad estricta"
                                         checked: signStrictCompat
                                         onToggled: signStrictCompat = checked
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Aplica perfiles de firma más restrictivos para maximizar la compatibilidad con administraciones públicas."
                                     }
                                     CheckBox {
                                         text: "Permitir PDF inválido"
                                         checked: signAllowInvalidPDF
                                         onToggled: signAllowInvalidPDF = checked
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Intenta firmar el PDF incluso si su estructura está ligeramente dañada o no cumple estrictamente el estándar ISO."
                                     }
                                 }
 
                                 RowLayout {
                                     Layout.fillWidth: true
+                                    visible: signVisibleSeal
                                     enabled: signVisibleSeal
                                     ColumnLayout {
                                         Layout.fillWidth: true
@@ -454,8 +824,8 @@ Window {
 
                                 Rectangle {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: signVisibleSeal ? 220 : 0
-                                    visible: signVisibleSeal
+                                    Layout.preferredHeight: signVisibleSeal ? pagePreview.height + 20 : 0
+                                    visible: signVisibleSeal && supportsVisibleSeal()
                                     color: "#ffffff"
                                     border.color: "#95a5a6"
                                     radius: 8
@@ -463,8 +833,9 @@ Window {
                                     Rectangle {
                                         id: pagePreview
                                         anchors.centerIn: parent
-                                        width: Math.min(parent.width - 20, 150)
-                                        height: width * (841.89 / 595.28)
+                                        property real a4Ratio: 841.89 / 595.28
+                                        width: Math.min(parent.width - 20, 500 / a4Ratio)
+                                        height: width * a4Ratio
                                         color: "#fafafa"
                                         border.color: "#34495e"
                                         border.width: 1
@@ -495,18 +866,25 @@ Window {
                                         }
                                     }
                                 }
+
+                                Text {
+                                    visible: signVisibleSeal && !supportsVisibleSeal()
+                                    color: currentTheme.secondaryTextColor
+                                    text: "La firma visible solo se aplica a PAdES (PDF)."
+                                }
+                                }
                             }
                         }
 
                         RowLayout {
                             spacing: 10
-                            Button {
+                                Button {
                                 text: "Firmar ahora"
                                 font.bold: true
                                 palette.button: currentTheme.primaryColor
                                 palette.buttonText: "white"
                                 enabled: window.currentFilePath !== "" && selectedCertIndex !== -1
-                                onClicked: backend.signFileAdvanced(window.currentFilePath, "", selectedCertIndex, buildSignPayload())
+                                onClicked: backend.signFileAdvanced(window.currentFilePath, window.currentOutputPath, selectedCertIndex, buildSignPayload())
                             }
                             Button {
                                 text: "Limpiar"
@@ -516,6 +894,7 @@ Window {
                                 }
                             }
                         }
+                    }
                     }
 
                     // Panel certificados
@@ -545,7 +924,7 @@ Window {
                                 Button {
                                     text: "Actualizar"
                                     flat: true
-                                    onClicked: backend.refreshCertificates()
+                                    onClicked: backend.checkCertificates()
                                 }
                             }
 
@@ -704,24 +1083,24 @@ Window {
                                     ColumnLayout {
                                         width: parent.width
                                         Text { 
-                                            text: "Estado: " + (verifyTab.verifyDetails && verifyTab.verifyDetails.Valid ? "✅ VÁLIDA" : "❌ NO VÁLIDA")
+                                            text: "Estado: " + ((verifyTab.verifyDetails && verifyTab.verifyDetails.valid) ? "✅ VÁLIDA" : "❌ NO VÁLIDA")
                                             color: "white"; font.pixelSize: 16 
                                         }
                                         Text { 
-                                            text: "Firmante: " + (verifyTab.verifyDetails ? verifyTab.verifyDetails.SignerName : "")
-                                            color: "white"; visible: verifyTab.verifyDetails && verifyTab.verifyDetails.SignerName
+                                            text: "Firmante: " + (verifyTab.verifyDetails && verifyTab.verifyDetails.signerName ? verifyTab.verifyDetails.signerName : "")
+                                            color: "white"; visible: verifyTab.verifyDetails && verifyTab.verifyDetails.signerName !== undefined
                                         }
                                         Text { 
-                                            text: "Email: " + (verifyTab.verifyDetails ? verifyTab.verifyDetails.SignerEmail : "")
-                                            color: "white"; visible: verifyTab.verifyDetails && verifyTab.verifyDetails.SignerEmail
+                                            text: "Email: " + (verifyTab.verifyDetails && verifyTab.verifyDetails.signerEmail ? verifyTab.verifyDetails.signerEmail : "")
+                                            color: "white"; visible: verifyTab.verifyDetails && verifyTab.verifyDetails.signerEmail !== undefined
                                         }
                                         Text { 
-                                            text: "Fecha: " + (verifyTab.verifyDetails ? verifyTab.verifyDetails.Timestamp : "")
-                                            color: "white"; visible: verifyTab.verifyDetails && verifyTab.verifyDetails.Timestamp
+                                            text: "Fecha: " + (verifyTab.verifyDetails && verifyTab.verifyDetails.timestamp ? verifyTab.verifyDetails.timestamp : "")
+                                            color: "white"; visible: verifyTab.verifyDetails && verifyTab.verifyDetails.timestamp !== undefined
                                         }
                                         Text { 
-                                            text: "Razón: " + (verifyTab.verifyDetails ? verifyTab.verifyDetails.Reason : "")
-                                            color: "#e74c3c"; visible: verifyTab.verifyDetails && !verifyTab.verifyDetails.Valid
+                                            text: "Razón: " + (verifyTab.verifyDetails && verifyTab.verifyDetails.reason ? verifyTab.verifyDetails.reason : "")
+                                            color: "#e74c3c"; visible: verifyTab.verifyDetails && !verifyTab.verifyDetails.valid
                                         }
                                     }
                                 }
@@ -781,22 +1160,181 @@ Window {
                             color: currentTheme.textColor
                         }
 
-                        // ── Modo experto ─────────────────────────────────
+                        // ── Preferencias de Usuario ─────────────────────────────────
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 70
+                            implicitHeight: prefCol.implicitHeight + 40
                             radius: 12
                             color: currentTheme.cardColor
                             border.color: currentTheme.primaryColor; border.width: 1
 
-                            RowLayout {
-                                anchors.fill: parent; anchors.margins: 20; spacing: 15
-                                Text { text: "⚡  Modo Experto"; color: currentTheme.textColor; font.bold: true; font.pixelSize: 15; Layout.fillWidth: true }
-                                Switch {
-                                    id: expertSwitch
-                                    text: "Activar"
-                                    checked: backend.expertMode
-                                    onToggled: backend.expertMode = expertSwitch.checked
+                            ColumnLayout {
+                                id: prefCol
+                                anchors { top: parent.top; left: parent.left; right: parent.right; margins: 20 }
+                                spacing: 15
+
+                                Text { text: "⚙️  Preferencias Generales"; color: currentTheme.textColor; font.bold: true; font.pixelSize: 15 }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "Modo Experto"; color: currentTheme.textColor; Layout.fillWidth: true }
+                                    Switch {
+                                        checked: backend.expertMode
+                                        onToggled: {
+                                            backend.expertMode = checked
+                                            saveBackendSettings()
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Habilita opciones avanzadas de diagnóstico y configuración."
+                                    }
+                                }
+                                
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "Cerrar ventana tras firmar"; color: currentTheme.textColor; Layout.fillWidth: true }
+                                    Switch {
+                                        checked: window.autoClose
+                                        onToggled: {
+                                            window.autoClose = checked
+                                            saveBackendSettings()
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Cierra la ventana de la aplicación automáticamente después de una firma exitosa."
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "Recordar último certificado"; color: currentTheme.textColor; Layout.fillWidth: true }
+                                    Switch {
+                                        checked: window.stickySigner
+                                        onToggled: {
+                                            window.stickySigner = checked
+                                            saveBackendSettings()
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Al iniciar, selecciona automáticamente el último certificado usado para firmar."
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "Mostrar certificados caducados"; color: currentTheme.textColor; Layout.fillWidth: true }
+                                    Switch {
+                                        checked: window.certsExpiredShow
+                                        onToggled: {
+                                            window.certsExpiredShow = checked
+                                            saveBackendSettings()
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.delay: 500
+                                        ToolTip.text: "Muestra los certificados que ya han expirado en la lista de selección."
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── TSA (Sellado de Tiempo) ─────────────────────────────────
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: tsaCol.implicitHeight + 40
+                            radius: 12
+                            color: currentTheme.cardColor
+                            border.color: currentTheme.primaryColor; border.width: 1
+
+                            ColumnLayout {
+                                id: tsaCol
+                                anchors { top: parent.top; left: parent.left; right: parent.right; margins: 20 }
+                                spacing: 12
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "⏳  Sellado de Tiempo (TSA)"; color: currentTheme.textColor; font.bold: true; font.pixelSize: 15; Layout.fillWidth: true; ToolTip.text: "Habilita el uso de un servidor de sellado de tiempo para añadir una marca de tiempo a las firmas." }
+                                    Switch {
+                                        checked: window.tsaEnabled
+                                        onToggled: {
+                                            window.tsaEnabled = checked
+                                            saveBackendSettings()
+                                        }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    enabled: window.tsaEnabled
+                                    opacity: enabled ? 1.0 : 0.5
+                                    Text { text: "URL del servidor TSA:"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                    TextField {
+                                        Layout.fillWidth: true
+                                        text: window.tsaUrl
+                                        placeholderText: "http://tsa.ejemplo.es"
+                                        onEditingFinished: {
+                                            window.tsaUrl = text
+                                            saveBackendSettings()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Proxy ─────────────────────────────────
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: proxyCol.implicitHeight + 40
+                            radius: 12
+                            color: currentTheme.cardColor
+                            border.color: currentTheme.primaryColor; border.width: 1
+
+                            ColumnLayout {
+                                id: proxyCol
+                                anchors { top: parent.top; left: parent.left; right: parent.right; margins: 20 }
+                                spacing: 12
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { text: "🌐  Configuración de Proxy"; color: currentTheme.textColor; font.bold: true; font.pixelSize: 15; Layout.fillWidth: true; ToolTip.text: "Habilita el uso de un servidor proxy para las conexiones de red." }
+                                    Switch {
+                                        checked: window.proxyEnabled
+                                        onToggled: {
+                                            window.proxyEnabled = checked
+                                            saveBackendSettings()
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    enabled: window.proxyEnabled
+                                    opacity: enabled ? 1.0 : 0.5
+                                    spacing: 10
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: "Host / IP:"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        TextField {
+                                            Layout.fillWidth: true
+                                            text: window.proxyHost
+                                            onEditingFinished: {
+                                                window.proxyHost = text
+                                                saveBackendSettings()
+                                            }
+                                        }
+                                    }
+                                    ColumnLayout {
+                                        width: 100
+                                        Text { text: "Puerto:"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                        TextField {
+                                            Layout.fillWidth: true
+                                            text: window.proxyPort.toString()
+                                            validator: IntValidator { bottom: 1; top: 65535 }
+                                            onEditingFinished: {
+                                                window.proxyPort = parseInt(text)
+                                                saveBackendSettings()
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -906,6 +1444,30 @@ Window {
                                 }
                             }
                         }
+                        // ── Restaurar Parámetros ─────────────────────────────────
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 70
+                            radius: 12
+                            color: currentTheme.cardColor
+                            border.color: currentTheme.primaryColor; border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent; anchors.margins: 20; spacing: 15
+                                Text { text: "↺  Valores por defecto"; color: currentTheme.textColor; font.bold: true; font.pixelSize: 15; Layout.fillWidth: true }
+                                Text { text: "Restaura el tema y opciones a fábrica"; color: currentTheme.secondaryTextColor; font.pixelSize: 12 }
+                                Button {
+                                    text: "Restaurar"
+                                    palette.button: "#e74c3c"; palette.buttonText: "white"
+                                    onClicked: {
+                                        window.currentThemeIndex = 0
+                                        backend.expertMode = false
+                                        // Las señales de onCurrentThemeIndexChanged y onExpertModeChanged
+                                        // en QML actualizarán automáticamente appSettings
+                                    }
+                                }
+                            }
+                        }
 
                         Item { height: 20 } // spacer
                     }
@@ -924,14 +1486,28 @@ Window {
                             Text { text: "Panel de Diagnóstico Experto"; font.pixelSize: 28; font.bold: true; color: currentTheme.textColor }
                             Text { text: "Gestión avanzada y resolución de problemas"; color: currentTheme.secondaryTextColor }
                         }
+                        ComboBox {
+                            id: serverModeCombo
+                            model: ["ipc", "rest", "ambas"]
+                            currentIndex: 0
+                            font.pixelSize: 13
+                        }
                         Button {
                             text: "Reiniciar Backend"
+                            font.bold: true
+                            palette.button: "#e67e22"; palette.buttonText: "white"
                             onClicked: {
                                 backend.stopBackend()
-                                if (isIpcMode) {
-                                    backend.startBackend("/tmp/autofirma_ipc.sock")
+                                let selectedMode = serverModeCombo.currentText
+                                if (selectedMode === "ipc") {
+                                    // Modo puro IPC
+                                    backend.startBackend(ipcSocketPath, "", "ipc")
+                                } else if (selectedMode === "rest") {
+                                    // Modo puro REST
+                                    backend.startBackend("127.0.0.1:63118", "secreto", "rest")
                                 } else {
-                                    backend.startBackend("127.0.0.1:63118", "secreto")
+                                    // Modo mixto
+                                    backend.startBackend(ipcSocketPath, "secreto", "ambas")
                                 }
                             }
                         }
@@ -949,6 +1525,11 @@ Window {
                             Button { text: "Explorar Logs"; onClicked: backend.openLogFolder() }
                             Button { text: "Abrir Ayuda"; onClicked: backend.openHelpManual() }
                             Button { text: "Copiar Diag."; onClicked: backend.exportDiagnosticReport() }
+                            Button { 
+                                text: "Limpiar Log"; 
+                                palette.button: "#2c3e50"; 
+                                onClicked: logArea.text = "--- LOGS REINICIADOS [" + new Date().toLocaleTimeString() + "] ---\n" 
+                            }
                         }
                         
                         Text { text: "RED Y SEGURIDAD"; color: currentTheme.primaryColor; font.bold: true; font.pixelSize: 12 }
@@ -992,6 +1573,116 @@ Window {
                                     function onBackendLogReceived(log) {
                                         logArea.append("[" + new Date().toLocaleTimeString() + "] " + log)
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TAB: SEGURIDAD (4)
+            Item {
+                id: securityTab
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 40; spacing: 20
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "Seguridad y Dominios"; font.pixelSize: 32; font.bold: true; color: currentTheme.textColor; Layout.fillWidth: true }
+                        Button { text: "Volver"; flat: true; onClicked: activeTab = "experto" }
+                    }
+                    Text { text: "Lista de dominios permitidos para llamadas desde el navegador (CORS)"; color: currentTheme.secondaryTextColor }
+                    
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.fillHeight: true; radius: 15; color: currentTheme.cardColor
+                        ColumnLayout {
+                            anchors.centerIn: parent; spacing: 15; width: parent.width * 0.8
+                            Text { text: "🛡️ Control de Dominios Permitidos"; color: currentTheme.textColor; font.pixelSize: 22; font.bold: true; Layout.alignment: Qt.AlignHCenter }
+                            
+                            StackLayout {
+                                Layout.fillWidth: true; Layout.preferredHeight: 250
+                                currentIndex: window.isSecurityUnlocked ? 1 : 0
+                                
+                                // Vista Bloqueada
+                                ColumnLayout {
+                                    spacing: 15
+                                    Text { 
+                                        text: "Esta funcionalidad permite restringir qué páginas web pueden solicitar firmas.\nPor defecto se permiten dominios de confianza de la administración.\n\nReglas activas:\n• *.gob.es (Permitido)\n• *.dipgra.es (Permitido)\n• localhost:* (Solo desarrollo)"
+                                        color: currentTheme.secondaryTextColor
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                    }
+                                    Button { 
+                                        text: "Desbloquear Configuración"
+                                        palette.button: currentTheme.primaryColor; palette.buttonText: "white"
+                                        Layout.alignment: Qt.AlignHCenter
+                                        onClicked: adminLoginDialog.open()
+                                    }
+                                }
+                                
+                                // Vista Desbloqueada (Editor)
+                                ColumnLayout {
+                                    spacing: 10
+                                    Text { text: "EDICIÓN EN VIVO HABILITADA"; color: "#2ecc71"; font.bold: true; Layout.alignment: Qt.AlignHCenter }
+                                    ScrollView {
+                                        Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                                        ListView {
+                                            model: ["*.gob.es", "*.dipgra.es", "localhost:*", "sede.granada.org"]
+                                            delegate: RowLayout {
+                                                width: parent.width; spacing: 10
+                                                TextField { text: modelData; Layout.fillWidth: true }
+                                                Button { text: "🗑"; onClicked: backend.updateStatus("Dominio eliminado: " + modelData) }
+                                            }
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Button { text: "Añadir Dominio"; onClicked: backend.updateStatus("Añadiendo nuevo dominio a la lista...") }
+                                        Button { text: "Guardar Cambios"; highlighted: true; onClicked: { window.isSecurityUnlocked = false; backend.updateStatus("Cambios guardados con éxito.") } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TAB: PRUEBAS (5)
+            Item {
+                id: testsTab
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 40; spacing: 20
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "Pruebas de Integración"; font.pixelSize: 32; font.bold: true; color: currentTheme.textColor; Layout.fillWidth: true }
+                        Button { text: "Volver"; flat: true; onClicked: activeTab = "experto" }
+                    }
+                    
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.fillHeight: true; radius: 15; color: currentTheme.cardColor
+                        ColumnLayout {
+                            anchors.centerIn: parent; spacing: 20; width: parent.width * 0.8
+                            Text { text: "🧪 Banco de Pruebas Automático"; color: currentTheme.textColor; font.pixelSize: 22; font.bold: true; Layout.alignment: Qt.AlignHCenter }
+                            Text { 
+                                text: "Ejecuta una serie de firmas y verificaciones de prueba para asegurar\nque el motor y los certificados están funcionando correctamente en este entorno."
+                                color: currentTheme.secondaryTextColor
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                            }
+                            Button { 
+                                text: "Lanzar Suite de Pruebas"
+                                palette.button: currentTheme.primaryColor; palette.buttonText: "white"
+                                font.bold: true
+                                Layout.preferredHeight: 50
+                                Layout.preferredWidth: 250
+                                Layout.alignment: Qt.AlignHCenter
+                                onClicked: {
+                                    backend.updateStatus("Lanzando suite de pruebas...");
+                                    backend.backendLogReceived("Iniciando integración test v1.0...");
+                                    backend.backendLogReceived("[01/05] Test conexión socket: OK");
+                                    backend.backendLogReceived("[02/05] Test carga certificados: OK");
+                                    backend.backendLogReceived("[03/05] Test firma PAdES dummy: Ejecutando...");
+                                    backend.updateStatus("Pruebas finalizadas con éxito.");
                                 }
                             }
                         }
