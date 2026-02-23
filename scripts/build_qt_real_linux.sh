@@ -28,7 +28,7 @@ echo "[qt-real] Compilando con $QMAKE_BIN..."
 )
 
 mkdir -p "$(dirname "${OUT_BIN}")"
-cp -f "${QT_DIR}/qt_real" "${OUT_BIN}"
+cp -f "${QT_DIR}/autofirma-qt" "${OUT_BIN}"
 
 # Sincronizar recursos
 echo "[qt-real] Sincronizando recursos..."

@@ -1,0 +1,5 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+<file alias="qml/main.qml">/home/alberto/Trabajo/AutoFirma_Dipgra/autofirma_migracion/work/native-host-src/cmd/gui-qml/qml/main.qml</file>
+</qresource>
+</RCC>

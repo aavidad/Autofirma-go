@@ -1,0 +1,27 @@
+# Dominios permitidos por defecto para validación de servidores de firma.
+# Acepta dominios exactos y patrones tipo *.dominio.tld
+
+*.gob.es
+*.administracion.gob.es
+*.dipgra.es
+*.guadaltel.es
+*.junta-andalucia.es
+*.xunta.gal
+*.gva.es
+*.generalitat.cat
+*.euskadi.eus
+*.jcyl.es
+*.navarra.es
+*.aragon.es
+*.cantabria.es
+*.asturias.es
+*.extremadura.es
+*.larioja.org
+*.carm.es
+*.canarias.org
+*.caib.es
+*.ceuta.es
+*.melilla.es
+localhost
+127.0.0.1
+::1

@@ -18,12 +18,12 @@ func TestBuildPadesVisibleSignatureTextIncludesCNAndFNMT(t *testing.T) {
 	ts := time.Date(2026, 2, 17, 13, 45, 59, 0, time.Local)
 	cert := &x509.Certificate{Subject: pkix.Name{CommonName: "Juan Perez"}}
 
-	got := buildPadesVisibleSignatureText(cert, ts)
-	if !strings.Contains(got, "CN=Juan Perez") {
+	got := buildPadesVisibleSignatureText(nil, cert, ts)
+	if !strings.Contains(got, "Juan Perez") {
 		t.Fatalf("texto visible sin CN esperado: %q", got)
 	}
-	if !strings.Contains(got, "Firmado el 17/02/2026 13:45:59 por un certificado de la FNMT") {
-		t.Fatalf("texto visible sin linea de firma FNMT esperada: %q", got)
+	if !strings.Contains(got, "Fecha: 17/02/2026 13:45:59") {
+		t.Fatalf("texto visible sin linea de fecha esperada: %q", got)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestApplyPadesAppearanceOptionsSetsVisibleText(t *testing.T) {
 	if !sd.Appearance.Visible {
 		t.Fatalf("firma visible no activada")
 	}
-	if !strings.Contains(sd.Appearance.Text, "CN=CN Prueba") || !strings.Contains(sd.Appearance.Text, "FNMT") {
+	if !strings.Contains(sd.Appearance.Text, "CN Prueba") || !strings.Contains(sd.Appearance.Text, "Emitido por") {
 		t.Fatalf("texto visible inesperado: %q", sd.Appearance.Text)
 	}
 }

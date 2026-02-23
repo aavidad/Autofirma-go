@@ -4,6 +4,18 @@ Formato: `MAJOR.MINOR.PATCH` — se incrementa el PATCH salvo indicación expres
 
 ---
 
+## [0.1.1] — 2026-02-22
+
+### Añadido
+- Añadida previsualización de texto en sello de firma
+
+
+## [0.0.3] — 2026-02-22
+
+### Añadido
+- Mejora de redimensionado de sello en frontend Qt
+
+
 ## [0.0.2] — 2026-02-21
 
 ### Añadido

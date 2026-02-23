@@ -63,7 +63,7 @@ SYMLINK_CORE="/usr/local/bin/autofirma-desktop"
 SYMLINK_GUI="/usr/local/bin/${APP_NAME}"
 
 # Native messaging
-HOST_NAME="com.autofirma.native"
+HOST_NAME="com.dipgra.autofirma"
 declare -a CHROMIUM_MANIFEST_DIRS=(
   "/etc/opt/chrome/native-messaging-hosts"
   "/etc/chromium/native-messaging-hosts"

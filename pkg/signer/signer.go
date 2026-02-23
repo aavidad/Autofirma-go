@@ -11,6 +11,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
@@ -93,24 +94,76 @@ func runCommandWithRetry(args []string, timeout time.Duration, retries int, labe
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 		configureCommandForOS(cmd)
-		output, err := cmd.CombinedOutput()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
 		cancel()
 
 		if err == nil {
-			if len(strings.TrimSpace(string(output))) > 0 {
-				log.Printf("[Exec] %s salida (ok): %s", label, truncateForLog(string(output), 800))
+			if len(strings.TrimSpace(stdout.String())) > 0 {
+				log.Printf("[Exec] %s salida (ok): %s", label, truncateForLog(stdout.String(), 800))
 			}
-			return output, nil
+			return stdout.Bytes(), nil
+		}
+
+		outStr := stdout.String()
+		errStr := stderr.String()
+		combined := outStr
+		if errStr != "" {
+			if combined != "" {
+				combined += "\nERROR: "
+			}
+			combined += errStr
 		}
 
 		if ctx.Err() == context.DeadlineExceeded {
 			lastErr = fmt.Errorf("%s timeout tras %s (intento %d/%d): %s",
-				label, timeout, attempt+1, retries+1, string(output))
+				label, timeout, attempt+1, retries+1, combined)
 		} else {
 			lastErr = fmt.Errorf("%s fallo (intento %d/%d): %v, salida: %s",
-				label, attempt+1, retries+1, err, string(output))
+				label, attempt+1, retries+1, err, combined)
 		}
 		log.Printf("[Exec] %s error intento %d/%d: %v", label, attempt+1, retries+1, lastErr)
+
+		if attempt < retries {
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+	return nil, lastErr
+}
+
+// runBinaryCommand es como runCommandWithRetry pero NUNCA hace log del contenido del stdout.
+// Ideal para comandos que devuelven datos binarios (como certificados).
+func runBinaryCommand(args []string, timeout time.Duration, retries int, label string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("%s: comando vacío", label)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		log.Printf("[Exec] %s intento %d/%d (binario)", label, attempt+1, retries+1)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		configureCommandForOS(cmd)
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		cancel()
+
+		if err == nil {
+			log.Printf("[Exec] %s éxito (%d bytes recibidos)", label, len(stdout.Bytes()))
+			return stdout.Bytes(), nil
+		}
+
+		errStr := stderr.String()
+		if ctx.Err() == context.DeadlineExceeded {
+			lastErr = fmt.Errorf("%s timeout tras %s: %s", label, timeout, errStr)
+		} else {
+			lastErr = fmt.Errorf("%s fallo: %v, stderr: %s", label, err, errStr)
+		}
 
 		if attempt < retries {
 			time.Sleep(time.Duration(attempt+1) * time.Second)
@@ -125,6 +178,36 @@ func truncateForLog(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncado)"
+}
+
+func runCommandWithStdin(args []string, input []byte, timeout time.Duration, label string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("%s: comando vacío", label)
+	}
+
+	log.Printf("[Exec] %s comando=%s timeout=%s (stdin %d bytes)", label, args[0], timeout, len(input))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	configureCommandForOS(cmd)
+	cmd.Stdin = bytes.NewReader(input)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%s timeout: %s", label, stderr.String())
+		}
+		return nil, fmt.Errorf("%s fallo: %v, stderr: %s", label, err, stderr.String())
+	}
+
+	// NO hacemos log del stdout porque puede contener claves privadas o certificados
+	log.Printf("[Exec] %s éxito (%d bytes recibidos)", label, len(stdout.Bytes()))
+	return stdout.Bytes(), nil
 }
 
 // SignData signs data using the specified certificate.
@@ -216,25 +299,80 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		memoryChains, _ = buildCertChains(memoryCert, []*x509.Certificate{memoryCert})
 		cleanupSigner = pkcs11Signer.Close
 	} else if runtime.GOOS == "linux" {
-		p12Data, err := exportCertificateToP12Memory(nickname, tempPassword)
+		log.Printf("[Signer] Iniciando exportación NSS a memoria (vía OpenSSL pipe)")
+
+		// 1. Obtener P12 desde NSS directamente a memoria (stdout)
+		nssDB := filepath.Join(os.Getenv("HOME"), ".pki/nssdb")
+		p12Data, err := runBinaryCommand(
+			[]string{"pk12util", "-o", "/dev/stdout", "-d", "sql:" + nssDB, "-n", nickname, "-W", tempPassword},
+			10*time.Second, 1, "pk12util export",
+		)
 		if err != nil {
-			return "", fmt.Errorf("fallo al exportar certificado NSS a memoria: %v", err)
+			return "", fmt.Errorf("fallo al exportar desde NSS: %v", err)
 		}
-		priv, parsedCert, caCerts, err := pkcs12.DecodeChain(p12Data, tempPassword)
+
+		// 2. Usar OpenSSL como filtro para extraer Private Key (normaliza BER -> PEM)
+		keyPEM, err := runCommandWithStdin(
+			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "pass:" + tempPassword, "-nocerts", "-nodes"},
+			p12Data, 10*time.Second, "openssl key filter",
+		)
 		if err != nil {
-			return "", fmt.Errorf("fallo decodificando p12 en memoria: %v", err)
+			return "", fmt.Errorf("openssl no pudo procesar la clave: %v", err)
+		}
+
+		// 3. Usar OpenSSL como filtro para extraer Certificados
+		certsPEM, err := runCommandWithStdin(
+			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "pass:" + tempPassword, "-nokeys"},
+			p12Data, 10*time.Second, "openssl cert filter",
+		)
+		if err != nil {
+			return "", fmt.Errorf("openssl no pudo procesar los certificados: %v", err)
+		}
+
+		// 4. Parsear resultados PEM en memoria
+		// Parsear clave privada
+		block, _ := pem.Decode(keyPEM)
+		if block == nil {
+			return "", fmt.Errorf("error decodificando PEM de clave")
+		}
+		priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			priv, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+			if err != nil {
+				return "", fmt.Errorf("fallo al parsear clave privada: %v", err)
+			}
 		}
 		var ok bool
 		memorySigner, ok = priv.(crypto.Signer)
 		if !ok {
-			return "", fmt.Errorf("clave extraída no es crypto.Signer")
+			return "", fmt.Errorf("la clave extraída no es crypto.Signer")
 		}
-		memoryCert = parsedCert
+
+		// Parsear certificados y cadena
 		var chainCerts []*x509.Certificate
-		chainCerts = append(chainCerts, parsedCert)
-		chainCerts = append(chainCerts, caCerts...)
-		memoryChains, _ = buildCertChains(parsedCert, chainCerts)
+		remaining := certsPEM
+		for {
+			block, remaining = pem.Decode(remaining)
+			if block == nil {
+				break
+			}
+			if block.Type == "CERTIFICATE" {
+				c, err := x509.ParseCertificate(block.Bytes)
+				if err == nil {
+					if memoryCert == nil {
+						memoryCert = c
+					}
+					chainCerts = append(chainCerts, c)
+				}
+			}
+		}
+
+		if memoryCert == nil {
+			return "", fmt.Errorf("no se encontró certificado válido en la cadena")
+		}
+		memoryChains, _ = buildCertChains(memoryCert, chainCerts)
 		cleanupSigner = func() {}
+		log.Printf("[Signer] Certificado NSS cargado exitosamente (operación 100%% en RAM)")
 	} else {
 		// Windows fallback file logic (no cambia en esta iteración para CAdES, PAdES ya entró por winstore más arriba)
 		p12Path, err := exportCertificateToP12(nickname, tempPassword)
@@ -732,20 +870,6 @@ func buildCertChains(leaf *x509.Certificate, certs []*x509.Certificate) ([][]*x5
 	return chains, nil
 }
 
-// exportCertificateToP12Memory exports a certificate from NSS directly to memory without temporary files.
-func exportCertificateToP12Memory(nickname, password string) ([]byte, error) {
-	timeout := time.Duration(getEnvInt("AUTOFIRMA_EXPORT_TIMEOUT_SEC", defaultExportTimeoutSec)) * time.Second
-	retries := getEnvInt("AUTOFIRMA_EXPORT_RETRIES", defaultRetriesSmall)
-
-	nssDB := filepath.Join(os.Getenv("HOME"), ".pki/nssdb")
-	return runCommandWithRetry(
-		[]string{"pk12util", "-o", "/dev/stdout", "-d", "sql:" + nssDB, "-n", nickname, "-W", password},
-		timeout,
-		retries,
-		"pk12util memory",
-	)
-}
-
 // ExportCertificateP12ByID exporta un certificado a PKCS#12 a partir de su ID.
 // Devuelve la ruta del fichero temporal .p12 generado.
 func ExportCertificateP12ByID(certificateID, password string, options map[string]interface{}) (string, error) {
@@ -811,11 +935,15 @@ func enrichPadesOptions(opts map[string]interface{}, cert *protocol.Certificate)
 	if _, ok := opts["signerName"]; !ok {
 		if cn := strings.TrimSpace(cert.Subject["CN"]); cn != "" {
 			opts["signerName"] = cn
+		} else if cert.SubjectName != "" {
+			opts["signerName"] = cert.SubjectName
 		}
 	}
 	if _, ok := opts["issuerName"]; !ok {
 		if icn := strings.TrimSpace(cert.Issuer["CN"]); icn != "" {
 			opts["issuerName"] = icn
+		} else if cert.IssuerName != "" {
+			opts["issuerName"] = cert.IssuerName
 		}
 	}
 	if _, ok := opts["issuerOrg"]; !ok {
@@ -824,11 +952,9 @@ func enrichPadesOptions(opts map[string]interface{}, cert *protocol.Certificate)
 		}
 	}
 	if _, ok := opts["signerDNI"]; !ok {
-		// Mejor esfuerzo: usar serialNumber del subject si existe; en su defecto, el serial del certificado.
-		if sn := strings.TrimSpace(cert.Subject["SERIALNUMBER"]); sn != "" {
+		// Intentar buscar el serialNumber que suele contener el DNI
+		if sn := strings.TrimSpace(cert.SerialNumber); sn != "" {
 			opts["signerDNI"] = sn
-		} else if serial := strings.TrimSpace(cert.SerialNumber); serial != "" {
-			opts["signerDNI"] = serial
 		}
 	}
 	return opts

@@ -11,6 +11,7 @@ Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 - Flujos soportados: `sign`, `cosign`, `countersign`, `selectcert`, `batch`, `websocket`, `service`, `save`.
 - Modos de uso: simple y experto.
 - Seguridad reforzada: lista blanca de dominios, diagnostico TLS/red, trust local, trazas saneadas.
+- Integración Native Messaging con extensión Dipgra (`com.dipgra.autofirma`) y alias legacy (`com.autofirma.native`).
 
 ## Funcionalidades principales
 - Firma y verificacion: CAdES, PAdES, XAdES.
@@ -38,6 +39,49 @@ go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
 go build -mod=readonly -o autofirma-desktop ./cmd/gui
 ```
 
+## Compilacion por sistema
+### Linux (nativo)
+Requisitos recomendados:
+- `go` 1.22+
+- `zip` (para generar ZIP de extensiones en release)
+- `qmake6` y `make` (si se compila frontend Qt real)
+
+Comandos:
+```bash
+# Binarios base
+go build -mod=readonly -o autofirma-desktop ./cmd/gui
+go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
+
+# Frontend Qt wrapper (Go)
+go build -mod=readonly -o autofirma-desktop-qt-bin ./cmd/qt
+
+# Frontend Qt real (si aplica)
+./scripts/build_qt_real_linux.sh ./autofirma-desktop-qt-real
+```
+
+### Windows (cross-compile desde Linux)
+Requisitos:
+- `go` 1.22+
+- `makensis` en `PATH` para generar instalador `.exe`
+
+Comandos:
+```bash
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H=windowsgui" -o autofirma-desktop.exe ./cmd/gui
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o autofirma-host.exe ./cmd/autofirma-host
+./packaging/windows/make_windows_release.sh
+```
+
+### macOS
+En macOS nativo:
+```bash
+go build -mod=readonly -o autofirma-desktop ./cmd/gui
+go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
+./packaging/macos/make_macos_release.sh
+```
+
+Desde Linux con `osxcross`:
+- Ver guía: `docs/OSXCROSS_BUILD.md`
+
 ## Uso CLI de `autofirma-desktop`
 ```bash
 autofirma-desktop -ayuda-detallada
@@ -62,6 +106,60 @@ autofirma-desktop -servidor-rest -direccion-rest 127.0.0.1:63118 -token-rest sec
 - Linux: `./packaging/linux/make_linux_release.sh`
 - Windows: `./packaging/windows/make_windows_release.sh`
 - macOS: `./packaging/macos/make_macos_release.sh`
+
+Si existe `../../DipgraExtension`, el empaquetado incluye automáticamente:
+- `extensiones/chromium` y `extensiones/firefox`
+- ZIPs de distribución: `dipgra-extension-chromium.zip` y `dipgra-extension-firefox.zip`
+
+## Ultimos cambios (integracion extension + seguridad)
+### Native Messaging unificado
+- Nombre principal de host: `com.dipgra.autofirma`.
+- Alias legacy mantenido: `com.autofirma.native`.
+- Instalación Linux crea manifiestos para ambos nombres (compatibilidad retro).
+
+### Allowlist de extensiones en host nativo
+- El host `autofirma-host` valida caller contra `native_messaging_allowlist.json`.
+- Ubicación habitual: `/opt/autofirma-dipgra/native_messaging_allowlist.json` (Linux).
+- Campos usados:
+  - `chromium_ids`
+  - `firefox_ids`
+  - `require_match`
+
+Variables de entorno soportadas:
+- `AUTOFIRMA_CHROMIUM_EXTENSION_IDS=id1,id2`
+- `AUTOFIRMA_FIREFOX_EXTENSION_IDS=id1,id2`
+- `AUTOFIRMA_NATIVE_HOST_NAME=com.dipgra.autofirma`
+- `AUTOFIRMA_NATIVE_HOST_ALIASES=com.autofirma.native`
+
+### Extensión de Diputación integrada en releases
+- Origen por defecto: `../../DipgraExtension`.
+- Se empaqueta en Linux/Windows/macOS dentro de `extensiones/`.
+- Se generan ZIPs de importación rápida para Chromium/Firefox.
+- Se puede redefinir origen con:
+  - `DIPGRA_EXTENSION_DIR=/ruta/DipgraExtension`
+
+### Dominios AAPP de España permitidos por defecto
+- La whitelist por defecto ya no está hardcodeada en código:
+  - `config/dominios_firma_permitidos.txt`
+  - `config/dominios_firma_autoconfiados.txt`
+- Incluye sedes AAPP (Estado + CCAA principales), por ejemplo:
+  - `*.gob.es`, `*.administracion.gob.es`, `*.junta-andalucia.es`, `*.xunta.gal`, `*.gva.es`, `*.generalitat.cat`, `*.euskadi.eus`, `*.jcyl.es`, `*.navarra.es`, `*.aragon.es`, `*.cantabria.es`, `*.asturias.es`, `*.extremadura.es`, `*.larioja.org`, `*.carm.es`, `*.canarias.org`, `*.caib.es`.
+- También se marcan como auto-confiados para evitar prompt inicial en esos dominios.
+- Override por entorno:
+  - `AUTOFIRMA_DOMINIOS_FIRMA_PERMITIDOS`
+  - `AUTOFIRMA_DOMINIOS_FIRMA_AUTOCONFIADOS`
+  - `AUTOFIRMA_DOMINIOS_FIRMA_PERMITIDOS_ARCHIVO`
+  - `AUTOFIRMA_DOMINIOS_FIRMA_AUTOCONFIADOS_ARCHIVO`
+  - Compatibilidad:
+  - `AUTOFIRMA_ALLOWED_SIGN_DOMAINS`
+  - `AUTOFIRMA_AUTO_TRUST_SIGN_DOMAINS`
+  - `AUTOFIRMA_ALLOWED_SIGN_DOMAINS_FILE`
+  - `AUTOFIRMA_AUTO_TRUST_SIGN_DOMAINS_FILE`
+
+Importación masiva desde fichero (uno por línea):
+```bash
+autofirma-desktop -modo-cli -operacion importar-dominios -fichero-dominios /ruta/dominios_aapp_es.txt
+```
 
 Empaquetado Linux con Qt nativo real incluido:
 ```bash
@@ -104,6 +202,20 @@ Ejemplos:
 ./release/linux/AutofirmaDipgra-linux-installer.run --perfil escritorio
 ./release/linux/AutofirmaDipgra-linux-installer.run --perfil minimo
 ./release/linux/AutofirmaDipgra-linux-installer.run --perfil escritorio --subperfil-escritorio qt
+```
+
+## Instalacion y prueba rapida de lo ultimo (Linux)
+```bash
+# 1) Generar instalador actualizado
+BUILD_SELF_CONTAINED=0 ./packaging/linux/make_linux_release.sh
+
+# 2) Instalar
+sudo ./release/linux/AutofirmaDipgra-linux-installer.run --perfil completo
+
+# 3) Verificar host nativo y allowlist
+ls -l /opt/autofirma-dipgra/native_messaging_allowlist.json
+ls -l /etc/opt/chrome/native-messaging-hosts/com.dipgra.autofirma.json
+ls -l /etc/opt/chrome/native-messaging-hosts/com.autofirma.native.json
 ```
 
 ## Licencia

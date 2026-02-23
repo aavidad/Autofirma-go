@@ -31,6 +31,15 @@ Permite:
 1. Ejecutar instalador del paquete correspondiente.
 2. Conceder permisos necesarios y reiniciar navegador.
 
+### Extension de navegador (Diputacion)
+En los paquetes recientes, la extension se incluye dentro del directorio `extensiones` del bundle/instalación:
+- Chromium: `dipgra-extension-chromium.zip`
+- Firefox: `dipgra-extension-firefox.zip`
+
+La integración Native Messaging usa el host:
+- Principal: `com.dipgra.autofirma`
+- Compatibilidad antigua: `com.autofirma.native`
+
 ## 4. Uso normal (modo simple)
 1. Inicie el tramite en la sede.
 2. Acepte el lanzamiento de la aplicacion cuando el navegador lo solicite.
@@ -55,6 +64,7 @@ Cuando una web no conocida solicita operar con `afirma://`, la app puede pedir c
 Incluye:
 - Alta/baja de dominios de confianza.
 - Avisos de riesgo si el dominio no esta en lista blanca.
+- Importación masiva desde fichero (`domains-import` / `importar-dominios`).
 
 ### Diagnostico de red y TLS
 La app puede comprobar:
@@ -112,7 +122,8 @@ Puede operar sin entorno grafico con parametros en castellano.
 - Ayuda CLI: `-ayuda-cli` (alias de `-cli-help`).
 - Operacion: `-operacion`.
   - Valores de firma: `firmar`, `cofirmar`, `contrafirmar`, `verificar`.
-  - Valores de soporte: `informe-diagnostico`, `listar-dominios`, `anadir-dominio`, `eliminar-dominio`, `estado-almacen-tls`, `limpiar-almacen-tls`, `estado-confianza-tls`, `generar-certificados-tls`, `instalar-confianza-tls`.
+  - Valores de soporte: `informe-diagnostico`, `listar-dominios`, `anadir-dominio`, `eliminar-dominio`, `importar-dominios`, `estado-almacen-tls`, `limpiar-almacen-tls`, `estado-confianza-tls`, `generar-certificados-tls`, `instalar-confianza-tls`.
+- Fichero para importar dominios: `-fichero-dominios` (compatibilidad: `-domain-file`).
 - Entrada/salida: `-entrada`, `-salida`.
 - Certificado: `-id-certificado`, `-indice-certificado`, `-certificado-contiene`.
 - Listado/comprobacion: `-listar-certificados`, `-comprobar-certificados`.
@@ -121,6 +132,9 @@ Puede operar sin entorno grafico con parametros en castellano.
 
 Ejemplo:
 `autofirma-desktop -modo-cli -operacion firmar -entrada /ruta/doc.pdf -indice-certificado 0 -formato pades -sello-visible -disposicion-sello footer`
+
+Importación masiva de dominios:
+`autofirma-desktop -modo-cli -operacion importar-dominios -fichero-dominios /ruta/dominios_aapp_es.txt`
 
 ### REST en castellano
 - Activar servidor REST: `-servidor-rest` (alias de `-rest`).

@@ -21,6 +21,7 @@ QT_REAL_BIN_PATH="${QT_REAL_BIN_PATH:-}"
 QT_RUNTIME_DIR="${QT_RUNTIME_DIR:-}"
 QT_RUNTIME_FROM_SYSTEM="${QT_RUNTIME_FROM_SYSTEM:-0}"
 BUILD_QT_REAL_FROM_SOURCE="${BUILD_QT_REAL_FROM_SOURCE:-1}"
+DIPGRA_EXTENSION_DIR="${DIPGRA_EXTENSION_DIR:-${ROOT_DIR}/../../DipgraExtension}"
 
 mkdir -p "${REL_DIR}" "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
 rm -rf "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
@@ -230,6 +231,40 @@ if [[ -d "${ROOT_DIR}/assets" ]]; then
   mkdir -p "${BUNDLE_DIR}/assets"
   cp -a "${ROOT_DIR}/assets/." "${BUNDLE_DIR}/assets/"
 fi
+if [[ -d "${ROOT_DIR}/config" ]]; then
+  mkdir -p "${BUNDLE_DIR}/config"
+  cp -a "${ROOT_DIR}/config/." "${BUNDLE_DIR}/config/"
+fi
+
+# Diputacion browser extensions (Chromium + Firefox), if available.
+if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" || -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+  mkdir -p "${BUNDLE_DIR}/extensiones"
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension" "${BUNDLE_DIR}/extensiones/chromium"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-chromium.zip
+        zip -qr dipgra-extension-chromium.zip chromium
+      )
+    fi
+  fi
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension-firefox" "${BUNDLE_DIR}/extensiones/firefox"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-firefox.zip
+        zip -qr dipgra-extension-firefox.zip firefox
+        rm -f dipgra-extension-firefox.xpi
+        cp -f dipgra-extension-firefox.zip dipgra-extension-firefox.xpi
+      )
+    fi
+  fi
+  echo "[linux] Extensiones Dipgra incluidas desde: ${DIPGRA_EXTENSION_DIR}"
+else
+  echo "[linux] Aviso: no se encontró DipgraExtension (DIPGRA_EXTENSION_DIR=${DIPGRA_EXTENSION_DIR})."
+fi
 
 cat > "${BUNDLE_DIR}/README.txt" <<README
 Autofirma Dipgra Linux
@@ -242,6 +277,9 @@ Frontend Qt nativo (opcional, si se incluyó):
   ./autofirma-desktop-qt-real
 Host nativo:
   ./autofirma-host
+Extensiones navegador:
+  ./extensiones/dipgra-extension-chromium.zip
+  ./extensiones/dipgra-extension-firefox.zip
 
 Notas de compilacion:
   - Modo autocontenido activo: ${BUILD_SELF_CONTAINED}

@@ -66,7 +66,7 @@ func getSystemCertificatesImpl() ([]protocol.Certificate, error) {
 		}
 
 		pc := ParseCertificate(cert, "windows")
-		pc.Nickname = normalizeThumbprint(sc.Thumbprint)
+		pc.Nickname = sc.Thumbprint // Keep thumbprint as nickname for windows store signing
 
 		// Keep explicit serial/times from store if available.
 		if strings.TrimSpace(sc.SerialNumber) != "" {
@@ -81,6 +81,15 @@ func getSystemCertificatesImpl() ([]protocol.Certificate, error) {
 
 		// Subject/issuer are already in parsed certificate; keep those canonical values.
 		result = append(result, pc)
+	}
+
+	// Also try Firefox profiles on Windows
+	firefoxProfiles := DiscoverFirefoxProfiles()
+	for _, profile := range firefoxProfiles {
+		nssCerts, err := getNSSCertificates(profile)
+		if err == nil {
+			result = append(result, nssCerts...)
+		}
 	}
 
 	return result, nil

@@ -13,6 +13,7 @@ ARTIFACT_TGZ="${REL_DIR}/AutofirmaDipgra-macos.tar.gz"
 ARTIFACT_RUN="${REL_DIR}/AutofirmaDipgra-macos-installer.run"
 BIN_PATH="${BUNDLE_DIR}/autofirma-desktop"
 HOST_BIN_PATH="${BUNDLE_DIR}/autofirma-host"
+DIPGRA_EXTENSION_DIR="${DIPGRA_EXTENSION_DIR:-${ROOT_DIR}/../../DipgraExtension}"
 
 mkdir -p "${REL_DIR}" "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
 rm -rf "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
@@ -33,6 +34,47 @@ echo "[macos] Compilando host nativo..."
     go build -trimpath -ldflags="-s -w" -o "${HOST_BIN_PATH}" ./cmd/autofirma-host
 )
 chmod +x "${HOST_BIN_PATH}"
+if [[ -d "${ROOT_DIR}/config" ]]; then
+  mkdir -p "${BUNDLE_DIR}/config"
+  cp -a "${ROOT_DIR}/config/." "${BUNDLE_DIR}/config/"
+fi
+if [[ -d "${ROOT_DIR}/cmd/qt_real/qml" ]]; then
+  mkdir -p "${BUNDLE_DIR}/qml"
+  cp -a "${ROOT_DIR}/cmd/qt_real/qml/." "${BUNDLE_DIR}/qml/"
+fi
+if [[ -d "${ROOT_DIR}/assets" ]]; then
+  mkdir -p "${BUNDLE_DIR}/assets"
+  cp -a "${ROOT_DIR}/assets/." "${BUNDLE_DIR}/assets/"
+fi
+
+if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" || -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+  mkdir -p "${BUNDLE_DIR}/extensiones"
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension" "${BUNDLE_DIR}/extensiones/chromium"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-chromium.zip
+        zip -qr dipgra-extension-chromium.zip chromium
+      )
+    fi
+  fi
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension-firefox" "${BUNDLE_DIR}/extensiones/firefox"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-firefox.zip
+        zip -qr dipgra-extension-firefox.zip firefox
+        rm -f dipgra-extension-firefox.xpi
+        cp -f dipgra-extension-firefox.zip dipgra-extension-firefox.xpi
+      )
+    fi
+  fi
+  echo "[macos] Extensiones Dipgra incluidas desde: ${DIPGRA_EXTENSION_DIR}"
+else
+  echo "[macos] Aviso: no se encontró DipgraExtension (DIPGRA_EXTENSION_DIR=${DIPGRA_EXTENSION_DIR})."
+fi
 
 echo "[macos] Compilando frontend Qt nativo..."
 QT_REAL_BIN="${BUNDLE_DIR}/autofirma-desktop-qt-real"
@@ -68,6 +110,9 @@ Ejecutable:
   ./autofirma-desktop
 Host nativo:
   ./autofirma-host
+Extensiones navegador:
+  ./extensiones/dipgra-extension-chromium.zip
+  ./extensiones/dipgra-extension-firefox.zip
 README
 
 (
@@ -91,10 +136,29 @@ cat > "${ARTIFACT_RUN}" <<'HDR'
 set -euo pipefail
 
 PREFIX="/Applications/AutofirmaDipgra"
-if [[ "${1:-}" == "--prefix" ]]; then
-  PREFIX="${2:-/Applications/AutofirmaDipgra}"
-  shift 2 || true
-fi
+PROFILE="${AUTOFIRMA_INSTALL_PERFIL:-${AUTOFIRMA_INSTALL_PROFILE:-completo}}"
+SUBPROFILE_DESKTOP="${AUTOFIRMA_SUBPERFIL_ESCRITORIO:-${AUTOFIRMA_DESKTOP_SUBPROFILE:-fyne}}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prefix)
+      PREFIX="${2:-/Applications/AutofirmaDipgra}"
+      shift 2 || true
+      ;;
+    --perfil|--profile)
+      PROFILE="${2:-completo}"
+      shift 2 || true
+      ;;
+    --subperfil-escritorio|--subperfil-desktop|--subperfil)
+      SUBPROFILE_DESKTOP="${2:-fyne}"
+      shift 2 || true
+      ;;
+    *)
+      echo "Uso: $0 [--prefix <ruta>] [--perfil minimo|escritorio|completo] [--subperfil-escritorio fyne|gio|qt]" >&2
+      exit 1
+      ;;
+  esac
+done
 
 SELF="$0"
 MARKER="__ARCHIVE_BELOW__"
@@ -106,9 +170,9 @@ tail -n +"$LINE" "$SELF" | tar -xz -C "$TMPDIR"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "Este instalador necesita permisos de administrador. Reintentando con sudo..."
-  exec sudo "$TMPDIR/install.sh" "$PREFIX"
+  exec sudo "$TMPDIR/install.sh" "$PREFIX" --perfil "$PROFILE" --subperfil-escritorio "$SUBPROFILE_DESKTOP"
 else
-  exec "$TMPDIR/install.sh" "$PREFIX"
+  exec "$TMPDIR/install.sh" "$PREFIX" --perfil "$PROFILE" --subperfil-escritorio "$SUBPROFILE_DESKTOP"
 fi
 
 exit 0

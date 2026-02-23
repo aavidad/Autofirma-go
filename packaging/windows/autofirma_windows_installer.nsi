@@ -27,6 +27,7 @@ InstallDir "${INSTALL_DIR}"
 RequestExecutionLevel admin
 
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\autofirma-desktop.exe"
@@ -38,52 +39,81 @@ RequestExecutionLevel admin
 
 !insertmacro MUI_LANGUAGE "Spanish"
 
-Section "Install"
+; --- SETTINGS ---
+Section "Base de AutoFirma (Requerido)" SEC_CORE
+  SectionIn RO
   SetRegView 64
   SetOutPath "$INSTDIR"
-  File /r "${BUNDLE_DIR}/*"
-  ; Prepare local TLS certs and trust so WSS works out-of-the-box.
+  
+  ; Core binaries
+  File "${BUNDLE_DIR}\autofirma-desktop.exe"
+  File "${BUNDLE_DIR}\autofirma-host.exe"
+  File "${BUNDLE_DIR}\autofirma.ico"
+  File "${BUNDLE_DIR}\native_messaging_allowlist.json"
+  
+  ; Resources
+  File /r "${BUNDLE_DIR}\certs"
+  File /r "${BUNDLE_DIR}\config"
+  File /r "${BUNDLE_DIR}\assets"
+  
+  ; Prepare local TLS certs
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --generate-certs'
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --exportar-certs-java "$INSTDIR"'
   ExecWait '"$INSTDIR\autofirma-desktop.exe" --install-trust'
-  ExecWait '"$INSTDIR\autofirma-desktop.exe" --trust-status'
-  IfFileExists "$INSTDIR\certs\fnmt-accomp.crt" 0 +3
-    ExecWait 'certutil -addstore -f Root "$INSTDIR\certs\fnmt-accomp.crt"'
-    ExecWait 'certutil -addstore -f CA "$INSTDIR\certs\fnmt-accomp.crt"'
 
-  ; Main executable
+  ; Browser integration registry
   WriteRegStr HKLM "Software\${COMPANY}\${APPNAME}" "Install_Dir" "$INSTDIR"
   WriteRegStr HKLM "Software\${COMPANY}\${APPNAME}" "Version" "${APP_VERSION}"
-  WriteRegStr HKLM "Software\${COMPANY}\${APPNAME}" "UpdateJsonUrl" "${UPDATE_JSON_URL}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "Publisher" "${COMPANY}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "URLUpdateInfo" "${UPDATE_JSON_URL}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" '"$INSTDIR\uninstall.exe"'
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "NoModify" 1
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "NoRepair" 1
-
-  ; afirma:// protocol
+  
+  ; Protocol afirma://
   WriteRegStr HKCR "afirma" "" "URL:Autofirma Protocol"
   WriteRegStr HKCR "afirma" "URL Protocol" ""
   WriteRegStr HKCR "afirma\DefaultIcon" "" "$INSTDIR\autofirma.ico,0"
   WriteRegStr HKCR "afirma\shell\open\command" "" '"$INSTDIR\autofirma-desktop.exe" "%1"'
-  ; Also register directly under Software\Classes for browser compatibility
-  WriteRegStr HKLM "Software\Classes\afirma" "" "URL:Autofirma Protocol"
-  WriteRegStr HKLM "Software\Classes\afirma" "URL Protocol" ""
-  WriteRegStr HKLM "Software\Classes\afirma\DefaultIcon" "" "$INSTDIR\autofirma.ico,0"
-  WriteRegStr HKLM "Software\Classes\afirma\shell\open\command" "" '"$INSTDIR\autofirma-desktop.exe" "%1"'
-  WriteRegStr HKCU "Software\Classes\afirma" "" "URL:Autofirma Protocol"
-  WriteRegStr HKCU "Software\Classes\afirma" "URL Protocol" ""
-  WriteRegStr HKCU "Software\Classes\afirma\DefaultIcon" "" "$INSTDIR\autofirma.ico,0"
-  WriteRegStr HKCU "Software\Classes\afirma\shell\open\command" "" '"$INSTDIR\autofirma-desktop.exe" "%1"'
-
-  CreateDirectory "$SMPROGRAMS\Autofirma Dipgra"
-  CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\Autofirma Dipgra.lnk" "$INSTDIR\autofirma-desktop.exe" "" "$INSTDIR\autofirma.ico" 0
-  CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\Servidor AutoFirma.lnk" "$INSTDIR\autofirma-desktop.exe" "--server" "$INSTDIR\autofirma.ico" 0
-  CreateShortcut "$DESKTOP\Autofirma Dipgra.lnk" "$INSTDIR\autofirma-desktop.exe" "" "$INSTDIR\autofirma.ico" 0
-
+  
+  ; Uninstall info
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteUninstaller "$INSTDIR\uninstall.exe"
+SectionEnd
+
+SectionGroup "Interfaces de Usuario" SEC_FE
+  Section "Interfaz Fyne (Go)" SEC_FYNE
+    CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\Autofirma Fyne.lnk" "$INSTDIR\autofirma-desktop.exe" "-frontend fyne" "$INSTDIR\autofirma.ico" 0
+  SectionEnd
+
+  Section "Interfaz Gio (Ligera)" SEC_GIO
+    CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\Autofirma Gio (Ligera).lnk" "$INSTDIR\autofirma-desktop.exe" "-frontend gio" "$INSTDIR\autofirma.ico" 0
+  SectionEnd
+
+  Section "Interfaz Qt 6 (Recomendada)" SEC_QT
+    SetOutPath "$INSTDIR"
+    File "${BUNDLE_DIR}\autofirma-desktop-qt-bin.exe"
+    File "${BUNDLE_DIR}\autofirma-desktop-qt-real.exe"
+    File /r "${BUNDLE_DIR}\qml"
+    ; Incluir DLLs de Qt si existen
+    File /nonfatal "${BUNDLE_DIR}\*.dll"
+    File /nonfatal /r "${BUNDLE_DIR}\platforms"
+    File /nonfatal /r "${BUNDLE_DIR}\styles"
+    File /nonfatal /r "${BUNDLE_DIR}\imageformats"
+    File /nonfatal /r "${BUNDLE_DIR}\tls"
+
+    CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\AutoFirma Dipgra.lnk" "$INSTDIR\autofirma-desktop-qt-bin.exe" "" "$INSTDIR\autofirma.ico" 0
+    CreateShortcut "$DESKTOP\AutoFirma Dipgra.lnk" "$INSTDIR\autofirma-desktop-qt-bin.exe" "" "$INSTDIR\autofirma.ico" 0
+    
+    ; Update protocol to use Qt by default if installed
+    WriteRegStr HKCR "afirma\shell\open\command" "" '"$INSTDIR\autofirma-desktop-qt-bin.exe" "%1"'
+  SectionEnd
+SectionGroupEnd
+
+Section "Extensiones de Navegador" SEC_EXT
+  SetOutPath "$INSTDIR\extensiones"
+  File /r "${BUNDLE_DIR}\extensiones\*"
+  
+  ; Firefox deployment
+  IfFileExists "$INSTDIR\extensiones\dipgra-extension-firefox.xpi" 0 +5
+    CreateDirectory "$PROGRAMFILES64\Mozilla Firefox\distribution\extensions"
+    CopyFiles /SILENT "$INSTDIR\extensiones\dipgra-extension-firefox.xpi" "$PROGRAMFILES64\Mozilla Firefox\distribution\extensions\extension@dipgra.es.xpi"
 SectionEnd
 
 Section "Uninstall"

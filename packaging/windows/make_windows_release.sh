@@ -21,6 +21,30 @@ GUI_CMD_PKG="${GUI_CMD_PKG:-}"
 PREBUILT_EXE="${PREBUILT_EXE:-}"
 PREBUILT_QT_EXE="${PREBUILT_QT_EXE:-}"
 QT_REAL_EXE="${QT_REAL_EXE:-}"
+CHROMIUM_IDS_RAW="${AUTOFIRMA_CHROMIUM_EXTENSION_IDS:-}"
+FIREFOX_IDS_RAW="${AUTOFIRMA_FIREFOX_EXTENSION_IDS:-extension@dipgra.es}"
+DIPGRA_EXTENSION_DIR="${DIPGRA_EXTENSION_DIR:-${ROOT_DIR}/../../DipgraExtension}"
+
+json_array_from_csv() {
+  local raw="$1"
+  local out="["
+  local first=1
+  local item trimmed escaped
+  IFS=',' read -r -a parts <<<"${raw}"
+  for item in "${parts[@]:-}"; do
+    trimmed="$(echo "${item}" | xargs)"
+    [[ -n "${trimmed}" ]] || continue
+    escaped="${trimmed//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    if [[ ${first} -eq 0 ]]; then
+      out+=", "
+    fi
+    out+="\"${escaped}\""
+    first=0
+  done
+  out+="]"
+  printf '%s' "${out}"
+}
 
 if ! command -v makensis >/dev/null 2>&1; then
   echo "[windows] Error: 'makensis' no esta instalado o no esta en PATH."
@@ -69,6 +93,13 @@ else
     GOCACHE=/tmp/gocache GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
       go build -ldflags="-H=windowsgui" -o "${BUNDLE_DIR}/autofirma-desktop.exe" "${GUI_CMD_PKG}"
   )
+
+  echo "[windows] Building Native Messaging host binary..."
+  (
+    cd "${ROOT_DIR}"
+    GOCACHE=/tmp/gocache GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+      go build -trimpath -ldflags="-s -w" -o "${BUNDLE_DIR}/autofirma-host.exe" ./cmd/autofirma-host
+  )
 fi
 
 if [[ -f "${ICON_FILE}" ]]; then
@@ -83,6 +114,62 @@ if [[ -f "${ROOT_DIR}/packaging/windows/certs/fnmt-accomp.crt" ]]; then
 else
   echo "[windows] Warning: cert file not found at packaging/windows/certs/fnmt-accomp.crt"
 fi
+if [[ -d "${ROOT_DIR}/config" ]]; then
+  mkdir -p "${BUNDLE_DIR}/config"
+  cp -a "${ROOT_DIR}/config/." "${BUNDLE_DIR}/config/"
+fi
+
+if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" || -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+  mkdir -p "${BUNDLE_DIR}/extensiones"
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension" "${BUNDLE_DIR}/extensiones/chromium"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-chromium.zip
+        zip -qr dipgra-extension-chromium.zip chromium
+      )
+    fi
+  fi
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension-firefox" "${BUNDLE_DIR}/extensiones/firefox"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-firefox.zip
+        zip -qr dipgra-extension-firefox.zip firefox
+        rm -f dipgra-extension-firefox.xpi
+        cp -f dipgra-extension-firefox.zip dipgra-extension-firefox.xpi
+      )
+    fi
+  fi
+  echo "[windows] Extensiones Dipgra incluidas desde: ${DIPGRA_EXTENSION_DIR}"
+else
+fi
+
+# Qt/QML resources
+if [[ -d "${ROOT_DIR}/cmd/qt_real/qml" ]]; then
+  mkdir -p "${BUNDLE_DIR}/qml"
+  cp -a "${ROOT_DIR}/cmd/qt_real/qml/." "${BUNDLE_DIR}/qml/"
+fi
+if [[ -d "${ROOT_DIR}/assets" ]]; then
+  mkdir -p "${BUNDLE_DIR}/assets"
+  cp -a "${ROOT_DIR}/assets/." "${BUNDLE_DIR}/assets/"
+fi
+
+chromium_ids_json="$(json_array_from_csv "${CHROMIUM_IDS_RAW}")"
+firefox_ids_json="$(json_array_from_csv "${FIREFOX_IDS_RAW}")"
+allow_require="false"
+if [[ "${chromium_ids_json}" != "[]" || "${firefox_ids_json}" != "[]" ]]; then
+  allow_require="true"
+fi
+cat > "${BUNDLE_DIR}/native_messaging_allowlist.json" <<JSON
+{
+  "chromium_ids": ${chromium_ids_json},
+  "firefox_ids": ${firefox_ids_json},
+  "require_match": ${allow_require}
+}
+JSON
 
 cat > "${BUNDLE_DIR}/autofirma-dipgra-server.bat" <<'BAT'
 @echo off
