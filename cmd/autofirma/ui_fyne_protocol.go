@@ -108,7 +108,8 @@ func (ui *FyneUI) HandleProtocolInit(uriString string) {
 		}
 
 		if ui.ProtocolQuickMode {
-			ui.SetStatus("Solicitud protocolaria sin documento descargable. No se puede completar en modo reducido.")
+			ui.SetStatus("Solicitud web sin documento descargable. Seleccione un fichero local para continuar.")
+			go ui.runProtocolQuickLocalFileSign(state)
 			return
 		}
 		ui.SetStatus("Iniciado modo firma local web. Seleccione archivo y certificado.")
@@ -354,6 +355,31 @@ func (ui *FyneUI) runProtocolQuickSign(state *ProtocolState) {
 		return
 	}
 	ui.signCurrentProtocolCore(state)
+}
+
+func (ui *FyneUI) runProtocolQuickLocalFileSign(state *ProtocolState) {
+	if state == nil {
+		ui.SetStatus("Error protocolo: estado inválido.")
+		return
+	}
+	paths, canceled, err := protocolLoadDialog("", "pdf,xml,csig,sig", false)
+	if canceled {
+		ui.SetStatus("Operación cancelada por el usuario.")
+		ui.notifyProtocolCancelAndClose(state, "sign")
+		return
+	}
+	if err != nil {
+		ui.SetStatus("Error seleccionando fichero local: " + err.Error())
+		return
+	}
+	if len(paths) == 0 || strings.TrimSpace(paths[0]) == "" {
+		ui.SetStatus("No se seleccionó fichero local.")
+		return
+	}
+	ui.InputFile = strings.TrimSpace(paths[0])
+	fyneSetFileLabel(ui, ui.InputFile)
+	ui.SetStatus("Fichero local seleccionado. Seleccione certificado para continuar.")
+	ui.runProtocolQuickSign(state)
 }
 
 func (ui *FyneUI) runProtocolQuickBatch(state *ProtocolState) {
