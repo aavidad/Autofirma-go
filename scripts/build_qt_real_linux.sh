@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_BIN="${1:-${ROOT_DIR}/out/autofirma-desktop-qt-real}"
+OUT_BIN="${1:-${ROOT_DIR}/out/autofirma-qt-real}"
 QT_DIR="${ROOT_DIR}/cmd/qt_real"
 
 if [[ ! -d "${QT_DIR}" ]]; then

@@ -1,6 +1,6 @@
 import re
 
-filepath = 'cmd/gui/ui.go'
+filepath = 'cmd/autofirma/ui.go'
 with open(filepath, 'r') as f:
     content = f.read()
 

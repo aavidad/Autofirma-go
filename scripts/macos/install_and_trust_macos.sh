@@ -22,7 +22,7 @@ else
   "${INSTALLER_SCRIPT}" "${PREFIX}"
 fi
 
-APP_BIN="${PREFIX}/autofirma-desktop"
+APP_BIN="${PREFIX}/autofirma"
 if [[ ! -x "${APP_BIN}" ]]; then
   echo "[install-trust-mac] ERROR: binario no encontrado tras instalación: ${APP_BIN}" >&2
   exit 1

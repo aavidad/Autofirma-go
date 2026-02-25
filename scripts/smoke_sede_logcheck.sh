@@ -43,8 +43,8 @@ done
 
 if [[ ! -f "$LOG_FILE" ]]; then
   for candidate in \
-    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-desktop-$(date +%F).log" \
-    "/tmp/AutofirmaDipgra/logs/autofirma-desktop-$(date +%F).log"; do
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-$(date +%F).log" \
+    "/tmp/AutofirmaDipgra/logs/autofirma-$(date +%F).log"; do
     if [[ -f "${candidate}" ]]; then
       LOG_FILE="${candidate}"
       echo "INFO: log auto-detectado: ${LOG_FILE}"

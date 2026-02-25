@@ -7,7 +7,7 @@ mkdir -p ~/.local/share/applications
 cat > ~/.local/share/applications/autofirma-dipgra.desktop <<EOL
 [Desktop Entry]
 Name=Autofirma Dipgra
-Exec=/home/alberto/Trabajo/GrxGo/plugin_autofirma_native/native-host/dist/autofirma-desktop %u
+Exec=/home/alberto/Trabajo/GrxGo/plugin_autofirma_native/native-host/dist/autofirma %u
 Type=Application
 Terminal=false
 MimeType=x-scheme-handler/afirma;

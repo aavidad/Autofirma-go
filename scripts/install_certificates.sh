@@ -85,5 +85,5 @@ cp server.key dist/
 echo ""
 echo -e "${GREEN}🎉 Done!${NC}"
 echo "1. Restart your browser."
-echo "2. Run the application: ./dist/autofirma-desktop --server"
+echo "2. Run the application: ./dist/autofirma --server"
 echo "3. The browser should now trust wss://127.0.0.1:63117/ automatically."

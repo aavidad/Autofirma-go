@@ -9,7 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${ROOT_DIR}/out"
 BUILD_DIR="${OUT_DIR}/package-linux"
 VERSION_TAG="${1:-$(date +%Y%m%d_%H%M%S)}"
-ARTIFACT="${OUT_DIR}/autofirma-host-linux-${VERSION_TAG}.tar.gz"
+ARTIFACT="${OUT_DIR}/autofirma-linux-${VERSION_TAG}.tar.gz"
 
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}" "${OUT_DIR}"
@@ -21,7 +21,7 @@ if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
 fi
 
 echo "[package] building host binary"
-GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BUILD_DIR}/autofirma-host" ./cmd/autofirma-host
+GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BUILD_DIR}/autofirma" ./cmd/autofirma
 
 # Optional smoke test data
 if [[ -d "${ROOT_DIR}/testdata" ]]; then
@@ -38,13 +38,13 @@ cat > "${BUILD_DIR}/README_PACKAGE.md" <<'PKG'
 # AutoFirma Host Package
 
 ## Contents
-- `autofirma-host`: native host binary (Go)
+- `autofirma`: native host binary (Go)
 - `testdata/`: optional local smoke assets
 - `smoke_native_host.sh`: quick compatibility check script
 
 ## Run
 ```bash
-./autofirma-host
+./autofirma
 ```
 
 ## Smoke
@@ -54,7 +54,7 @@ chmod +x smoke_native_host.sh
 ```
 PKG
 
-chmod +x "${BUILD_DIR}/autofirma-host"
+chmod +x "${BUILD_DIR}/autofirma"
 chmod +x "${BUILD_DIR}/smoke_native_host.sh" || true
 
 tar -C "${BUILD_DIR}" -czf "${ARTIFACT}" .

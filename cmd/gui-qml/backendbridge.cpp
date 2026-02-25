@@ -44,9 +44,9 @@ void BackendBridge::startBackend(const QString &addr, const QString &token,
     return;
 
   QString appDir = QCoreApplication::applicationDirPath();
-  QString desktopBin = QDir(appDir).filePath("autofirma-desktop");
+  QString desktopBin = QDir(appDir).filePath("autofirma");
   if (!QFileInfo::exists(desktopBin))
-    desktopBin = "autofirma-desktop";
+    desktopBin = "autofirma";
 
   m_process = new QProcess(this);
   m_process->setProgram(desktopBin);

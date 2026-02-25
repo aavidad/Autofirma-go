@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_TMP="/tmp/autofirma-desktop"
-BIN_DST="/opt/autofirma-dipgra/autofirma-desktop"
+BIN_TMP="/tmp/autofirma"
+BIN_DST="/opt/autofirma-dipgra/autofirma"
 LOG_DIR="${HOME}/.local/state/autofirma-dipgra/logs"
-LOG_FILE="${LOG_DIR}/autofirma-desktop-$(date +%F).log"
+LOG_FILE="${LOG_DIR}/autofirma-$(date +%F).log"
 
 TAIL_LOG=1
 if [[ "${1:-}" == "--no-tail" ]]; then
@@ -17,11 +17,11 @@ if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
 fi
 
 echo "[1/4] Parando procesos anteriores..."
-pkill -f '/opt/autofirma-dipgra/autofirma-desktop|autofirma-web-compat|/cmd/gui' || true
+pkill -f '/opt/autofirma-dipgra/autofirma|autofirma-web-compat|/cmd/autofirma' || true
 
 echo "[2/4] Compilando binario..."
 cd "${ROOT_DIR}"
-GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_TMP}" ./cmd/gui
+GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_TMP}" ./cmd/autofirma
 
 echo "[3/4] Instalando en ${BIN_DST}..."
 sudo install -m 0755 "${BIN_TMP}" "${BIN_DST}"

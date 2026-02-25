@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSET_ICON="${ROOT_DIR}/pkg/applog/assets/systray_icon_64.png"
 BACKUP_ICON="${ASSET_ICON}.bak_test"
-TEST_BIN="/tmp/autofirma-desktop-systray-test"
+TEST_BIN="/tmp/autofirma-systray-test"
 
 ICON_A="${1:-${ROOT_DIR}/pluma.png}"
 ICON_B="${2:-${ROOT_DIR}/plumas2.png}"
@@ -47,7 +47,7 @@ prepare_icon() {
 build_test_bin() {
   (
     cd "${ROOT_DIR}"
-    go build -o "${TEST_BIN}" ./cmd/gui
+    go build -o "${TEST_BIN}" ./cmd/autofirma
   )
 }
 
@@ -87,4 +87,4 @@ echo "Icono seleccionado copiado en: ${ASSET_ICON}"
 echo "Compilando binario final..."
 build_test_bin
 echo "OK. Si quieres instalarlo en /opt:"
-echo "  sudo install -m 0755 ${TEST_BIN} /opt/autofirma-dipgra/autofirma-desktop"
+echo "  sudo install -m 0755 ${TEST_BIN} /opt/autofirma-dipgra/autofirma"

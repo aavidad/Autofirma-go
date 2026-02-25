@@ -11,7 +11,7 @@ param(
 )
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..\\..')).Path
-$Bin = Join-Path $RootDir 'autofirma-host-e2e.exe'
+$Bin = Join-Path $RootDir 'autofirma-e2e.exe'
 
 if (-not $env:GOFLAGS -or $env:GOFLAGS -notmatch '(^|\s)-mod=') {
   if ([string]::IsNullOrWhiteSpace($env:GOFLAGS)) { $env:GOFLAGS = '-mod=readonly' } else { $env:GOFLAGS = "$($env:GOFLAGS) -mod=readonly" }
@@ -21,7 +21,7 @@ if (-not $env:GOCACHE -or [string]::IsNullOrWhiteSpace($env:GOCACHE)) {
 }
 
 Set-Location $RootDir
-& go build -o $Bin ./cmd/autofirma-host
+& go build -o $Bin ./cmd/autofirma
 
 function Read-Exact([System.IO.Stream]$Stream, [int]$Count) {
   $buf = New-Object byte[] $Count

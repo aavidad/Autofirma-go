@@ -4,9 +4,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_BIN="/tmp/autofirma-desktop-qt-real"
+TMP_BIN="/tmp/autofirma-qt-real"
 DEST_DIR="/opt/autofirma-dipgra"
-DEST_BIN="${DEST_DIR}/autofirma-desktop-qt-real"
+DEST_BIN="${DEST_DIR}/autofirma-qt-real"
 
 echo "[1/3] Compilando qt-real..."
 "${ROOT_DIR}/scripts/build_qt_real_linux.sh" "${TMP_BIN}"

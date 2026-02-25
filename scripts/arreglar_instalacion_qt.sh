@@ -4,10 +4,10 @@
 set -euo pipefail
 
 APP_DIR="/opt/autofirma-dipgra"
-BIN_MAIN="${APP_DIR}/autofirma-desktop"
-BIN_QT="${APP_DIR}/autofirma-desktop-qt-bin"
+BIN_MAIN="${APP_DIR}/autofirma"
+BIN_QT="${APP_DIR}/autofirma-qt-bin"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUNDLE_MAIN="${ROOT_DIR}/release/linux/bundle/AutofirmaDipgra/autofirma-desktop"
+BUNDLE_MAIN="${ROOT_DIR}/release/linux/bundle/AutofirmaDipgra/autofirma"
 
 if [[ ! -x "${BIN_QT}" ]]; then
   echo "[ERROR] No existe ${BIN_QT}."
@@ -22,7 +22,7 @@ if [[ ! -x "${BUNDLE_MAIN}" ]]; then
   exit 1
 fi
 
-echo "[1/4] Restaurando autofirma-desktop (binario Go principal)..."
+echo "[1/4] Restaurando autofirma (binario Go principal)..."
 sudo install -m 0755 "${BUNDLE_MAIN}" "${BIN_MAIN}"
 
 echo "[2/4] Reescribiendo launchers..."
@@ -30,22 +30,22 @@ sudo rm -f /usr/local/bin/autofirma-dipgra
 
 sudo tee /usr/local/bin/autofirma-dipgra >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma-desktop" -frontend qt "$@"
+exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma" -frontend qt "$@"
 EOF
 
 sudo tee /usr/local/bin/autofirma-dipgra-qt >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma-desktop" -frontend qt "$@"
+exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma" -frontend qt "$@"
 EOF
 
 sudo tee /usr/local/bin/autofirma-dipgra-fyne >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec "/opt/autofirma-dipgra/autofirma-desktop" -frontend fyne "$@"
+exec "/opt/autofirma-dipgra/autofirma" -frontend fyne "$@"
 EOF
 
 sudo tee /usr/local/bin/autofirma-dipgra-gio >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec "/opt/autofirma-dipgra/autofirma-desktop" -frontend gio "$@"
+exec "/opt/autofirma-dipgra/autofirma" -frontend gio "$@"
 EOF
 
 sudo chmod 0755 \

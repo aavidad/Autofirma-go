@@ -155,10 +155,10 @@ install_system_dependencies() {
 stop_running_instances() {
   echo "[install] Checking running Autofirma instances..."
   local patterns=(
-    "/opt/autofirma-dipgra/autofirma-desktop"
+    "/opt/autofirma-dipgra/autofirma"
     "/autofirma-web-compat"
-    "/autofirma-desktop --server"
-    "/autofirma-desktop afirma://websocket"
+    "/autofirma --server"
+    "/autofirma afirma://websocket"
   )
   local found=0
   local pat pid_list
@@ -393,9 +393,9 @@ install_system_dependencies
 echo "[install] Installing into ${PREFIX} (perfil=${PROFILE})"
 mkdir -p "${PREFIX}"
 cp -a "${APP_SRC}/." "${PREFIX}/"
-chmod +x "${PREFIX}/autofirma-desktop"
-if [[ -f "${PREFIX}/autofirma-host" ]]; then
-  chmod +x "${PREFIX}/autofirma-host"
+chmod +x "${PREFIX}/autofirma"
+if [[ -f "${PREFIX}/autofirma" ]]; then
+  chmod +x "${PREFIX}/autofirma"
 fi
 if [[ "${ENABLE_NATIVE_PROFILE}" -eq 1 ]]; then
   install_browser_extensions_linux
@@ -417,19 +417,19 @@ if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   # Generate local certificates for the installing user (best effort).
   if [[ -n "${USER_NAME}" ]] && command -v runuser >/dev/null 2>&1; then
     target_user_certs_dir="${USER_HOME:-${HOME}}/.config/AutofirmaDipgra/certs"
-    runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
-    runuser -u "${USER_NAME}" -- env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
-    runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma-desktop" --exportar-certs-java "${target_user_certs_dir}" >/dev/null 2>&1 || true
+    runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma" --generate-certs >/dev/null 2>&1 || true
+    runuser -u "${USER_NAME}" -- env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma" --install-trust >/dev/null 2>&1 || true
+    runuser -u "${USER_NAME}" -- "${PREFIX}/autofirma" --exportar-certs-java "${target_user_certs_dir}" >/dev/null 2>&1 || true
   else
-    "${PREFIX}/autofirma-desktop" --generate-certs >/dev/null 2>&1 || true
-    env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
-    "${PREFIX}/autofirma-desktop" --exportar-certs-java "${HOME}/.config/AutofirmaDipgra/certs" >/dev/null 2>&1 || true
+    "${PREFIX}/autofirma" --generate-certs >/dev/null 2>&1 || true
+    env AUTOFIRMA_TRUST_SKIP_SYSTEM=1 "${PREFIX}/autofirma" --install-trust >/dev/null 2>&1 || true
+    "${PREFIX}/autofirma" --exportar-certs-java "${HOME}/.config/AutofirmaDipgra/certs" >/dev/null 2>&1 || true
   fi
   copy_java_compat_certs_to_prefix
 
   # System-wide trust (best effort, needs root)
   if [[ "$(id -u)" -eq 0 ]]; then
-    env AUTOFIRMA_TRUST_SKIP_NSS=1 "${PREFIX}/autofirma-desktop" --install-trust >/dev/null 2>&1 || true
+    env AUTOFIRMA_TRUST_SKIP_NSS=1 "${PREFIX}/autofirma" --install-trust >/dev/null 2>&1 || true
     install_fnmt_accomp_system_ca
   fi
 else
@@ -440,11 +440,11 @@ mkdir -p /usr/local/bin
 
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   # Evita sobrescribir el binario real si existían symlinks legacy
-  # (p.ej. /usr/local/bin/autofirma-dipgra -> /opt/.../autofirma-desktop).
+  # (p.ej. /usr/local/bin/autofirma-dipgra -> /opt/.../autofirma).
   rm -f /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio /usr/local/bin/autofirma-dipgra-qt /usr/local/bin/autofirma-dipgra-server
 
-  if [[ "${DESKTOP_SUBPROFILE}" == "qt" && ! -x "${PREFIX}/autofirma-desktop-qt-bin" ]]; then
-    echo "[install] Aviso: subperfil qt solicitado pero no se encontró ${PREFIX}/autofirma-desktop-qt-bin; se usará fyne."
+  if [[ "${DESKTOP_SUBPROFILE}" == "qt" && ! -x "${PREFIX}/autofirma-qt-bin" ]]; then
+    echo "[install] Aviso: subperfil qt solicitado pero no se encontró ${PREFIX}/autofirma-qt-bin; se usará fyne."
     DESKTOP_SUBPROFILE="fyne"
   fi
 
@@ -453,7 +453,7 @@ if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
     qt_env_base="AUTOFIRMA_QT_RUNTIME_DIR=${PREFIX}/qt-runtime "
   fi
   qt_fallback_env=""
-  if [[ ! -x "${PREFIX}/autofirma-desktop-qt-real" ]]; then
+  if [[ ! -x "${PREFIX}/autofirma-qt-real" ]]; then
     qt_fallback_env="AUTOFIRMA_QT_FALLBACK_FYNE=1 "
   fi
 
@@ -461,12 +461,12 @@ if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
     if [[ "${frontend}" == "qt" ]]; then
       cat > "/usr/local/bin/autofirma-dipgra-${frontend}" <<WRAP
 #!/usr/bin/env bash
-exec env ${qt_env_base}${qt_fallback_env}"${PREFIX}/autofirma-desktop" -frontend "${frontend}" "\$@"
+exec env ${qt_env_base}${qt_fallback_env}"${PREFIX}/autofirma" -frontend "${frontend}" "\$@"
 WRAP
     else
       cat > "/usr/local/bin/autofirma-dipgra-${frontend}" <<WRAP
 #!/usr/bin/env bash
-exec "${PREFIX}/autofirma-desktop" -frontend "${frontend}" "\$@"
+exec "${PREFIX}/autofirma" -frontend "${frontend}" "\$@"
 WRAP
     fi
     chmod 0755 "/usr/local/bin/autofirma-dipgra-${frontend}"
@@ -475,32 +475,32 @@ WRAP
   if [[ "${DESKTOP_SUBPROFILE}" == "qt" ]]; then
     cat > /usr/local/bin/autofirma-dipgra <<WRAP
 #!/usr/bin/env bash
-exec env ${qt_env_base}${qt_fallback_env}"${PREFIX}/autofirma-desktop" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
+exec env ${qt_env_base}${qt_fallback_env}"${PREFIX}/autofirma" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
 WRAP
   else
     cat > /usr/local/bin/autofirma-dipgra <<WRAP
 #!/usr/bin/env bash
-exec "${PREFIX}/autofirma-desktop" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
+exec "${PREFIX}/autofirma" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
 WRAP
   fi
   chmod 0755 /usr/local/bin/autofirma-dipgra
 
   cat > /usr/local/bin/autofirma-dipgra-server <<WRAP
 #!/usr/bin/env bash
-exec "${PREFIX}/autofirma-desktop" --server "\$@"
+exec "${PREFIX}/autofirma" --server "\$@"
 WRAP
   chmod 0755 /usr/local/bin/autofirma-dipgra-server
 else
-  ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
+  ln -sf "${PREFIX}/autofirma" /usr/local/bin/autofirma-dipgra
   cat > /usr/local/bin/autofirma-dipgra-server <<WRAP
 #!/usr/bin/env bash
-exec "${PREFIX}/autofirma-desktop" --server "\$@"
+exec "${PREFIX}/autofirma" --server "\$@"
 WRAP
   chmod 0755 /usr/local/bin/autofirma-dipgra-server
 fi
 
-if [[ -f "${PREFIX}/autofirma-host" ]]; then
-  ln -sf "${PREFIX}/autofirma-host" /usr/local/bin/autofirma-host
+if [[ -f "${PREFIX}/autofirma" ]]; then
+  ln -sf "${PREFIX}/autofirma" /usr/local/bin/autofirma
 fi
 
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
@@ -576,8 +576,8 @@ fi
 # Native Messaging manifests for Chromium/Firefox.
 if [[ "${ENABLE_NATIVE_PROFILE}" -ne 1 ]]; then
   echo "[install] Perfil ${PROFILE}: se omite registro Native Messaging."
-elif [[ ! -x "${PREFIX}/autofirma-host" ]]; then
-  echo "[install] Warning: autofirma-host not found in ${PREFIX}. Native Messaging will not be installed."
+elif [[ ! -x "${PREFIX}/autofirma" ]]; then
+  echo "[install] Warning: autofirma not found in ${PREFIX}. Native Messaging will not be installed."
 else
   declare -a host_manifest_names=("${HOST_NAME}")
   while IFS= read -r alias_name; do
@@ -630,7 +630,7 @@ else
   chromium_ids_array="$(json_array "${chromium_ids[@]}")"
   firefox_ids_array="$(json_array "${firefox_ids[@]}")"
 
-  # Allowlist local para endurecer validación de caller en autofirma-host.
+  # Allowlist local para endurecer validación de caller en autofirma.
   allow_require="false"
   if [[ "${#chromium_ids[@]}" -gt 0 || "${#firefox_ids[@]}" -gt 0 ]]; then
     allow_require="true"
@@ -657,7 +657,7 @@ JSON
 {
   "name": "${manifest_name}",
   "description": "AutoFirma Native Messaging Host",
-  "path": "${PREFIX}/autofirma-host",
+  "path": "${PREFIX}/autofirma-browser-bridge",
   "type": "stdio",
   "allowed_origins": ${chromium_array}
 }
@@ -680,7 +680,7 @@ JSON
 {
   "name": "${manifest_name}",
   "description": "AutoFirma Native Messaging Host",
-  "path": "${PREFIX}/autofirma-host",
+  "path": "${PREFIX}/autofirma-browser-bridge",
   "type": "stdio",
   "allowed_origins": ${chromium_array}
 }
@@ -708,7 +708,7 @@ JSON
 {
   "name": "${manifest_name}",
   "description": "AutoFirma Native Messaging Host",
-  "path": "${PREFIX}/autofirma-host",
+  "path": "${PREFIX}/autofirma-browser-bridge",
   "type": "stdio",
   "allowed_extensions": ${firefox_array}
 }
@@ -725,7 +725,7 @@ JSON
 {
   "name": "${manifest_name}",
   "description": "AutoFirma Native Messaging Host",
-  "path": "${PREFIX}/autofirma-host",
+  "path": "${PREFIX}/autofirma-browser-bridge",
   "type": "stdio",
   "allowed_extensions": ${firefox_array}
 }
@@ -742,7 +742,7 @@ JSON
 fi
 
 echo "[install] Done (perfil=${PROFILE})"
-echo "[install] Binary: ${PREFIX}/autofirma-desktop"
+echo "[install] Binary: ${PREFIX}/autofirma"
 echo "[install] Command: autofirma-dipgra"
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   echo "[install] Integración de escritorio: habilitada"
@@ -752,9 +752,9 @@ else
   echo "[install] Integración de escritorio: omitida"
   echo "[install] Lanzador servidor: autofirma-dipgra-server"
 fi
-if [[ -x "${PREFIX}/autofirma-host" ]]; then
-  echo "[install] Native host: ${PREFIX}/autofirma-host"
-  echo "[install] Native host command: autofirma-host"
+if [[ -x "${PREFIX}/autofirma" ]]; then
+  echo "[install] Native host: ${PREFIX}/autofirma-browser-bridge"
+  echo "[install] Native host command: autofirma-browser-bridge"
   if [[ -f "${PREFIX}/native_messaging_allowlist.json" ]]; then
     echo "[install] Allowlist Native Messaging: ${PREFIX}/native_messaging_allowlist.json"
   fi

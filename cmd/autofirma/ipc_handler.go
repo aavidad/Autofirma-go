@@ -1,8 +1,11 @@
 package main
 
 import (
+	"autofirma-host/pkg/certstore"
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -85,6 +88,44 @@ func processIPCRequest(req ipcRequest, core *CoreService) ipcResponse {
 				"failCount":    failCount,
 			},
 		}
+
+	case "import_certificate", "certificados_importar":
+		var params struct {
+			P12B64   string `json:"p12B64"`
+			Password string `json:"password"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return ipcResponse{OK: false, Error: "invalid params"}
+		}
+		if params.P12B64 == "" {
+			return ipcResponse{OK: false, Error: "p12B64 is required"}
+		}
+		data, err := base64.StdEncoding.DecodeString(params.P12B64)
+		if err != nil {
+			return ipcResponse{OK: false, Error: "invalid base64"}
+		}
+		tmpFile, err := ioutil.TempFile("", "autofirma-import-*.p12")
+		if err != nil {
+			return ipcResponse{OK: false, Error: "failed to create temp file"}
+		}
+		defer os.Remove(tmpFile.Name())
+		if _, err := tmpFile.Write(data); err != nil {
+			tmpFile.Close()
+			return ipcResponse{OK: false, Error: "failed to write temp file"}
+		}
+		tmpFile.Close()
+
+		if err := certstore.ImportP12ToSystem(tmpFile.Name(), params.Password); err != nil {
+			return ipcResponse{OK: false, Error: err.Error()}
+		}
+		return ipcResponse{OK: true, Data: "Certificado importado correctamente"}
+
+	case "install_public_roots", "confianza_instalar":
+		lines, err := installPublicAdminRoots()
+		if err != nil {
+			return ipcResponse{OK: false, Error: err.Error(), Data: lines}
+		}
+		return ipcResponse{OK: true, Data: lines}
 
 	// ── Firma ─────────────────────────────────────────────────────────────────
 	case "sign", "firmar":

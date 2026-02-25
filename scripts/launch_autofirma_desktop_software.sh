@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-BIN="/home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/work/native-host-src/dist/autofirma-desktop"
+BIN="/home/alberto/Trabajo/GrxGo/.codex_workspace/autofirma_migracion/work/native-host-src/dist/autofirma"
 LOG="/tmp/autofirma-launcher.log"
 
 export LIBGL_ALWAYS_SOFTWARE=1

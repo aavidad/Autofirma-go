@@ -18,7 +18,7 @@ need_cmd() {
 need_cmd sudo
 need_cmd install
 
-if [[ ! -f "${BUNDLE_DIR}/autofirma-desktop" || ! -f "${BUNDLE_DIR}/autofirma-desktop-qt-bin" || ! -f "${BUNDLE_DIR}/autofirma-desktop-qt-real" ]]; then
+if [[ ! -f "${BUNDLE_DIR}/autofirma" || ! -f "${BUNDLE_DIR}/autofirma-qt-bin" || ! -f "${BUNDLE_DIR}/autofirma-qt-real" ]]; then
   echo "[reparar-qt] Bundle incompleto en ${BUNDLE_DIR}" >&2
   echo "[reparar-qt] Genera primero el release:" >&2
   echo "  QT_RUNTIME_FROM_SYSTEM=1 BUILD_QT_REAL_FROM_SOURCE=1 BUILD_SELF_CONTAINED=0 ./packaging/linux/make_linux_release.sh" >&2
@@ -27,10 +27,10 @@ fi
 
 echo "[reparar-qt] Copiando binarios a ${TARGET_DIR}..."
 sudo mkdir -p "${TARGET_DIR}"
-sudo install -m 0755 "${BUNDLE_DIR}/autofirma-desktop" "${TARGET_DIR}/autofirma-desktop"
-sudo install -m 0755 "${BUNDLE_DIR}/autofirma-desktop-qt-bin" "${TARGET_DIR}/autofirma-desktop-qt-bin"
-sudo install -m 0755 "${BUNDLE_DIR}/autofirma-desktop-qt-real" "${TARGET_DIR}/autofirma-desktop-qt-real"
-sudo install -m 0755 "${BUNDLE_DIR}/autofirma-host" "${TARGET_DIR}/autofirma-host"
+sudo install -m 0755 "${BUNDLE_DIR}/autofirma" "${TARGET_DIR}/autofirma"
+sudo install -m 0755 "${BUNDLE_DIR}/autofirma-qt-bin" "${TARGET_DIR}/autofirma-qt-bin"
+sudo install -m 0755 "${BUNDLE_DIR}/autofirma-qt-real" "${TARGET_DIR}/autofirma-qt-real"
+sudo install -m 0755 "${BUNDLE_DIR}/autofirma" "${TARGET_DIR}/autofirma"
 if [[ -d "${BUNDLE_DIR}/qt-runtime" ]]; then
   sudo rm -rf "${TARGET_DIR}/qt-runtime"
   sudo mkdir -p "${TARGET_DIR}/qt-runtime"
@@ -40,22 +40,22 @@ fi
 echo "[reparar-qt] Creando launchers en /usr/local/bin..."
 sudo tee /usr/local/bin/autofirma-dipgra-qt >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma-desktop" -frontend qt "$@"
+exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma" -frontend qt "$@"
 EOF
 sudo tee /usr/local/bin/autofirma-dipgra >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma-desktop" -frontend qt "$@"
+exec env AUTOFIRMA_QT_RUNTIME_DIR=/opt/autofirma-dipgra/qt-runtime "/opt/autofirma-dipgra/autofirma" -frontend qt "$@"
 EOF
 sudo tee /usr/local/bin/autofirma-dipgra-fyne >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec "/opt/autofirma-dipgra/autofirma-desktop" -frontend fyne "$@"
+exec "/opt/autofirma-dipgra/autofirma" -frontend fyne "$@"
 EOF
 sudo tee /usr/local/bin/autofirma-dipgra-gio >/dev/null <<'EOF'
 #!/usr/bin/env bash
-exec "/opt/autofirma-dipgra/autofirma-desktop" -frontend gio "$@"
+exec "/opt/autofirma-dipgra/autofirma" -frontend gio "$@"
 EOF
 sudo chmod 0755 /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-qt /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio
 
 echo "[reparar-qt] Verificación..."
-file "${TARGET_DIR}/autofirma-desktop" | sed 's/^/[reparar-qt] /'
+file "${TARGET_DIR}/autofirma" | sed 's/^/[reparar-qt] /'
 echo "[reparar-qt] OK. Arranca con: autofirma-dipgra-qt"

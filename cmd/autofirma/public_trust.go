@@ -45,12 +45,66 @@ func installPublicAdminRoots() ([]string, error) {
 	defer os.RemoveAll(tempDir)
 
 	downloadedCerts := []string{}
+	// Directorios donde buscar certificados locales antes de descargar
+	exePath, _ := os.Executable()
+	if !filepath.IsAbs(exePath) {
+		if abs, err := filepath.Abs(exePath); err == nil {
+			exePath = abs
+		}
+	}
+	home, _ := os.UserHomeDir()
+
+	localSearchDirs := []string{
+		filepath.Join(filepath.Dir(exePath), "certs", "public_roots"),
+		filepath.Join(filepath.Dir(exePath), "..", "certs", "public_roots"),
+		filepath.Join(home, ".config", "AutoFirmaDipgra", "certs", "public_roots"),
+		"certs/public_roots",
+		"/opt/autofirma-dipgra/certs/public_roots",
+	}
+
+	log.Printf("[Trust] Buscando certificados locales en: %v", localSearchDirs)
+
 	for _, c := range publicAdminCerts {
-		path := filepath.Join(tempDir, filepath.Base(c.URL))
+		fileName := filepath.Base(c.URL)
+		foundLocal := false
+		localPath := ""
+
+		for _, d := range localSearchDirs {
+			p := filepath.Join(d, fileName)
+			if _, err := os.Stat(p); err == nil {
+				localPath = p
+				foundLocal = true
+				break
+			}
+			// Reintentar con extension .crt si no existe el .cer y viceversa
+			altName := fileName
+			if strings.HasSuffix(strings.ToLower(fileName), ".cer") {
+				altName = fileName[:len(fileName)-4] + ".crt"
+			} else if strings.HasSuffix(strings.ToLower(fileName), ".crt") {
+				altName = fileName[:len(fileName)-4] + ".cer"
+			}
+			pAlt := filepath.Join(d, altName)
+			if _, err := os.Stat(pAlt); err == nil {
+				localPath = pAlt
+				foundLocal = true
+				break
+			}
+		}
+
+		path := filepath.Join(tempDir, fileName)
 		if strings.HasSuffix(strings.ToLower(path), ".cer") || strings.HasSuffix(strings.ToLower(path), ".crt") {
 			// okay
 		} else {
 			path += ".crt"
+		}
+
+		if foundLocal {
+			log.Printf("[Trust] Usando certificado local: %s", localPath)
+			if err := copyFile(localPath, path, 0o644); err == nil {
+				downloadedCerts = append(downloadedCerts, path)
+				lines = append(lines, fmt.Sprintf("[Trust] Local: %s", c.Name))
+				continue
+			}
 		}
 
 		log.Printf("[Trust] Descargando %s desde %s", c.Name, c.URL)

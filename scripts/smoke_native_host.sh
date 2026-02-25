@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_PATH="${ROOT_DIR}/autofirma-host-smoke"
+BIN_PATH="${ROOT_DIR}/autofirma-smoke"
 STRICT_FORMATS=0
 
 for arg in "$@"; do
@@ -30,7 +30,7 @@ fi
 
 build_bin() {
   echo "[smoke] compilando binario del host..."
-  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_PATH}" ./cmd/autofirma-host
+  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_PATH}" ./cmd/browser-bridge
 }
 
 send_req() {

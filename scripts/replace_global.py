@@ -2,7 +2,7 @@ import glob
 import re
 import os
 
-gui_files = glob.glob('cmd/gui/*.go')
+gui_files = glob.glob('cmd/autofirma/*.go')
 
 for filepath in gui_files:
     with open(filepath, 'r') as f:

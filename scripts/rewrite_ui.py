@@ -1,18 +1,18 @@
 import re
 
-with open('cmd/gui/ui.go', 'r') as f:
+with open('cmd/autofirma/ui.go', 'r') as f:
     lines = f.readlines()
 
 # Cambiar el inicio de ui.go para quitar imports gioui
 content = "".join(lines)
 content = re.sub(r'import \([\s\S]*?\n\)\n', '''import (
-\t"autofirma-host/pkg/applog"
-\t"autofirma-host/pkg/browser"
-\t"autofirma-host/pkg/certstore"
-\t"autofirma-host/pkg/config"
-\t"autofirma-host/pkg/diag"
-\t"autofirma-host/pkg/protocol"
-\t"autofirma-host/pkg/update"
+\t"autofirma/pkg/applog"
+\t"autofirma/pkg/browser"
+\t"autofirma/pkg/certstore"
+\t"autofirma/pkg/config"
+\t"autofirma/pkg/diag"
+\t"autofirma/pkg/protocol"
+\t"autofirma/pkg/update"
 
 \t"bytes"
 \t"crypto/x509"
@@ -64,7 +64,7 @@ final_content = '\n'.join(out_lines)
 final_content = final_content.replace('ui.Window.Invalidate()', 'ui.Refresh()')
 final_content = final_content.replace('w *app.Window', 'w fyne.Window')
 
-with open('cmd/gui/ui.go', 'w') as f:
+with open('cmd/autofirma/ui.go', 'w') as f:
     f.write(final_content)
 
 print("ui.go rewrite OK")

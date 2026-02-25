@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_PATH="${ROOT_DIR}/autofirma-host-large"
+BIN_PATH="${ROOT_DIR}/autofirma-large"
 PAYLOAD_MB="${PAYLOAD_MB:-3}"
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -20,7 +20,7 @@ fi
 
 build_bin() {
   echo "[large] building host binary..."
-  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_PATH}" ./cmd/autofirma-host
+  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN_PATH}" ./cmd/browser-bridge
 }
 
 send_req() {

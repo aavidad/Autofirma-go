@@ -76,6 +76,8 @@ var (
 
 	importP12CastFlag      = flag.String("importar-p12", "", "Alias de -import-p12")
 	importPasswordCastFlag = flag.String("contrasena-p12", "", "Alias de -import-password")
+
+	installPublicRootsFlag = flag.Bool("install-public-roots", false, "Instalar raíces de confianza públicas (FNMT, Camerfirma, etc.)")
 )
 
 func applyRESTSpanishAliases() {
@@ -234,6 +236,18 @@ func main() {
 		}
 		if err != nil {
 			log.Printf("Fallo comprobando confianza TLS local: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *installPublicRootsFlag {
+		lines, err := installPublicAdminRoots()
+		for _, line := range lines {
+			log.Printf("%s", line)
+		}
+		if err != nil {
+			log.Printf("Fallo instalando raíces públicas: %v", err)
 			os.Exit(1)
 		}
 		return

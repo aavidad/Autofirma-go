@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 LAUNCHER_LOG="/tmp/autofirma-launcher.log"
 WEB_LOG="/tmp/autofirma-web-compat.log"
-HOST_LOG="/tmp/AutofirmaDipgra/logs/autofirma-host-$(date +%F).log"
+HOST_LOG="/tmp/AutofirmaDipgra/logs/autofirma-$(date +%F).log"
 SINCE_MINUTES=180
 CLEAN_LOGS=0
 REQUIRE_XADES_COUNTERSIGN=0
@@ -41,8 +41,8 @@ resolve_launcher_log() {
   fi
 
   local candidates=(
-    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-desktop-$(date +%F).log"
-    "/tmp/AutofirmaDipgra/logs/autofirma-desktop-$(date +%F).log"
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-$(date +%F).log"
+    "/tmp/AutofirmaDipgra/logs/autofirma-$(date +%F).log"
   )
   local c
   for c in "${candidates[@]}"; do
@@ -60,8 +60,8 @@ resolve_host_log() {
   fi
 
   local candidates=(
-    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-host-$(date +%F).log"
-    "/tmp/AutofirmaDipgra/logs/autofirma-host-$(date +%F).log"
+    "${HOME}/.local/state/autofirma-dipgra/logs/autofirma-$(date +%F).log"
+    "/tmp/AutofirmaDipgra/logs/autofirma-$(date +%F).log"
   )
   local c
   for c in "${candidates[@]}"; do

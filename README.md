@@ -35,8 +35,8 @@ Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 Requisito: Go 1.22+
 
 ```bash
-go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
-go build -mod=readonly -o autofirma-desktop ./cmd/gui
+go build -mod=readonly -o autofirma-browser-bridge ./cmd/browser-bridge
+go build -mod=readonly -o autofirma ./cmd/autofirma
 ```
 
 ## Compilacion por sistema
@@ -49,14 +49,14 @@ Requisitos recomendados:
 Comandos:
 ```bash
 # Binarios base
-go build -mod=readonly -o autofirma-desktop ./cmd/gui
-go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
+go build -mod=readonly -o autofirma ./cmd/autofirma
+go build -mod=readonly -o autofirma-browser-bridge ./cmd/browser-bridge
 
 # Frontend Qt wrapper (Go)
-go build -mod=readonly -o autofirma-desktop-qt-bin ./cmd/qt
+go build -mod=readonly -o autofirma-qt-bin ./cmd/qt
 
 # Frontend Qt real (si aplica)
-./scripts/build_qt_real_linux.sh ./autofirma-desktop-qt-real
+./scripts/build_qt_real_linux.sh ./autofirma-qt-real
 ```
 
 ### Windows (cross-compile desde Linux)
@@ -66,40 +66,40 @@ Requisitos:
 
 Comandos:
 ```bash
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H=windowsgui" -o autofirma-desktop.exe ./cmd/gui
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o autofirma-host.exe ./cmd/autofirma-host
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H=windowsgui" -o autofirma.exe ./cmd/autofirma
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o autofirma-browser-bridge.exe ./cmd/browser-bridge
 ./packaging/windows/make_windows_release.sh
 ```
 
 ### macOS
 En macOS nativo:
 ```bash
-go build -mod=readonly -o autofirma-desktop ./cmd/gui
-go build -mod=readonly -o autofirma-host ./cmd/autofirma-host
+go build -mod=readonly -o autofirma ./cmd/autofirma
+go build -mod=readonly -o autofirma-browser-bridge ./cmd/browser-bridge
 ./packaging/macos/make_macos_release.sh
 ```
 
 Desde Linux con `osxcross`:
 - Ver guía: `docs/OSXCROSS_BUILD.md`
 
-## Uso CLI de `autofirma-desktop`
+## Uso CLI de `autofirma`
 ```bash
-autofirma-desktop -ayuda-detallada
-autofirma-desktop -version
-autofirma-desktop -generate-certs
-autofirma-desktop -install-trust
-autofirma-desktop -trust-status
-autofirma-desktop -server
-autofirma-desktop -exportar-certs-java /ruta/directorio
+autofirma -ayuda-detallada
+autofirma -version
+autofirma -generate-certs
+autofirma -install-trust
+autofirma -trust-status
+autofirma -server
+autofirma -exportar-certs-java /ruta/directorio
 
 # Modo CLI en castellano (alias compatibles)
-autofirma-desktop -modo-cli -listar-certificados
-autofirma-desktop -modo-cli -operacion firmar -entrada /ruta/doc.pdf -indice-certificado 0 -formato pades
-autofirma-desktop -modo-cli -operacion verificar -entrada /ruta/firmado.pdf
-autofirma-desktop -modo-cli -operacion informe-diagnostico -salida-json
+autofirma -modo-cli -listar-certificados
+autofirma -modo-cli -operacion firmar -entrada /ruta/doc.pdf -indice-certificado 0 -formato pades
+autofirma -modo-cli -operacion verificar -entrada /ruta/firmado.pdf
+autofirma -modo-cli -operacion informe-diagnostico -salida-json
 
 # Modo REST en castellano (alias compatibles)
-autofirma-desktop -servidor-rest -direccion-rest 127.0.0.1:63118 -token-rest secreto
+autofirma -servidor-rest -direccion-rest 127.0.0.1:63118 -token-rest secreto
 ```
 
 ## Empaquetado
@@ -118,7 +118,7 @@ Si existe `../../DipgraExtension`, el empaquetado incluye automáticamente:
 - Instalación Linux crea manifiestos para ambos nombres (compatibilidad retro).
 
 ### Allowlist de extensiones en host nativo
-- El host `autofirma-host` valida caller contra `native_messaging_allowlist.json`.
+- El host `autofirma-browser-bridge` valida caller contra `native_messaging_allowlist.json`.
 - Ubicación habitual: `/opt/autofirma-dipgra/native_messaging_allowlist.json` (Linux).
 - Campos usados:
   - `chromium_ids`
@@ -158,17 +158,17 @@ Variables de entorno soportadas:
 
 Importación masiva desde fichero (uno por línea):
 ```bash
-autofirma-desktop -modo-cli -operacion importar-dominios -fichero-dominios /ruta/dominios_aapp_es.txt
+autofirma -modo-cli -operacion importar-dominios -fichero-dominios /ruta/dominios_aapp_es.txt
 ```
 
 Empaquetado Linux con Qt nativo real incluido:
 ```bash
-QT_REAL_BIN_PATH=/ruta/autofirma-desktop-qt-real BUILD_SELF_CONTAINED=0 ./packaging/linux/make_linux_release.sh
+QT_REAL_BIN_PATH=/ruta/autofirma-qt-real BUILD_SELF_CONTAINED=0 ./packaging/linux/make_linux_release.sh
 ```
 
 Empaquetado Linux con runtime Qt incluido:
 ```bash
-QT_REAL_BIN_PATH=/ruta/autofirma-desktop-qt-real \
+QT_REAL_BIN_PATH=/ruta/autofirma-qt-real \
 QT_RUNTIME_DIR=/ruta/qt-runtime \
 BUILD_SELF_CONTAINED=0 \
 ./packaging/linux/make_linux_release.sh
@@ -186,8 +186,8 @@ Subperfil de escritorio (para `escritorio` y `completo`):
 - `qt`
 
 Nota sobre `qt`:
-- El lanzador `qt` usa `autofirma-desktop-qt-bin`.
-- Si existe un binario Qt nativo real, puede indicarse con `AUTOFIRMA_QT_BIN_REAL=/ruta/autofirma-desktop-qt-real`.
+- El lanzador `qt` usa `autofirma-qt-bin`.
+- Si existe un binario Qt nativo real, puede indicarse con `AUTOFIRMA_QT_BIN_REAL=/ruta/autofirma-qt-real`.
 - Mientras no exista ese binario, el instalador deja fallback temporal a Fyne para no bloquear el uso.
 
 El instalador genera lanzadores directos:

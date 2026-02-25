@@ -13,19 +13,23 @@ AutoFirma Dipgra implementa un cliente compatible con AutoFirma Java, centrado e
 
 ## 2. Binarios principales
 ### `cmd/browser-bridge`
-- Host de Native Messaging.
-- Entrada/salida JSON por `stdin/stdout`.
-- Pensado para extensiones de navegador.
+- Host de Native Messaging (se compila como `autofirma-browser-bridge`).
+- Única función centralizada de Native Messaging delegada: Entrada/salida JSON por `stdin/stdout`.
+- Pensado para comunicarse eficientemente con las extensiones de Chrome/Firefox.
+- Reenvía el tráfico formateado y extrae la validación Caller (ID de extensión).
 
 ### `cmd/autofirma`
-- App de escritorio (incluye GUIs Gio/Fyne) y motor de compatibilidad web.
-- Ejecuta flujos de protocolo, WSS local, firma por lote y diagnósticos.
-- Incluye el servidor REST/IPC para comunicar con las GUIs de Qt.
+- App de escritorio local y motor de compatibilidad web local. Este componente fusiona lo que anteriormente se dividía entre `autofirma-desktop` y `autofirma-host`.
+- Se compila como el binario principal (típicamente `autofirma` o `autofirma-core`).
+- Ejecuta los flujos pesados y la lógica de firma de protocolo (`afirma://`).
+- Levanta el Servidor WSS local, puertos legacy y ejecuta las solicitudes batch.
+- Incluye un servidor REST sobre IPC (`127.0.0.1:63118`) mediante el que se comunican las GUIs de Qt.
+- Actúa de fallback GUI ligero usando las librerías transversales Fyne o Gio.
 
 ### `cmd/gui-qml` / `cmd/gui-widgets`
 - Interfaces de usuario avanzadas en C++/Qt.
-- Ambas actúan como clientes del core Go mediante REST (127.0.0.1:63118).
-- `gui-qml` (Premium) y `gui-widgets` (Clásica).
+- Ambas actúan como clientes del core Go (`cmd/autofirma`) mediante REST.
+- `gui-qml` (Premium) y `gui-widgets` (Clícica).
 - Comparten configuración (temas, certificados) mediante `QSettings`.
 
 ## 3. Estructura técnica relevante

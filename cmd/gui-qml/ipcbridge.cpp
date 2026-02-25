@@ -158,7 +158,7 @@ void IpcBridge::launchBackendProcess() {
   });
   m_process->start();
   if (!m_process->waitForStarted(3000)) {
-    emit backendLogReceived("❌ No se pudo arrancar autofirma-desktop: " +
+    emit backendLogReceived("❌ No se pudo arrancar autofirma: " +
                             m_process->errorString());
     setStatus("Error al arrancar el backend");
   } else {

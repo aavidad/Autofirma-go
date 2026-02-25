@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-BIN_PATH="${1:-/opt/autofirma-dipgra/autofirma-desktop}"
+BIN_PATH="${1:-/opt/autofirma-dipgra/autofirma}"
 LAUNCHER_PATH="/usr/local/bin/autofirma-dipgra-server"
 
 if [[ ! -x "${BIN_PATH}" ]]; then

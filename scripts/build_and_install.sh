@@ -166,8 +166,8 @@ uninstall() {
       "/usr/local/bin/autofirma-gui-qml" \
       "/usr/local/bin/autofirma-gui-widgets" \
       "/usr/local/bin/autofirma-browser-bridge" \
-      "/usr/local/bin/autofirma-host" \
-      "/usr/local/bin/autofirma-desktop"; do
+      "/usr/local/bin/autofirma" \
+      "/usr/local/bin/autofirma"; do
     [[ -L "${link}" || -f "${link}" ]] && rm -f "${link}" && info "Eliminado: ${link}"
   done
 
@@ -314,10 +314,10 @@ install_app() {
     # Limpiar binarios y QML antiguos (conservar configuración de usuario)
     rm -f "${BIN_CORE}" "${BIN_GUI}"
     rm -rf "${QML_DIR}"
-    rm -f "${PREFIX}/autofirma-desktop-qt-real" \
-          "${PREFIX}/autofirma-desktop-qt-bin" \
-          "${PREFIX}/autofirma-desktop-gio" \
-          "${PREFIX}/autofirma-desktop-fyne" \
+    rm -f "${PREFIX}/autofirma-qt-real" \
+          "${PREFIX}/autofirma-qt-bin" \
+          "${PREFIX}/autofirma-gio" \
+          "${PREFIX}/autofirma-fyne" \
           "${PREFIX}/autofirma-web-compat" 2>/dev/null || true
     ok "Archivos de versión anterior limpiados."
   else
@@ -416,7 +416,7 @@ DESKTOP
   chown "${REAL_USER}:$(id -gn "${REAL_USER}")" "${user_mimeapps}" 2>/dev/null || true
   ok "Manejador afirma:// registrado para ${REAL_USER}."
 
-  # Native Messaging (si existe autofirma-host)
+  # Native Messaging (si existe autofirma)
   if [[ -f "${HOST_BIN}" ]]; then
     _install_native_messaging
   fi

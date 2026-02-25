@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="${ROOT_DIR}/autofirma-host-e2e"
+BIN="${ROOT_DIR}/autofirma-e2e"
 ACTION="${1:-ping}"
 
 if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
@@ -14,7 +14,7 @@ if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
 fi
 
 cd "${ROOT_DIR}"
-GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN}" ./cmd/autofirma-host
+GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN}" ./cmd/browser-bridge
 
 send_req() {
   local payload="$1"

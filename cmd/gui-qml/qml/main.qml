@@ -1885,7 +1885,7 @@ Window {
                                             configTab.restServerRunning = true
                                             backend.startBackend("0.0.0.0:" + restPortField.text, 
                                                                 restTokenField.text, 
-                                                                "ambas",
+                                                                "ambas", 
                                                                 restFingerprintsField.text,
                                                                 restHttpsCheck.checked)
                                         }
@@ -2080,13 +2080,13 @@ Window {
                                 let selectedMode = serverModeCombo.currentText
                                 if (selectedMode === "ipc") {
                                     // Modo puro IPC
-                                    backend.startBackend(ipcSocketPath, "", "ipc")
+                                    backend.startBackend(ipcSocketPath, "", "ipc", "", false)
                                 } else if (selectedMode === "rest") {
                                     // Modo puro REST
-                                    backend.startBackend("127.0.0.1:63118", "secreto", "rest")
+                                    backend.startBackend("127.0.0.1:63118", "secreto", "rest", "", false)
                                 } else {
                                     // Modo mixto
-                                    backend.startBackend(ipcSocketPath, "secreto", "ambas")
+                                    backend.startBackend(ipcSocketPath, "secreto", "ambas", "", false)
                                 }
                             }
                         }

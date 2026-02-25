@@ -34,7 +34,7 @@ func TestEnsureTrustedSigningDomain_FirstUseAndRemember(t *testing.T) {
 		return true, nil
 	}
 
-	host := "afirmasignature.sededgsfp.gob.es"
+	host := "afirmasignature.ejemplo.com"
 	if err := ensureTrustedSigningDomain(host); err != nil {
 		t.Fatalf("fallo inesperado primera confianza: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestEnsureTrustedSigningDomain_Reject(t *testing.T) {
 	confirmFirstDomainUseFunc = func(host string) (bool, error) {
 		return false, nil
 	}
-	if err := ensureTrustedSigningDomain("rechazado.sededgsfp.gob.es"); err == nil {
+	if err := ensureTrustedSigningDomain("rechazado.ejemplo.com"); err == nil {
 		t.Fatalf("se esperaba error por rechazo del usuario")
 	}
 }
