@@ -60,6 +60,7 @@ func onSystrayReady(wsServer *WebSocketServer) {
 	systray.AddSeparator()
 
 	mControlPanel := systray.AddMenuItem("Abrir panel de control local", "Abre la vista local en el navegador")
+	mDesktopQt := systray.AddMenuItem("Abrir app desktop (Qt)", "Abre la interfaz completa Qt/QML")
 	mLogs := systray.AddMenuItem("Ver carpeta de logs", "Abre el directorio de registros")
 	mWeb := systray.AddMenuItem("Portal AutoFirma DipGra", "Abre la web de soporte de Diputación")
 
@@ -82,6 +83,10 @@ func onSystrayReady(wsServer *WebSocketServer) {
 				url := buildSystrayControlPanelURL()
 				log.Printf("[Systray] Abriendo panel local: %s", url)
 				_ = openExternal(url)
+			case <-mDesktopQt.ClickedCh:
+				if err := launchDesktopQtFromSystray(); err != nil {
+					log.Printf("[Systray] Error abriendo app desktop Qt: %v", err)
+				}
 			case <-mToggleIPC.ClickedCh:
 				enabled, statusText := trayServices.toggleIPC()
 				updateToggleMenuState(mToggleIPC, enabled)
@@ -211,6 +216,28 @@ func updateToggleMenuState(item *systray.MenuItem, enabled bool) {
 		return
 	}
 	item.Uncheck()
+}
+
+func launchDesktopQtFromSystray() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "-frontend", "qt")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	log.Printf("[Systray] Lanzando app desktop Qt pid=%d", cmd.Process.Pid)
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("[Systray] App desktop Qt finalizada con error: %v", err)
+			return
+		}
+		log.Printf("[Systray] App desktop Qt finalizada")
+	}()
+	return nil
 }
 
 type trayServiceController struct {

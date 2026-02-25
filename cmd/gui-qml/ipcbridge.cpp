@@ -25,6 +25,10 @@ IpcBridge::IpcBridge(QObject *parent) : QObject(parent) {
 
 IpcBridge::~IpcBridge() { stopBackend(); }
 
+bool IpcBridge::canStopOwnedBackend() const {
+  return m_process && m_process->state() != QProcess::NotRunning;
+}
+
 void IpcBridge::setExpertMode(bool v) {
   if (m_expertMode != v) {
     m_expertMode = v;

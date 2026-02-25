@@ -31,6 +31,7 @@ public:
                                 const QString &fingerprints = "",
                                 bool useTLS = false);
   Q_INVOKABLE void stopBackend();
+  Q_INVOKABLE bool canStopOwnedBackend() const;
   Q_INVOKABLE void signFile(const QString &inputPath, const QString &outputPath,
                             int certIndex, const QString &format);
   Q_INVOKABLE void signFileAdvanced(const QString &inputPath,

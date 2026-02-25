@@ -19,6 +19,10 @@ BackendBridge::BackendBridge(QObject *parent) : QObject(parent) {
 
 BackendBridge::~BackendBridge() { stopBackend(); }
 
+bool BackendBridge::canStopOwnedBackend() const {
+  return m_process && m_process->state() != QProcess::NotRunning;
+}
+
 void BackendBridge::setExpertMode(bool v) {
   if (m_expertMode != v) {
     m_expertMode = v;

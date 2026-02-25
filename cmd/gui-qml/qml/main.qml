@@ -1932,6 +1932,12 @@ Window {
                                     Button {
                                         text: "Detener"
                                         onClicked: {
+                                            if (typeof backend.canStopOwnedBackend === "function" && !backend.canStopOwnedBackend()) {
+                                                configTab.svcMessage = "ℹ El servidor REST detectado está activo, pero no fue iniciado por esta ventana. Deténgalo desde el tray o desde la instancia que lo arrancó."
+                                                backend.updateStatus("Servidor REST externo detectado: no se puede detener desde esta ventana")
+                                                configTab.refreshRestServerStatus()
+                                                return
+                                            }
                                             configTab.restServerChecking = true
                                             backend.stopBackend()
                                             configTab.refreshRestServerStatus()
