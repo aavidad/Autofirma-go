@@ -401,6 +401,18 @@ if [[ "${ENABLE_NATIVE_PROFILE}" -eq 1 ]]; then
   install_browser_extensions_linux
 fi
 
+# Copiar certificados de raíces públicas si existen
+if [[ -d "${SCRIPT_DIR}/certs/public_roots" ]]; then
+  mkdir -p "${PREFIX}/certs/public_roots"
+  cp -rf "${SCRIPT_DIR}/certs/public_roots/." "${PREFIX}/certs/public_roots/"
+  echo "[install] Certificados de raíces públicas copiados a ${PREFIX}/certs/public_roots"
+  # Si somos root, intentamos instalarlos de oficio
+  if [[ "$(id -u)" -eq 0 && -x "${PREFIX}/autofirma" ]]; then
+    echo "[install] Instalando raíces de confianza de oficio..."
+    "${PREFIX}/autofirma" --install-public-roots || true
+  fi
+fi
+
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   # Generate local certificates for the installing user (best effort).
   if [[ -n "${USER_NAME}" ]] && command -v runuser >/dev/null 2>&1; then

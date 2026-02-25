@@ -59,6 +59,7 @@ public:
   Q_INVOKABLE void installCamerfirmaCerts();
   Q_INVOKABLE void importCertificate(const QString &path,
                                      const QString &password);
+  Q_INVOKABLE void installPublicRoots();
   Q_INVOKABLE QString getAppDirPath() const {
 #ifdef Q_OS_WIN
     return QCoreApplication::applicationDirPath();
@@ -81,6 +82,7 @@ signals:
   void settingsLoaded(QVariantMap settings);
   void pdfPreviewReceived(bool ok, QString data, double width, double height);
   void certificateImportFinished(bool ok, QString message);
+  void publicRootsInstallationFinished(bool ok, QString message);
 
 private slots:
   void onBackendReadyRead();

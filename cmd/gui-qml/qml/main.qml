@@ -532,6 +532,14 @@ Window {
                 backend.backendLogReceived("Error importando certificado: " + message)
             }
         }
+        function onPublicRootsInstallationFinished(ok, message) {
+            backend.updateStatus(ok ? ("✅ " + message) : ("❌ " + message))
+            if (ok) {
+                backend.backendLogReceived("Confianza: Raíces de AAPP instaladas correctamente.")
+            } else {
+                backend.backendLogReceived("Error instalando raíces de confianza: " + message)
+            }
+        }
     }
 
     RowLayout {
@@ -1450,6 +1458,52 @@ Window {
                                         Text { 
                                             text: "Razón: " + (verifyTab.verifyDetails && verifyTab.verifyDetails.reason ? verifyTab.verifyDetails.reason : "")
                                             color: "#e74c3c"; visible: verifyTab.verifyDetails && !verifyTab.verifyDetails.valid
+                                        }
+
+                                        // Alerta de confianza
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 80
+                                            Layout.topMargin: 10
+                                            visible: verifyTab.verifyDetails && verifyTab.verifyDetails.reason && verifyTab.verifyDetails.reason.indexOf("emisor no confiable") !== -1
+                                            color: "#34495e"
+                                            radius: 8
+                                            border.color: "#f1c40f"
+                                            border.width: 1
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.margins: 10
+                                                spacing: 10
+                                                Text {
+                                                    text: "⚠️"
+                                                    font.pixelSize: 24
+                                                }
+                                                ColumnLayout {
+                                                    Layout.fillWidth: true
+                                                    Text {
+                                                        text: "Emisor no reconocido"
+                                                        color: "white"
+                                                        font.bold: true
+                                                    }
+                                                    Text {
+                                                        text: "Para que las firmas de este emisor (FNMT, etc.) sean válidas, debe instalar las raíces de confianza."
+                                                        color: "white"
+                                                        font.pixelSize: 10
+                                                        wrapMode: Text.WordWrap
+                                                        Layout.fillWidth: true
+                                                    }
+                                                }
+                                                Button {
+                                                    text: "Confiar en este emisor"
+                                                    onClicked: backend.installPublicRoots()
+                                                    background: Rectangle {
+                                                        color: "#2ecc71"
+                                                        radius: 4
+                                                    }
+                                                    palette.buttonText: "white"
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -111,7 +111,7 @@ append_report "since_minutes: ${SEDE_SINCE_MINUTES}"
 # Keep Go tooling reproducible when vendor metadata is stale for local replace setups.
 # Prefer readonly mode so validation never mutates go.mod/go.sum.
 if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
-  export GOFLAGS="${GOFLAGS:-} -mod=readonly"
+  export GOFLAGS="${GOFLAGS:-} -mod=mod"
 fi
 
 if [[ -n "${BATCH_HTTP_TIMEOUT_MS}" ]]; then

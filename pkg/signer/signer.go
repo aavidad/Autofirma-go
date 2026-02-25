@@ -359,16 +359,28 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 			if block.Type == "CERTIFICATE" {
 				c, err := x509.ParseCertificate(block.Bytes)
 				if err == nil {
-					if memoryCert == nil {
-						memoryCert = c
-					}
 					chainCerts = append(chainCerts, c)
 				}
 			}
 		}
 
+		pubSignerBytes, errPub := x509.MarshalPKIXPublicKey(memorySigner.Public())
+		if errPub == nil {
+			for _, c := range chainCerts {
+				pubCertBytes, errCert := x509.MarshalPKIXPublicKey(c.PublicKey)
+				if errCert == nil && bytes.Equal(pubSignerBytes, pubCertBytes) {
+					memoryCert = c
+					break
+				}
+			}
+		}
+
 		if memoryCert == nil {
-			return "", fmt.Errorf("no se encontró certificado válido en la cadena")
+			if len(chainCerts) > 0 {
+				memoryCert = chainCerts[0]
+			} else {
+				return "", fmt.Errorf("no se encontró ningún certificado en la exportación NSS")
+			}
 		}
 		memoryChains, _ = buildCertChains(memoryCert, chainCerts)
 		cleanupSigner = func() {}

@@ -27,7 +27,7 @@ QT_WARNING_PUSH
 QT_WARNING_DISABLE_DEPRECATED
 namespace {
 struct qt_meta_stringdata_BackendBridge_t {
-    uint offsetsAndSizes[146];
+    uint offsetsAndSizes[150];
     char stringdata0[14];
     char stringdata1[14];
     char stringdata2[1];
@@ -56,51 +56,53 @@ struct qt_meta_stringdata_BackendBridge_t {
     char stringdata25[6];
     char stringdata26[7];
     char stringdata27[26];
-    char stringdata28[19];
-    char stringdata29[23];
-    char stringdata30[15];
-    char stringdata31[6];
-    char stringdata32[13];
-    char stringdata33[5];
-    char stringdata34[6];
-    char stringdata35[5];
-    char stringdata36[13];
-    char stringdata37[7];
-    char stringdata38[12];
-    char stringdata39[9];
-    char stringdata40[10];
+    char stringdata28[32];
+    char stringdata29[19];
+    char stringdata30[23];
+    char stringdata31[15];
+    char stringdata32[6];
+    char stringdata33[13];
+    char stringdata34[5];
+    char stringdata35[6];
+    char stringdata36[5];
+    char stringdata37[13];
+    char stringdata38[7];
+    char stringdata39[12];
+    char stringdata40[9];
     char stringdata41[10];
-    char stringdata42[7];
-    char stringdata43[17];
-    char stringdata44[8];
-    char stringdata45[20];
-    char stringdata46[11];
-    char stringdata47[13];
-    char stringdata48[4];
-    char stringdata49[13];
-    char stringdata50[5];
-    char stringdata51[16];
-    char stringdata52[14];
-    char stringdata53[15];
-    char stringdata54[18];
+    char stringdata42[10];
+    char stringdata43[7];
+    char stringdata44[17];
+    char stringdata45[8];
+    char stringdata46[20];
+    char stringdata47[11];
+    char stringdata48[13];
+    char stringdata49[4];
+    char stringdata50[13];
+    char stringdata51[5];
+    char stringdata52[16];
+    char stringdata53[14];
+    char stringdata54[15];
     char stringdata55[18];
-    char stringdata56[23];
-    char stringdata57[19];
-    char stringdata58[17];
-    char stringdata59[15];
-    char stringdata60[17];
-    char stringdata61[13];
-    char stringdata62[12];
+    char stringdata56[18];
+    char stringdata57[23];
+    char stringdata58[19];
+    char stringdata59[17];
+    char stringdata60[15];
+    char stringdata61[17];
+    char stringdata62[13];
     char stringdata63[12];
-    char stringdata64[13];
-    char stringdata65[14];
-    char stringdata66[5];
-    char stringdata67[23];
-    char stringdata68[18];
-    char stringdata69[9];
-    char stringdata70[14];
-    char stringdata71[7];
-    char stringdata72[11];
+    char stringdata64[12];
+    char stringdata65[13];
+    char stringdata66[14];
+    char stringdata67[5];
+    char stringdata68[23];
+    char stringdata69[18];
+    char stringdata70[9];
+    char stringdata71[19];
+    char stringdata72[14];
+    char stringdata73[7];
+    char stringdata74[11];
 };
 #define QT_MOC_LITERAL(ofs, len) \
     uint(sizeof(qt_meta_stringdata_BackendBridge_t::offsetsAndSizes) + ofs), len 
@@ -134,51 +136,53 @@ Q_CONSTINIT static const qt_meta_stringdata_BackendBridge_t qt_meta_stringdata_B
         QT_MOC_LITERAL(296, 5),  // "width"
         QT_MOC_LITERAL(302, 6),  // "height"
         QT_MOC_LITERAL(309, 25),  // "certificateImportFinished"
-        QT_MOC_LITERAL(335, 18),  // "onBackendReadyRead"
-        QT_MOC_LITERAL(354, 22),  // "onNetworkReplyFinished"
-        QT_MOC_LITERAL(377, 14),  // "QNetworkReply*"
-        QT_MOC_LITERAL(392, 5),  // "reply"
-        QT_MOC_LITERAL(398, 12),  // "startBackend"
-        QT_MOC_LITERAL(411, 4),  // "addr"
-        QT_MOC_LITERAL(416, 5),  // "token"
-        QT_MOC_LITERAL(422, 4),  // "mode"
-        QT_MOC_LITERAL(427, 12),  // "fingerprints"
-        QT_MOC_LITERAL(440, 6),  // "useTLS"
-        QT_MOC_LITERAL(447, 11),  // "stopBackend"
-        QT_MOC_LITERAL(459, 8),  // "signFile"
-        QT_MOC_LITERAL(468, 9),  // "inputPath"
-        QT_MOC_LITERAL(478, 9),  // "certIndex"
-        QT_MOC_LITERAL(488, 6),  // "format"
-        QT_MOC_LITERAL(495, 16),  // "signFileAdvanced"
-        QT_MOC_LITERAL(512, 7),  // "options"
-        QT_MOC_LITERAL(520, 19),  // "refreshCertificates"
-        QT_MOC_LITERAL(540, 10),  // "verifyFile"
-        QT_MOC_LITERAL(551, 12),  // "updateStatus"
-        QT_MOC_LITERAL(564, 3),  // "msg"
-        QT_MOC_LITERAL(568, 12),  // "openExternal"
-        QT_MOC_LITERAL(581, 4),  // "path"
-        QT_MOC_LITERAL(586, 15),  // "openCertManager"
-        QT_MOC_LITERAL(602, 13),  // "openLogFolder"
-        QT_MOC_LITERAL(616, 14),  // "openHelpManual"
-        QT_MOC_LITERAL(631, 17),  // "checkCertificates"
-        QT_MOC_LITERAL(649, 17),  // "runTLSDiagnostics"
-        QT_MOC_LITERAL(667, 22),  // "exportDiagnosticReport"
-        QT_MOC_LITERAL(690, 18),  // "clearTLSTrustStore"
-        QT_MOC_LITERAL(709, 16),  // "getServiceStatus"
-        QT_MOC_LITERAL(726, 14),  // "installService"
-        QT_MOC_LITERAL(741, 16),  // "uninstallService"
-        QT_MOC_LITERAL(758, 12),  // "startService"
-        QT_MOC_LITERAL(771, 11),  // "stopService"
-        QT_MOC_LITERAL(783, 11),  // "getSettings"
-        QT_MOC_LITERAL(795, 12),  // "saveSettings"
-        QT_MOC_LITERAL(808, 13),  // "getPdfPreview"
-        QT_MOC_LITERAL(822, 4),  // "page"
-        QT_MOC_LITERAL(827, 22),  // "installCamerfirmaCerts"
-        QT_MOC_LITERAL(850, 17),  // "importCertificate"
-        QT_MOC_LITERAL(868, 8),  // "password"
-        QT_MOC_LITERAL(877, 13),  // "getAppDirPath"
-        QT_MOC_LITERAL(891, 6),  // "status"
-        QT_MOC_LITERAL(898, 10)   // "expertMode"
+        QT_MOC_LITERAL(335, 31),  // "publicRootsInstallationFinished"
+        QT_MOC_LITERAL(367, 18),  // "onBackendReadyRead"
+        QT_MOC_LITERAL(386, 22),  // "onNetworkReplyFinished"
+        QT_MOC_LITERAL(409, 14),  // "QNetworkReply*"
+        QT_MOC_LITERAL(424, 5),  // "reply"
+        QT_MOC_LITERAL(430, 12),  // "startBackend"
+        QT_MOC_LITERAL(443, 4),  // "addr"
+        QT_MOC_LITERAL(448, 5),  // "token"
+        QT_MOC_LITERAL(454, 4),  // "mode"
+        QT_MOC_LITERAL(459, 12),  // "fingerprints"
+        QT_MOC_LITERAL(472, 6),  // "useTLS"
+        QT_MOC_LITERAL(479, 11),  // "stopBackend"
+        QT_MOC_LITERAL(491, 8),  // "signFile"
+        QT_MOC_LITERAL(500, 9),  // "inputPath"
+        QT_MOC_LITERAL(510, 9),  // "certIndex"
+        QT_MOC_LITERAL(520, 6),  // "format"
+        QT_MOC_LITERAL(527, 16),  // "signFileAdvanced"
+        QT_MOC_LITERAL(544, 7),  // "options"
+        QT_MOC_LITERAL(552, 19),  // "refreshCertificates"
+        QT_MOC_LITERAL(572, 10),  // "verifyFile"
+        QT_MOC_LITERAL(583, 12),  // "updateStatus"
+        QT_MOC_LITERAL(596, 3),  // "msg"
+        QT_MOC_LITERAL(600, 12),  // "openExternal"
+        QT_MOC_LITERAL(613, 4),  // "path"
+        QT_MOC_LITERAL(618, 15),  // "openCertManager"
+        QT_MOC_LITERAL(634, 13),  // "openLogFolder"
+        QT_MOC_LITERAL(648, 14),  // "openHelpManual"
+        QT_MOC_LITERAL(663, 17),  // "checkCertificates"
+        QT_MOC_LITERAL(681, 17),  // "runTLSDiagnostics"
+        QT_MOC_LITERAL(699, 22),  // "exportDiagnosticReport"
+        QT_MOC_LITERAL(722, 18),  // "clearTLSTrustStore"
+        QT_MOC_LITERAL(741, 16),  // "getServiceStatus"
+        QT_MOC_LITERAL(758, 14),  // "installService"
+        QT_MOC_LITERAL(773, 16),  // "uninstallService"
+        QT_MOC_LITERAL(790, 12),  // "startService"
+        QT_MOC_LITERAL(803, 11),  // "stopService"
+        QT_MOC_LITERAL(815, 11),  // "getSettings"
+        QT_MOC_LITERAL(827, 12),  // "saveSettings"
+        QT_MOC_LITERAL(840, 13),  // "getPdfPreview"
+        QT_MOC_LITERAL(854, 4),  // "page"
+        QT_MOC_LITERAL(859, 22),  // "installCamerfirmaCerts"
+        QT_MOC_LITERAL(882, 17),  // "importCertificate"
+        QT_MOC_LITERAL(900, 8),  // "password"
+        QT_MOC_LITERAL(909, 18),  // "installPublicRoots"
+        QT_MOC_LITERAL(928, 13),  // "getAppDirPath"
+        QT_MOC_LITERAL(942, 6),  // "status"
+        QT_MOC_LITERAL(949, 10)   // "expertMode"
     },
     "BackendBridge",
     "statusChanged",
@@ -208,6 +212,7 @@ Q_CONSTINIT static const qt_meta_stringdata_BackendBridge_t qt_meta_stringdata_B
     "width",
     "height",
     "certificateImportFinished",
+    "publicRootsInstallationFinished",
     "onBackendReadyRead",
     "onNetworkReplyFinished",
     "QNetworkReply*",
@@ -250,6 +255,7 @@ Q_CONSTINIT static const qt_meta_stringdata_BackendBridge_t qt_meta_stringdata_B
     "installCamerfirmaCerts",
     "importCertificate",
     "password",
+    "installPublicRoots",
     "getAppDirPath",
     "status",
     "expertMode"
@@ -263,61 +269,63 @@ Q_CONSTINIT static const uint qt_meta_data_BackendBridge[] = {
       10,       // revision
        0,       // classname
        0,    0, // classinfo
-      43,   14, // methods
-       2,  421, // properties
+      45,   14, // methods
+       2,  439, // properties
        0,    0, // enums/sets
        0,    0, // constructors
        0,       // flags
-      11,       // signalCount
+      12,       // signalCount
 
  // signals: name, argc, parameters, tag, flags, initial metatype offsets
-       1,    0,  272,    2, 0x06,    3 /* Public */,
-       3,    0,  273,    2, 0x06,    4 /* Public */,
-       4,    1,  274,    2, 0x06,    5 /* Public */,
-       6,    3,  277,    2, 0x06,    7 /* Public */,
-      10,    3,  284,    2, 0x06,   11 /* Public */,
-      12,    1,  291,    2, 0x06,   15 /* Public */,
-      14,    4,  294,    2, 0x06,   17 /* Public */,
-      19,    2,  303,    2, 0x06,   22 /* Public */,
-      21,    1,  308,    2, 0x06,   25 /* Public */,
-      23,    4,  311,    2, 0x06,   27 /* Public */,
-      27,    2,  320,    2, 0x06,   32 /* Public */,
+       1,    0,  284,    2, 0x06,    3 /* Public */,
+       3,    0,  285,    2, 0x06,    4 /* Public */,
+       4,    1,  286,    2, 0x06,    5 /* Public */,
+       6,    3,  289,    2, 0x06,    7 /* Public */,
+      10,    3,  296,    2, 0x06,   11 /* Public */,
+      12,    1,  303,    2, 0x06,   15 /* Public */,
+      14,    4,  306,    2, 0x06,   17 /* Public */,
+      19,    2,  315,    2, 0x06,   22 /* Public */,
+      21,    1,  320,    2, 0x06,   25 /* Public */,
+      23,    4,  323,    2, 0x06,   27 /* Public */,
+      27,    2,  332,    2, 0x06,   32 /* Public */,
+      28,    2,  337,    2, 0x06,   35 /* Public */,
 
  // slots: name, argc, parameters, tag, flags, initial metatype offsets
-      28,    0,  325,    2, 0x08,   35 /* Private */,
-      29,    1,  326,    2, 0x08,   36 /* Private */,
+      29,    0,  342,    2, 0x08,   38 /* Private */,
+      30,    1,  343,    2, 0x08,   39 /* Private */,
 
  // methods: name, argc, parameters, tag, flags, initial metatype offsets
-      32,    5,  329,    2, 0x02,   38 /* Public */,
-      32,    4,  340,    2, 0x22,   44 /* Public | MethodCloned */,
-      32,    3,  349,    2, 0x22,   49 /* Public | MethodCloned */,
-      32,    2,  356,    2, 0x22,   53 /* Public | MethodCloned */,
-      38,    0,  361,    2, 0x02,   56 /* Public */,
-      39,    4,  362,    2, 0x02,   57 /* Public */,
-      43,    4,  371,    2, 0x02,   62 /* Public */,
-      45,    0,  380,    2, 0x02,   67 /* Public */,
-      46,    1,  381,    2, 0x02,   68 /* Public */,
-      47,    1,  384,    2, 0x02,   70 /* Public */,
-      49,    1,  387,    2, 0x02,   72 /* Public */,
-      51,    0,  390,    2, 0x02,   74 /* Public */,
-      52,    0,  391,    2, 0x02,   75 /* Public */,
-      53,    0,  392,    2, 0x02,   76 /* Public */,
-      54,    0,  393,    2, 0x02,   77 /* Public */,
-      55,    0,  394,    2, 0x02,   78 /* Public */,
-      56,    0,  395,    2, 0x02,   79 /* Public */,
-      57,    0,  396,    2, 0x02,   80 /* Public */,
-      58,    0,  397,    2, 0x02,   81 /* Public */,
-      59,    0,  398,    2, 0x02,   82 /* Public */,
-      60,    0,  399,    2, 0x02,   83 /* Public */,
-      61,    0,  400,    2, 0x02,   84 /* Public */,
-      62,    0,  401,    2, 0x02,   85 /* Public */,
-      63,    0,  402,    2, 0x02,   86 /* Public */,
-      64,    1,  403,    2, 0x02,   87 /* Public */,
-      65,    2,  406,    2, 0x02,   89 /* Public */,
-      65,    1,  411,    2, 0x22,   92 /* Public | MethodCloned */,
-      67,    0,  414,    2, 0x02,   94 /* Public */,
-      68,    2,  415,    2, 0x02,   95 /* Public */,
-      70,    0,  420,    2, 0x102,   98 /* Public | MethodIsConst  */,
+      33,    5,  346,    2, 0x02,   41 /* Public */,
+      33,    4,  357,    2, 0x22,   47 /* Public | MethodCloned */,
+      33,    3,  366,    2, 0x22,   52 /* Public | MethodCloned */,
+      33,    2,  373,    2, 0x22,   56 /* Public | MethodCloned */,
+      39,    0,  378,    2, 0x02,   59 /* Public */,
+      40,    4,  379,    2, 0x02,   60 /* Public */,
+      44,    4,  388,    2, 0x02,   65 /* Public */,
+      46,    0,  397,    2, 0x02,   70 /* Public */,
+      47,    1,  398,    2, 0x02,   71 /* Public */,
+      48,    1,  401,    2, 0x02,   73 /* Public */,
+      50,    1,  404,    2, 0x02,   75 /* Public */,
+      52,    0,  407,    2, 0x02,   77 /* Public */,
+      53,    0,  408,    2, 0x02,   78 /* Public */,
+      54,    0,  409,    2, 0x02,   79 /* Public */,
+      55,    0,  410,    2, 0x02,   80 /* Public */,
+      56,    0,  411,    2, 0x02,   81 /* Public */,
+      57,    0,  412,    2, 0x02,   82 /* Public */,
+      58,    0,  413,    2, 0x02,   83 /* Public */,
+      59,    0,  414,    2, 0x02,   84 /* Public */,
+      60,    0,  415,    2, 0x02,   85 /* Public */,
+      61,    0,  416,    2, 0x02,   86 /* Public */,
+      62,    0,  417,    2, 0x02,   87 /* Public */,
+      63,    0,  418,    2, 0x02,   88 /* Public */,
+      64,    0,  419,    2, 0x02,   89 /* Public */,
+      65,    1,  420,    2, 0x02,   90 /* Public */,
+      66,    2,  423,    2, 0x02,   92 /* Public */,
+      66,    1,  428,    2, 0x22,   95 /* Public | MethodCloned */,
+      68,    0,  431,    2, 0x02,   97 /* Public */,
+      69,    2,  432,    2, 0x02,   98 /* Public */,
+      71,    0,  437,    2, 0x02,  101 /* Public */,
+      72,    0,  438,    2, 0x102,  102 /* Public | MethodIsConst  */,
 
  // signals: parameters
     QMetaType::Void,
@@ -331,23 +339,24 @@ Q_CONSTINIT static const uint qt_meta_data_BackendBridge[] = {
     QMetaType::Void, QMetaType::QVariantMap,   22,
     QMetaType::Void, QMetaType::Bool, QMetaType::QString, QMetaType::Double, QMetaType::Double,   20,   24,   25,   26,
     QMetaType::Void, QMetaType::Bool, QMetaType::QString,   20,    8,
+    QMetaType::Void, QMetaType::Bool, QMetaType::QString,   20,    8,
 
  // slots: parameters
     QMetaType::Void,
-    QMetaType::Void, 0x80000000 | 30,   31,
+    QMetaType::Void, 0x80000000 | 31,   32,
 
  // methods: parameters
-    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::QString, QMetaType::QString, QMetaType::Bool,   33,   34,   35,   36,   37,
-    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::QString, QMetaType::QString,   33,   34,   35,   36,
-    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::QString,   33,   34,   35,
-    QMetaType::Void, QMetaType::QString, QMetaType::QString,   33,   34,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::QString, QMetaType::QString, QMetaType::Bool,   34,   35,   36,   37,   38,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::QString, QMetaType::QString,   34,   35,   36,   37,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::QString,   34,   35,   36,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString,   34,   35,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::Int, QMetaType::QString,   40,    9,   41,   42,
-    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::Int, QMetaType::QVariantMap,   40,    9,   41,   44,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::Int, QMetaType::QString,   41,    9,   42,   43,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString, QMetaType::Int, QMetaType::QVariantMap,   41,    9,   42,   45,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::QString,   40,
-    QMetaType::Void, QMetaType::QString,   48,
-    QMetaType::Void, QMetaType::QString,   50,
+    QMetaType::Void, QMetaType::QString,   41,
+    QMetaType::Void, QMetaType::QString,   49,
+    QMetaType::Void, QMetaType::QString,   51,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -362,15 +371,16 @@ Q_CONSTINIT static const uint qt_meta_data_BackendBridge[] = {
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void, QMetaType::QVariantMap,   22,
-    QMetaType::Void, QMetaType::QString, QMetaType::Int,   50,   66,
-    QMetaType::Void, QMetaType::QString,   50,
+    QMetaType::Void, QMetaType::QString, QMetaType::Int,   51,   67,
+    QMetaType::Void, QMetaType::QString,   51,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::QString, QMetaType::QString,   50,   69,
+    QMetaType::Void, QMetaType::QString, QMetaType::QString,   51,   70,
+    QMetaType::Void,
     QMetaType::QString,
 
  // properties: name, type, flags
-      71, QMetaType::QString, 0x00015001, uint(0), 0,
-      72, QMetaType::Bool, 0x00015103, uint(1), 0,
+      73, QMetaType::QString, 0x00015001, uint(0), 0,
+      74, QMetaType::Bool, 0x00015103, uint(1), 0,
 
        0        // eod
 };
@@ -428,6 +438,10 @@ Q_CONSTINIT const QMetaObject BackendBridge::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<double, std::false_type>,
         QtPrivate::TypeAndForceComplete<double, std::false_type>,
         // method 'certificateImportFinished'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        QtPrivate::TypeAndForceComplete<bool, std::false_type>,
+        QtPrivate::TypeAndForceComplete<QString, std::false_type>,
+        // method 'publicRootsInstallationFinished'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<bool, std::false_type>,
         QtPrivate::TypeAndForceComplete<QString, std::false_type>,
@@ -525,6 +539,8 @@ Q_CONSTINIT const QMetaObject BackendBridge::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<const QString &, std::false_type>,
         QtPrivate::TypeAndForceComplete<const QString &, std::false_type>,
+        // method 'installPublicRoots'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'getAppDirPath'
         QtPrivate::TypeAndForceComplete<QString, std::false_type>
     >,
@@ -548,45 +564,47 @@ void BackendBridge::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _i
         case 8: _t->settingsLoaded((*reinterpret_cast< std::add_pointer_t<QVariantMap>>(_a[1]))); break;
         case 9: _t->pdfPreviewReceived((*reinterpret_cast< std::add_pointer_t<bool>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<double>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<double>>(_a[4]))); break;
         case 10: _t->certificateImportFinished((*reinterpret_cast< std::add_pointer_t<bool>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2]))); break;
-        case 11: _t->onBackendReadyRead(); break;
-        case 12: _t->onNetworkReplyFinished((*reinterpret_cast< std::add_pointer_t<QNetworkReply*>>(_a[1]))); break;
-        case 13: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[4])),(*reinterpret_cast< std::add_pointer_t<bool>>(_a[5]))); break;
-        case 14: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[4]))); break;
-        case 15: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[3]))); break;
-        case 16: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2]))); break;
-        case 17: _t->stopBackend(); break;
-        case 18: _t->signFile((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[4]))); break;
-        case 19: _t->signFileAdvanced((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QVariantMap>>(_a[4]))); break;
-        case 20: _t->refreshCertificates(); break;
-        case 21: _t->verifyFile((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 22: _t->updateStatus((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 23: _t->openExternal((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 24: _t->openCertManager(); break;
-        case 25: _t->openLogFolder(); break;
-        case 26: _t->openHelpManual(); break;
-        case 27: _t->checkCertificates(); break;
-        case 28: _t->runTLSDiagnostics(); break;
-        case 29: _t->exportDiagnosticReport(); break;
-        case 30: _t->clearTLSTrustStore(); break;
-        case 31: _t->getServiceStatus(); break;
-        case 32: _t->installService(); break;
-        case 33: _t->uninstallService(); break;
-        case 34: _t->startService(); break;
-        case 35: _t->stopService(); break;
-        case 36: _t->getSettings(); break;
-        case 37: _t->saveSettings((*reinterpret_cast< std::add_pointer_t<QVariantMap>>(_a[1]))); break;
-        case 38: _t->getPdfPreview((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[2]))); break;
-        case 39: _t->getPdfPreview((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
-        case 40: _t->installCamerfirmaCerts(); break;
-        case 41: _t->importCertificate((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2]))); break;
-        case 42: { QString _r = _t->getAppDirPath();
+        case 11: _t->publicRootsInstallationFinished((*reinterpret_cast< std::add_pointer_t<bool>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2]))); break;
+        case 12: _t->onBackendReadyRead(); break;
+        case 13: _t->onNetworkReplyFinished((*reinterpret_cast< std::add_pointer_t<QNetworkReply*>>(_a[1]))); break;
+        case 14: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[4])),(*reinterpret_cast< std::add_pointer_t<bool>>(_a[5]))); break;
+        case 15: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[4]))); break;
+        case 16: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[3]))); break;
+        case 17: _t->startBackend((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2]))); break;
+        case 18: _t->stopBackend(); break;
+        case 19: _t->signFile((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[4]))); break;
+        case 20: _t->signFileAdvanced((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[3])),(*reinterpret_cast< std::add_pointer_t<QVariantMap>>(_a[4]))); break;
+        case 21: _t->refreshCertificates(); break;
+        case 22: _t->verifyFile((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 23: _t->updateStatus((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 24: _t->openExternal((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 25: _t->openCertManager(); break;
+        case 26: _t->openLogFolder(); break;
+        case 27: _t->openHelpManual(); break;
+        case 28: _t->checkCertificates(); break;
+        case 29: _t->runTLSDiagnostics(); break;
+        case 30: _t->exportDiagnosticReport(); break;
+        case 31: _t->clearTLSTrustStore(); break;
+        case 32: _t->getServiceStatus(); break;
+        case 33: _t->installService(); break;
+        case 34: _t->uninstallService(); break;
+        case 35: _t->startService(); break;
+        case 36: _t->stopService(); break;
+        case 37: _t->getSettings(); break;
+        case 38: _t->saveSettings((*reinterpret_cast< std::add_pointer_t<QVariantMap>>(_a[1]))); break;
+        case 39: _t->getPdfPreview((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[2]))); break;
+        case 40: _t->getPdfPreview((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 41: _t->installCamerfirmaCerts(); break;
+        case 42: _t->importCertificate((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<QString>>(_a[2]))); break;
+        case 43: _t->installPublicRoots(); break;
+        case 44: { QString _r = _t->getAppDirPath();
             if (_a[0]) *reinterpret_cast< QString*>(_a[0]) = std::move(_r); }  break;
         default: ;
         }
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
         switch (_id) {
         default: *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType(); break;
-        case 12:
+        case 13:
             switch (*reinterpret_cast<int*>(_a[1])) {
             default: *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType(); break;
             case 0:
@@ -673,6 +691,13 @@ void BackendBridge::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _i
                 return;
             }
         }
+        {
+            using _t = void (BackendBridge::*)(bool , QString );
+            if (_t _q_method = &BackendBridge::publicRootsInstallationFinished; *reinterpret_cast<_t *>(_a[1]) == _q_method) {
+                *result = 11;
+                return;
+            }
+        }
     }else if (_c == QMetaObject::ReadProperty) {
         auto *_t = static_cast<BackendBridge *>(_o);
         (void)_t;
@@ -714,13 +739,13 @@ int BackendBridge::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 43)
+        if (_id < 45)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 43;
+        _id -= 45;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 43)
+        if (_id < 45)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 43;
+        _id -= 45;
     }else if (_c == QMetaObject::ReadProperty || _c == QMetaObject::WriteProperty
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty
             || _c == QMetaObject::RegisterPropertyMetaType) {
@@ -803,6 +828,13 @@ void BackendBridge::certificateImportFinished(bool _t1, QString _t2)
 {
     void *_a[] = { nullptr, const_cast<void*>(reinterpret_cast<const void*>(std::addressof(_t1))), const_cast<void*>(reinterpret_cast<const void*>(std::addressof(_t2))) };
     QMetaObject::activate(this, &staticMetaObject, 10, _a);
+}
+
+// SIGNAL 11
+void BackendBridge::publicRootsInstallationFinished(bool _t1, QString _t2)
+{
+    void *_a[] = { nullptr, const_cast<void*>(reinterpret_cast<const void*>(std::addressof(_t1))), const_cast<void*>(reinterpret_cast<const void*>(std::addressof(_t2))) };
+    QMetaObject::activate(this, &staticMetaObject, 11, _a);
 }
 QT_WARNING_POP
 QT_END_MOC_NAMESPACE

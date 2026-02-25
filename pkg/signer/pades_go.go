@@ -284,7 +284,10 @@ func verifyPadesWithGo(pdfFile string) (*protocol.VerifyResult, error) {
 	}
 	defer f.Close()
 
-	resp, err := pdfverify.VerifyFileWithOptions(f, pdfverify.DefaultVerifyOptions())
+	opts := pdfverify.DefaultVerifyOptions()
+	opts.RequireDigitalSignatureKU = false
+
+	resp, err := pdfverify.VerifyFileWithOptions(f, opts)
 	if err != nil {
 		return nil, err
 	}

@@ -653,3 +653,15 @@ void BackendBridge::importCertificate(const QString &path,
     reply->deleteLater();
   });
 }
+
+void BackendBridge::installPublicRoots() {
+  emit backendLogReceived("⚙ Instalando raíces de confianza públicas...");
+  auto req = BackendBridgeMakeReq(m_addr, m_token, "/confianza/instalar");
+  QNetworkReply *reply = m_nam->post(req, QByteArray());
+  connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    bool ok = (reply->error() == QNetworkReply::NoError);
+    QString msg = ok ? "Raíces instaladas con éxito" : reply->errorString();
+    emit publicRootsInstallationFinished(ok, msg);
+    reply->deleteLater();
+  });
+}

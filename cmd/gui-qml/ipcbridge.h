@@ -56,6 +56,9 @@ public:
   Q_INVOKABLE void getSettings();
   Q_INVOKABLE void saveSettings(const QVariantMap &settings);
   Q_INVOKABLE void getPdfPreview(const QString &path, int page = 1);
+  Q_INVOKABLE void importCertificate(const QString &path,
+                                     const QString &password);
+  Q_INVOKABLE void installPublicRoots();
 
   bool expertMode() const { return m_expertMode; }
   void setExpertMode(bool v);
@@ -72,6 +75,8 @@ signals:
   void serviceActionFinished(bool ok, QString message);
   void settingsLoaded(QVariantMap settings);
   void pdfPreviewReceived(bool ok, QString data, double width, double height);
+  void certificateImportFinished(bool ok, QString message);
+  void publicRootsInstallationFinished(bool ok, QString message);
 
 private slots:
   void onReadyRead();

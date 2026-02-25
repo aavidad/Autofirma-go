@@ -440,6 +440,13 @@ void IpcBridge::onReadyRead() {
         setStatus(msg);
         emit verificationFinished(true, msg, res.toVariantMap());
       }
+    } else if (action == "import_certificate") {
+      emit certificateImportFinished(ok, ok ? "Certificado importado correctamente" : errMsg);
+      if (ok) {
+        refreshCertificates();
+      }
+    } else if (action == "install_public_roots") {
+      emit publicRootsInstallationFinished(ok, ok ? "Raíces de confianza instaladas correctamente" : errMsg);
     }
   }
 }
@@ -685,4 +692,37 @@ void IpcBridge::getPdfPreview(const QString &path, int page) {
     return;
   }
   m_socket->write(QJsonDocument(req).toJson(QJsonDocument::Compact) + "\n");
+}
+
+void IpcBridge::importCertificate(const QString &path,
+                                  const QString &password) {
+  QString localPath = path;
+  if (localPath.startsWith("file://")) {
+    localPath = QUrl(path).toLocalFile();
+  }
+
+  QFile file(localPath);
+  if (!file.open(QIODevice::ReadOnly)) {
+    emit certificateImportFinished(
+        false, "No se pudo abrir el archivo de certificado.");
+    return;
+  }
+  QByteArray data = file.readAll();
+  file.close();
+
+  QString b64 = data.toBase64();
+
+  QVariantMap params;
+  params.insert("p12B64", b64);
+  params.insert("password", password);
+
+  emit backendLogReceived("⚙ Iniciando importación de certificado IPC...");
+  m_pendingAction = "import_certificate";
+  sendRequest("import_certificate", params);
+}
+
+void IpcBridge::installPublicRoots() {
+  emit backendLogReceived("⚙ Iniciando instalación de raíces de confianza de AAPP...");
+  m_pendingAction = "install_public_roots";
+  sendRequest("install_public_roots", QVariantMap());
 }
