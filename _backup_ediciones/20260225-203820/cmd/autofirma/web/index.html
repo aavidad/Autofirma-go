@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoFirma Web Console</title>
+    <!-- Modern Typography: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="brand">
+                <img src="assets/logo.svg" alt="Diputación de Granada" width="220" />
+            </div>
+
+            <ul class="nav-links">
+                <li class="active" data-route="dashboard">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>Estado</span>
+                </li>
+                <li data-route="certificates">
+                    <i class="fa-solid fa-id-card"></i>
+                    <span>Certificados</span>
+                </li>
+                <li data-route="sign">
+                    <i class="fa-solid fa-file-signature"></i>
+                    <span>Firmar Documento</span>
+                </li>
+                <li data-route="settings">
+                    <i class="fa-solid fa-sliders"></i>
+                    <span>Configuración</span>
+                </li>
+            </ul>
+
+            <div class="server-status">
+                <div class="status-indicator"></div>
+                <span id="global-status-text">Conectando...</span>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <header class="topbar">
+                <h1 id="page-title">Estado del Motor</h1>
+                <div class="topbar-actions">
+                    <button class="icon-btn theme-toggle" title="AutoFirma Desktop GUI" id="btn-launch-gui"
+                        onclick="window.location.href='afirma://'">
+                        <i class="fa-solid fa-desktop"></i>
+                    </button>
+                    <button class="icon-btn theme-toggle" title="Cambiar tema" id="theme-toggle">
+                        <i class="fa-solid fa-moon"></i>
+                    </button>
+                    <button class="btn btn-primary" id="btn-reconnect">
+                        <i class="fa-solid fa-plug"></i> Reconectar
+                    </button>
+                </div>
+            </header>
+
+            <div class="view-container">
+                <!-- Dashboard View -->
+                <section id="view-dashboard" class="view active">
+                    <div class="cards-grid">
+                        <div class="glass-card status-card">
+                            <i class="fa-solid fa-server card-icon"></i>
+                            <div class="card-content">
+                                <h3>API Local REST</h3>
+                                <p id="rest-status" class="status-good"><i class="fa-solid fa-check"></i> Activo en
+                                    127.0.0.1:63118</p>
+                                <p class="text-muted" style="font-size: 0.75rem; margin-top: 0.5rem; display: none;">
+                                    /diagnostics/report /security/domains /tls/clear-store /tls/trust-status /tls/install-trust /tls/generate-certs
+                                </p>
+                            </div>
+                        </div>
+                        <div class="glass-card status-card">
+                            <i class="fa-solid fa-shield-halved card-icon"></i>
+                            <div class="card-content">
+                                <h3>Confianza TLS</h3>
+                                <p id="tls-status" class="status-pending"><i
+                                        class="fa-solid fa-circle-notch fa-spin"></i> Comprobando...</p>
+                            </div>
+                        </div>
+                        <div class="glass-card status-card">
+                            <i class="fa-solid fa-file-code card-icon"></i>
+                            <div class="card-content">
+                                <h3>Formatos Soportados</h3>
+                                <p class="text-muted">PAdES, XAdES, CAdES, FacturaE</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="diagnostics-panel panel mt-6">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-stethoscope"></i> Log de Diagnóstico</h3>
+                            <button class="icon-btn" id="clear-log"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        <div class="log-console" id="log-console">
+                            <div class="log-entry info">[Sistema] Inicializando consola Web de AutoFirma...</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Certificates View -->
+                <section id="view-certificates" class="view">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-id-badge"></i> Almacén de Certificados Locales</h3>
+                            <button class="btn btn-secondary" id="btn-refresh-certs"><i
+                                    class="fa-solid fa-rotate-right"></i> Refrescar</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Icono</th>
+                                        <th>Sujeto / Nombre</th>
+                                        <th>Emisor</th>
+                                        <th>Caducidad</th>
+                                        <th>ID</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="certs-tbody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">Cargando certificados...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Sign File View -->
+                <section id="view-sign" class="view">
+                    <div class="split-layout">
+                        <div class="panel drop-zone-panel">
+                            <h3><i class="fa-solid fa-cloud-arrow-up"></i> Seleccionar Documento</h3>
+                            <div class="drop-zone" id="drop-zone">
+                                <i class="fa-solid fa-file-arrow-up drop-icon"></i>
+                                <p class="drop-text">Arrastra aquí tu PDF o archivo a firmar</p>
+                                <span class="drop-or">o</span>
+                                <input type="file" id="file-input" class="hidden-input">
+                                <button class="btn btn-outline"
+                                    onclick="document.getElementById('file-input').click()">Examinar Archivos</button>
+                            </div>
+                            <div id="file-details" class="file-details hidden">
+                                <i class="fa-solid fa-file-pdf file-type-icon"></i>
+                                <div class="file-info">
+                                    <h4 id="file-name">documento.pdf</h4>
+                                    <span id="file-size" class="text-muted">0 KB</span>
+                                </div>
+                                <button class="icon-btn text-danger" id="btn-remove-file"><i
+                                        class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="panel signature-options">
+                            <h3><i class="fa-solid fa-gear"></i> Opciones de Firma</h3>
+                            <div class="form-group mt-4">
+                                <label for="sign-format">Formato de Firma</label>
+                                <select id="sign-format" class="modern-select">
+                                    <option value="auto">Automático (Detectar por extensión)</option>
+                                    <option value="PAdES">PAdES (Documentos PDF)</option>
+                                    <option value="XAdES">XAdES (Facturas, XML)</option>
+                                    <option value="CAdES">CAdES (Ficheros binarios/texto genéricos)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="add-visible-seal">
+                                <label for="add-visible-seal">Añadir sello visible (Solo PAdES/PDF)</label>
+                            </div>
+
+                            <button class="btn btn-primary btn-block mt-6" id="btn-execute-sign" disabled>
+                                <i class="fa-solid fa-signature"></i> Firmar Ahora
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Signature Result Modal Overlay -->
+                    <div class="modal hidden" id="sign-result-modal">
+                        <div class="modal-content glass-card success-modal">
+                            <div class="modal-icon text-success">
+                                <i class="fa-regular fa-circle-check"></i>
+                            </div>
+                            <h2>¡Firma completada!</h2>
+                            <p class="text-muted">El documento ha sido firmado exitosamente con el motor local.</p>
+                            <div class="modal-actions mt-6">
+                                <button class="btn btn-secondary" id="btn-close-modal">Cerrar</button>
+                                <a id="btn-download-signed" class="btn btn-primary" download="documento_firmado"><i
+                                        class="fa-solid fa-download"></i> Descargar Documento</a>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings View -->
+                <section id="view-settings" class="view">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-network-wired"></i> Conectividad API</h2>
+                        </div>
+                        <div class="form-group mt-4 maxWidth-500">
+                            <label for="api-url">URL Base del Servidor (REST API)</label>
+                            <input type="text" id="api-url" class="modern-input" value="http://127.0.0.1:63118">
+                            <span class="text-sm text-muted">Modifica esto si AutoFirma está escuchando en otro puerto o
+                                habilitaste HTTPS.</span>
+                        </div>
+                        <div class="form-group mt-4 maxWidth-500">
+                            <label for="api-token">Token de Seguridad (Opción -rest-token)</label>
+                            <input type="password" id="api-token" class="modern-input" placeholder="x-api-token...">
+                            <span class="text-sm text-muted">Si AutoFirma local arrancó con un token, introdúcelo aquí
+                                para autenticar las llamadas.</span>
+                        </div>
+                        <div class="mt-6">
+                            <button class="btn btn-primary" id="btn-save-settings"><i
+                                    class="fa-solid fa-floppy-disk"></i> Guardar y Aplicar</button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Script Application Logic -->
+    <script src="js/app.js"></script>
+</body>
+
+</html>
