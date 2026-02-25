@@ -7,7 +7,7 @@ package main
 import "testing"
 
 func TestValidateSigningServerURL_AllowAndDeny(t *testing.T) {
-	t.Setenv("AUTOFIRMA_ALLOWED_SIGN_DOMAINS", "*.gob.es,*.dipgra.es,localhost,127.0.0.1")
+	t.Setenv("AUTOFIRMA_ALLOWED_SIGN_DOMAINS", "*.gob.es,redsara.es,*.redsara.es,*.dipgra.es,localhost,127.0.0.1")
 	t.Setenv("AUTOFIRMA_DOMAIN_TRUST_AUTO_ALLOW", "1")
 
 	if err := validateSigningServerURL("https://afirmasignature.sededgsfp.gob.es/afirma-signature-storage/StorageService", "stservlet"); err != nil {
