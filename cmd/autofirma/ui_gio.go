@@ -449,15 +449,48 @@ func (ui *UI) browseOutputFile() {
 }
 
 func (ui *UI) loadCertificates() {
-	certs, err := certstore.GetSystemCertificates()
-	if err != nil {
-		ui.StatusMsg = "Error cargando certificados: " + err.Error()
+	log.Printf("[UI] Cargando certificados (fase 1: almacenes software, sin PKCS11)...")
+	softCerts, softErr := certstore.GetSystemCertificatesWithOptions(certstore.Options{IncludePKCS11: false})
+	if softErr != nil {
+		log.Printf("[UI] Error cargando certificados software: %v", softErr)
+		ui.StatusMsg = "Error cargando certificados: " + softErr.Error()
 		ui.Window.Invalidate()
 		return
 	}
-	ui.Certs = certs
-	ui.CertClicks = make([]widget.Clickable, len(certs))
+	log.Printf("[UI] Certificados software cargados: %d", len(softCerts))
+	ui.Certs = softCerts
+	ui.CertClicks = make([]widget.Clickable, len(softCerts))
 	ui.Window.Invalidate()
+
+	// Cargar PKCS#11 en segundo plano para no bloquear la UI si OpenSC/token se queda colgado.
+	go func() {
+		log.Printf("[UI] Cargando certificados (fase 2: incluyendo PKCS11)...")
+		allCerts, err := certstore.GetSystemCertificates()
+		if err != nil {
+			log.Printf("[UI] Error cargando certificados con PKCS11: %v", err)
+			return
+		}
+		if len(allCerts) <= len(softCerts) {
+			log.Printf("[UI] Certificados con PKCS11: %d (sin cambios visibles)", len(allCerts))
+			return
+		}
+		prevSelectedID := ""
+		if ui.SelectedCert >= 0 && ui.SelectedCert < len(ui.Certs) {
+			prevSelectedID = ui.Certs[ui.SelectedCert].ID
+		}
+		ui.Certs = allCerts
+		ui.CertClicks = make([]widget.Clickable, len(allCerts))
+		if prevSelectedID != "" {
+			for i := range ui.Certs {
+				if ui.Certs[i].ID == prevSelectedID {
+					ui.SelectedCert = i
+					break
+				}
+			}
+		}
+		log.Printf("[UI] Certificados con PKCS11 cargados: %d", len(allCerts))
+		ui.Window.Invalidate()
+	}()
 }
 
 func (ui *UI) openFile() {
