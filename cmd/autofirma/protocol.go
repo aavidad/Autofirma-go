@@ -158,7 +158,16 @@ func ParseProtocolURI(uriString string) (*ProtocolState, error) {
 		case "save", "load", "selectcert", "signandsave", "batch":
 			// Permitido en modo WebSocket/local.
 		default:
-			return nil, fmt.Errorf("parámetros insuficientes en la solicitud (falta id, rtservlet o stservlet)")
+			// Algunas sedes/envuelven acciones no estándar pero sí incluyen estado de
+			// sesión o datos suficientes para continuar por la ruta WebSocket/local.
+			if getQueryParam(q,
+				"idsession", "idSession", "sessionid", "sessionId",
+				"dat", "data", "ksb64", "properties",
+				"file", "filename", "url",
+			) == "" {
+				return nil, fmt.Errorf("parámetros insuficientes en la solicitud (falta id, rtservlet o stservlet)")
+			}
+			log.Printf("[Protocol] Acción no estándar %q aceptada por tener parámetros de sesión/datos suficientes", state.Action)
 		}
 	}
 
@@ -1576,6 +1585,7 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 
 	state, err := ParseProtocolURI(uriString)
 	if err != nil {
+		log.Printf("[Protocol] Error parseando URI protocolaria: %v uri=%q", err, uriString)
 		ui.StatusMsg = "Error protocolo: " + err.Error()
 		ui.Window.Invalidate()
 		return

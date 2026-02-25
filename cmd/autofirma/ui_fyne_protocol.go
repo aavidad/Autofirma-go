@@ -24,6 +24,7 @@ func (ui *FyneUI) HandleProtocolInit(uriString string) {
 
 	state, err := ParseProtocolURI(uriString)
 	if err != nil {
+		log.Printf("[FyneUI][Protocol] Error parseando URI protocolaria: %v uri=%q", err, uriString)
 		ui.SetStatus("Error protocolo: " + err.Error())
 		return
 	}
