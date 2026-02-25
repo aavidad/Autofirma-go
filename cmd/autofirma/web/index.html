@@ -7,7 +7,7 @@
     <title>AutoFirma Web Console</title>
     <!-- Modern Typography: Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=0.1.9-restfix6">
     <!-- FontAwesome for Premium Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -41,7 +41,7 @@
 
             <div class="server-status">
                 <div class="status-indicator"></div>
-                <span id="global-status-text">Conectando...</span>
+                <span id="global-status-text">Desconectado</span>
             </div>
         </nav>
 
@@ -50,15 +50,14 @@
             <header class="topbar">
                 <h1 id="page-title">Estado del Motor</h1>
                 <div class="topbar-actions">
-                    <button class="icon-btn theme-toggle" title="AutoFirma Desktop GUI" id="btn-launch-gui"
-                        onclick="window.location.href='afirma://'">
+                    <button class="icon-btn theme-toggle" title="AutoFirma Desktop GUI (Qt)" id="btn-launch-gui">
                         <i class="fa-solid fa-desktop"></i>
                     </button>
                     <button class="icon-btn theme-toggle" title="Cambiar tema" id="theme-toggle">
                         <i class="fa-solid fa-moon"></i>
                     </button>
                     <button class="btn btn-primary" id="btn-reconnect">
-                        <i class="fa-solid fa-plug"></i> Reconectar
+                        <i class="fa-solid fa-plug"></i> Conectar
                     </button>
                 </div>
             </header>
@@ -82,8 +81,8 @@
                             <i class="fa-solid fa-shield-halved card-icon"></i>
                             <div class="card-content">
                                 <h3>Confianza TLS</h3>
-                                <p id="tls-status" class="status-pending"><i
-                                        class="fa-solid fa-circle-notch fa-spin"></i> Comprobando...</p>
+                                <p id="tls-status" class="text-muted"><i
+                                        class="fa-solid fa-plug-circle-xmark"></i> Desconectado</p>
                             </div>
                         </div>
                         <div class="glass-card status-card">
@@ -171,14 +170,33 @@
                                 </select>
                             </div>
 
+                            <div class="form-group mt-4">
+                                <label for="sign-certificate">Certificado para firmar</label>
+                                <select id="sign-certificate" class="modern-select">
+                                    <option value="">Selecciona un certificado...</option>
+                                </select>
+                                <span class="text-sm text-muted">Seleccione un certificado.</span>
+                            </div>
+
                             <div class="form-group checkbox-group">
                                 <input type="checkbox" id="add-visible-seal">
                                 <label for="add-visible-seal">Añadir sello visible (Solo PAdES/PDF)</label>
                             </div>
 
-                            <button class="btn btn-primary btn-block mt-6" id="btn-execute-sign" disabled>
-                                <i class="fa-solid fa-signature"></i> Firmar Ahora
-                            </button>
+                            <div class="mt-4">
+                                <button class="btn btn-secondary btn-block" id="btn-preview-seal" type="button" disabled>
+                                    <i class="fa-solid fa-up-right-and-down-left-from-center"></i> Previsualizar sello visible
+                                </button>
+                            </div>
+
+                            <div class="mt-6" style="display:flex; gap:10px; flex-wrap:wrap;">
+                                <button class="btn btn-secondary" id="btn-validate-file" type="button" disabled style="flex:1 1 220px;">
+                                    <i class="fa-solid fa-shield-check"></i> Validar
+                                </button>
+                                <button class="btn btn-primary" id="btn-execute-sign" disabled style="flex:1 1 220px;">
+                                    <i class="fa-solid fa-signature"></i> Firmar Ahora
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -194,6 +212,24 @@
                                 <button class="btn btn-secondary" id="btn-close-modal">Cerrar</button>
                                 <a id="btn-download-signed" class="btn btn-primary" download="documento_firmado"><i
                                         class="fa-solid fa-download"></i> Descargar Documento</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal hidden" id="seal-preview-modal">
+                        <div class="modal-content glass-card seal-preview-modal-content">
+                            <h2><i class="fa-regular fa-file-pdf"></i> Previsualizar sello visible</h2>
+                            <p class="text-muted">Arrastra para dibujar el área del sello en la primera página.</p>
+                            <div class="seal-preview-stage" id="seal-preview-stage">
+                                <img id="seal-preview-image" alt="Previsualización PDF" />
+                                <div class="seal-preview-overlay" id="seal-preview-overlay"></div>
+                                <div class="seal-preview-rect" id="seal-preview-rect"></div>
+                            </div>
+                            <div class="text-muted mt-4" id="seal-preview-info">x=62.0% y=4.0% ancho=34.0% alto=12.0%</div>
+                            <div class="modal-actions mt-6">
+                                <button class="btn btn-secondary" id="btn-seal-reset">Restablecer</button>
+                                <button class="btn btn-secondary" id="btn-seal-cancel">Cancelar</button>
+                                <button class="btn btn-primary" id="btn-seal-apply">Usar área</button>
                             </div>
                         </div>
                     </div>
@@ -228,7 +264,7 @@
     </div>
 
     <!-- Script Application Logic -->
-    <script src="js/app.js"></script>
+    <script src="js/app.js?v=0.1.9-restfix11"></script>
 </body>
 
 </html>

@@ -3,12 +3,20 @@
  */
 
 const AppState = {
-    apiUrl: 'http://127.0.0.1:63118',
+    apiUrl: (window.location && /^https?:$/i.test(window.location.protocol))
+        ? window.location.origin
+        : 'http://127.0.0.1:63118',
     apiToken: '',
     connected: false,
     selectedFile: null,
     selectedFileB64: null,
+    selectedCertId: '',
     certificates: [],
+    visibleSealRect: { page: 1, x: 0.62, y: 0.04, w: 0.34, h: 0.12, rotation: 0 },
+    sealPreviewDraft: null,
+    reconnectTimer: null,
+    reconnectAttempts: 0,
+    checkingConnection: false,
 };
 
 // UI Elements
@@ -19,6 +27,7 @@ const DOM = {
     restStatus: document.getElementById('rest-status'),
     tlsStatus: document.getElementById('tls-status'),
     btnReconnect: document.getElementById('btn-reconnect'),
+    btnLaunchGUI: document.getElementById('btn-launch-gui'),
     themeToggle: document.getElementById('theme-toggle'),
     navLinks: document.querySelectorAll('.nav-links li'),
     views: document.querySelectorAll('.view'),
@@ -35,14 +44,26 @@ const DOM = {
     fileName: document.getElementById('file-name'),
     fileSize: document.getElementById('file-size'),
     btnRemoveFile: document.getElementById('btn-remove-file'),
+    btnValidateFile: document.getElementById('btn-validate-file'),
     btnExecuteSign: document.getElementById('btn-execute-sign'),
     signFormat: document.getElementById('sign-format'),
+    signCertificate: document.getElementById('sign-certificate'),
     addVisibleSeal: document.getElementById('add-visible-seal'),
+    btnPreviewSeal: document.getElementById('btn-preview-seal'),
     
     // Modal
     resultModal: document.getElementById('sign-result-modal'),
     btnCloseModal: document.getElementById('btn-close-modal'),
     btnDownloadSigned: document.getElementById('btn-download-signed'),
+    sealPreviewModal: document.getElementById('seal-preview-modal'),
+    sealPreviewStage: document.getElementById('seal-preview-stage'),
+    sealPreviewImage: document.getElementById('seal-preview-image'),
+    sealPreviewOverlay: document.getElementById('seal-preview-overlay'),
+    sealPreviewRect: document.getElementById('seal-preview-rect'),
+    sealPreviewInfo: document.getElementById('seal-preview-info'),
+    btnSealReset: document.getElementById('btn-seal-reset'),
+    btnSealCancel: document.getElementById('btn-seal-cancel'),
+    btnSealApply: document.getElementById('btn-seal-apply'),
     
     // Settings
     apiUrlInput: document.getElementById('api-url'),
@@ -55,10 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     setupNavigation();
     setupDragAndDrop();
-    setupEventListeners();
     
     log('Sistema', 'Inicializando consola Web de AutoFirma...', 'info');
-    checkConnection();
+    setManualConnectIdleState();
 });
 
 // --- Theme Management ---
@@ -132,7 +152,39 @@ document.getElementById('clear-log')?.addEventListener('click', () => {
 });
 
 // --- API Communication ---
-async function apiCall(endpoint, method = 'GET', body = null) {
+function localizeBackendMessage(message) {
+    const raw = String(message || '').trim();
+    if (!raw) return raw;
+    const low = raw.toLowerCase();
+
+    const exact = new Map([
+        ['no digital signature in document', 'El documento no contiene una firma digital.'],
+        ['unauthorized', 'No autorizado.'],
+        ['method not allowed', 'Método no permitido.'],
+        ['invalid request body', 'Cuerpo de petición inválido.'],
+        ['invalid params', 'Parámetros inválidos.'],
+        ['invalid json', 'JSON inválido.'],
+        ['json inválido', 'JSON inválido.'],
+        ['timeout', 'Tiempo de espera agotado.'],
+    ]);
+    if (exact.has(low)) return exact.get(low);
+
+    if (low.startsWith('http ')) {
+        return `Error HTTP (${raw.replace(/^HTTP\s*/i, '')})`;
+    }
+    if (low.includes('timeout')) {
+        return `Tiempo de espera agotado (${raw})`;
+    }
+    if (low.includes('no digital signature')) {
+        return 'El documento no contiene una firma digital.';
+    }
+    if (low.includes('certificateindex fuera de rango')) {
+        return 'Índice de certificado fuera de rango.';
+    }
+    return raw;
+}
+
+async function apiCall(endpoint, method = 'GET', body = null, opts = {}) {
     const headers = { 'Content-Type': 'application/json' };
     if (AppState.apiToken) {
         headers['Authorization'] = `Bearer ${AppState.apiToken}`;
@@ -140,29 +192,56 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
+    const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 0;
+    let timeoutId = null;
+    if (timeoutMs > 0 && typeof AbortController !== 'undefined') {
+        const controller = new AbortController();
+        options.signal = controller.signal;
+        timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    }
 
     try {
         const response = await fetch(`${AppState.apiUrl}${endpoint}`, options);
         if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error || `HTTP ${response.status}`);
+            throw new Error(localizeBackendMessage(errData.error || `HTTP ${response.status}`));
         }
         return await response.json();
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            throw new Error(`timeout (${timeoutMs} ms)`);
+        }
+        if (error instanceof Error) {
+            throw new Error(localizeBackendMessage(error.message));
+        }
         throw error;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
     }
 }
 
 // --- Connection Diagnostics ---
 async function checkConnection() {
+    if (AppState.checkingConnection) {
+        return;
+    }
+    AppState.checkingConnection = true;
     setConnectionState(null); // Loading state
     try {
-        const health = await apiCall('/health');
+        const health = await apiCall('/health', 'GET', null, { timeoutMs: 3000 });
         if (health && health.ok) {
+            AppState.reconnectAttempts = 0;
+            if (AppState.reconnectTimer) {
+                clearTimeout(AppState.reconnectTimer);
+                AppState.reconnectTimer = null;
+            }
             setConnectionState(true);
             DOM.restStatus.innerHTML = `<i class="fa-solid fa-check"></i> Activo: ${health.version || 'v2026'}`;
             DOM.restStatus.className = 'status-good text-success';
             log('Conexión', `API REST detectada correctamente.`, 'success');
+            loadCertificates().catch((e) => {
+                log('Certificados', `No se pudieron cargar automáticamente al conectar: ${e.message}`, 'warn');
+            });
             
             // Also check TLS trust
             checkTLSTrust();
@@ -176,13 +255,52 @@ async function checkConnection() {
         DOM.tlsStatus.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> No aplicable`;
         DOM.tlsStatus.className = 'text-muted';
         log('Conexión', `No se pudo conectar a AutoFirma local: ${e.message}`, 'error');
+        scheduleAutoReconnect();
+    } finally {
+        AppState.checkingConnection = false;
     }
 }
 
+function scheduleAutoReconnect() {
+    // Modo manual: no reconectar automáticamente.
+}
+
+function setManualConnectIdleState() {
+    AppState.connected = false;
+    if (AppState.reconnectTimer) {
+        clearTimeout(AppState.reconnectTimer);
+        AppState.reconnectTimer = null;
+    }
+    AppState.reconnectAttempts = 0;
+    DOM.statusText.textContent = "Desconectado";
+    DOM.statusIndicator.classList.remove('connected');
+    DOM.statusIndicator.style.background = 'var(--muted-color)';
+    if (DOM.btnReconnect) {
+        DOM.btnReconnect.innerHTML = `<i class="fa-solid fa-plug"></i> Conectar`;
+    }
+    if (DOM.restStatus) {
+        DOM.restStatus.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Desconectado (pulsa Conectar)`;
+        DOM.restStatus.className = 'text-muted';
+    }
+    if (DOM.tlsStatus) {
+        DOM.tlsStatus.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Desconectado`;
+        DOM.tlsStatus.className = 'text-muted';
+    }
+    syncSignButtonState();
+}
+
 async function checkTLSTrust() {
+    const panelUsesHTTP = window.location && window.location.protocol === 'http:';
     try {
-        const tls = await apiCall('/tls/trust-status');
-        if (tls && tls.ok && tls.trusted) {
+        const tls = await apiCall('/tls/trust-status', 'GET', null, { timeoutMs: 5000 });
+        const trusted = inferTLSTrusted(tls);
+        if (panelUsesHTTP) {
+            DOM.tlsStatus.innerHTML = `<i class="fa-solid fa-circle-info"></i> Panel en HTTP local (TLS opcional para esta vista)`;
+            DOM.tlsStatus.className = 'text-muted';
+            log('Seguridad', 'La consola REST está abierta por HTTP local. La confianza TLS solo afecta a uso HTTPS/WSS.', 'info');
+            return;
+        }
+        if (tls && tls.ok && trusted) {
             DOM.tlsStatus.innerHTML = `<i class="fa-solid fa-shield-check"></i> Certificados confiados en sistema`;
             DOM.tlsStatus.className = 'text-success';
             log('Seguridad', 'La CA local TLS está instalada y confiada. Las llamadas WSS y HTTPS están listas.', 'success');
@@ -192,33 +310,79 @@ async function checkTLSTrust() {
             log('Seguridad', 'La CA local no está en el almacén. Debes instalarla manualmente o con AutoFirma', 'warn');
         }
     } catch (e) {
+        if (panelUsesHTTP) {
+            DOM.tlsStatus.innerHTML = `<i class="fa-solid fa-circle-info"></i> Panel en HTTP local (comprobación TLS omitida)`;
+            DOM.tlsStatus.className = 'text-muted';
+            log('Seguridad', `Comprobación TLS omitida en panel HTTP local: ${e.message}`, 'info');
+            return;
+        }
         DOM.tlsStatus.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> Error al verificar: ${e.message}`;
         log('Seguridad', `No se pudo verificar TLS: ${e.message}`, 'error');
     }
+}
+
+function inferTLSTrusted(tls) {
+    if (!tls || !tls.ok) return false;
+    if (typeof tls.trusted === 'boolean') return tls.trusted;
+    const lines = Array.isArray(tls.lines) ? tls.lines : [];
+    if (lines.length === 0) return false;
+    const joined = lines.join('\n').toLowerCase();
+    const hasMissing = joined.includes('falta') || joined.includes('no encontrada') || joined.includes('pendiente');
+    const hasOk = joined.includes('nss ok') || joined.includes('sistema: ok') || joined.includes('confiad');
+    return hasOk && !hasMissing;
 }
 
 function setConnectionState(isConnected) {
     if (isConnected === null) {
         AppState.connected = false;
         DOM.statusText.textContent = "Conectando...";
+        if (DOM.btnReconnect) {
+            DOM.btnReconnect.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Conectando...`;
+        }
         DOM.statusIndicator.classList.remove('connected');
         DOM.statusIndicator.style.background = 'var(--muted-color)';
     } else if (isConnected) {
         AppState.connected = true;
         DOM.statusText.textContent = "Conectado al Motor";
+        if (DOM.btnReconnect) {
+            DOM.btnReconnect.innerHTML = `<i class="fa-solid fa-rotate-right"></i> Reconectar`;
+        }
         DOM.statusIndicator.classList.add('connected');
         DOM.statusIndicator.style.background = '';
     } else {
         AppState.connected = false;
         DOM.statusText.textContent = "Desconectado";
+        if (DOM.btnReconnect) {
+            DOM.btnReconnect.innerHTML = `<i class="fa-solid fa-plug"></i> Conectar`;
+        }
         DOM.statusIndicator.classList.remove('connected');
         DOM.statusIndicator.style.background = 'var(--danger-color)';
     }
+    syncSignButtonState();
 }
 
 DOM.btnReconnect.addEventListener('click', () => {
+    if (AppState.reconnectTimer) {
+        clearTimeout(AppState.reconnectTimer);
+        AppState.reconnectTimer = null;
+    }
+    AppState.reconnectAttempts = 0;
     log('Sistema', 'Forzando reconexión al motor...', 'info');
     checkConnection();
+});
+
+DOM.btnLaunchGUI?.addEventListener('click', async () => {
+    try {
+        const res = await apiCall('/desktop/open', 'POST', { frontend: 'qt' });
+        log('Desktop', res?.message || 'GUI Qt lanzada', 'success');
+    } catch (e) {
+        log('Desktop', `No se pudo lanzar GUI Qt por REST (${e.message}). Intentando protocolo...`, 'warn');
+        try {
+            window.location.href = 'afirma://';
+        } catch (_) {
+            // noop
+        }
+    }
 });
 
 // --- Settings View ---
@@ -241,11 +405,21 @@ async function loadCertificates() {
         if (data && data.certificates) {
             AppState.certificates = data.certificates;
             renderCertificates();
+            renderSignCertificateSelect();
             log('Certificados', `Se cargaron ${data.certificates.length} certificados del almacén.`, 'success');
         }
     } catch (e) {
         DOM.certsTbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger"><i class="fa-solid fa-circle-exclamation"></i> Error al cargar: ${e.message}</td></tr>`;
         log('Certificados', `Error al obtener certificados: ${e.message}`, 'error');
+    }
+}
+
+async function loadCertificatesForSign() {
+    if (!AppState.connected) return;
+    const data = await apiCall('/certificados');
+    if (data && Array.isArray(data.certificates)) {
+        AppState.certificates = data.certificates;
+        renderSignCertificateSelect();
     }
 }
 
@@ -283,6 +457,26 @@ function renderCertificates() {
 }
 
 DOM.btnRefreshCerts.addEventListener('click', loadCertificates);
+
+function renderSignCertificateSelect() {
+    if (!DOM.signCertificate) return;
+    const current = AppState.selectedCertId || DOM.signCertificate.value || '';
+    let html = `<option value="">Selecciona un certificado...</option>`;
+    for (const c of AppState.certificates) {
+        const label = (c.name || c.subjectName || c.nickname || c.id || 'Certificado').replace(/</g, '&lt;');
+        const issuer = (c.issuerName || '').replace(/</g, '&lt;');
+        html += `<option value="${c.id}">${label}${issuer ? ` · ${issuer}` : ''}</option>`;
+    }
+    DOM.signCertificate.innerHTML = html;
+    if (current && AppState.certificates.some(c => c.id === current)) {
+        DOM.signCertificate.value = current;
+        AppState.selectedCertId = current;
+    } else {
+        AppState.selectedCertId = '';
+        DOM.signCertificate.value = '';
+    }
+    syncSignButtonState();
+}
 
 // --- Sign File View ---
 function setupDragAndDrop() {
@@ -339,12 +533,13 @@ function processFileSelection(file) {
         
         DOM.dropZone.classList.add('hidden');
         DOM.fileDetails.classList.remove('hidden');
-        DOM.btnExecuteSign.disabled = !AppState.connected;
+        syncSignButtonState();
         
         // Match extension with format if auto
         if (ext === 'pdf') DOM.signFormat.value = 'PAdES';
         else if (ext === 'xml') DOM.signFormat.value = 'XAdES';
         else DOM.signFormat.value = 'CAdES';
+        updateSealPreviewAvailability();
         
         log('Firma', `Archivo cargado: ${file.name} (${sizeStr})`, 'info');
     };
@@ -360,13 +555,23 @@ DOM.btnRemoveFile.addEventListener('click', () => {
     DOM.fileInput.value = "";
     DOM.dropZone.classList.remove('hidden');
     DOM.fileDetails.classList.add('hidden');
-    DOM.btnExecuteSign.disabled = true;
+    updateSealPreviewAvailability();
+    syncSignButtonState();
 });
+
+function syncSignButtonState() {
+    const hasFile = !!AppState.selectedFileB64;
+    const hasCert = !!AppState.selectedCertId;
+    DOM.btnExecuteSign.disabled = !(AppState.connected && hasFile && hasCert);
+    if (DOM.btnValidateFile) {
+        DOM.btnValidateFile.disabled = !(AppState.connected && hasFile);
+    }
+}
 
 // Execute REST Sign
 DOM.btnExecuteSign.addEventListener('click', async () => {
-    if (!AppState.selectedFileB64 || !AppState.connected) {
-        log('Firma', 'Servidor no conectado o archivo no cargado', 'error');
+    if (!AppState.selectedFileB64 || !AppState.connected || !AppState.selectedCertId) {
+        log('Firma', 'Servidor no conectado, archivo no cargado o certificado no seleccionado', 'error');
         return;
     }
 
@@ -383,13 +588,14 @@ DOM.btnExecuteSign.addEventListener('click', async () => {
         const reqPayload = {
             dataB64: AppState.selectedFileB64,
             format: format,
-            compatibilidadEstricta: true // Ensure PAdES basic rules as Java did
+            idCertificado: AppState.selectedCertId,
+            compatibilidadEstricta: true, // Ensure PAdES basic rules as Java did
+            devolverFirmaB64: true,
+            guardarEnDisco: false
         };
         
         if (seal) {
-            reqPayload.selloVisible = {
-                page: 1, x: 50, y: 50, w: 100, h: 50, rotation: 0
-            };
+            reqPayload.selloVisible = { ...(AppState.visibleSealRect || { page: 1, x: 0.62, y: 0.04, w: 0.34, h: 0.12, rotation: 0 }) };
         }
 
         const signedRes = await apiCall('/firmar', 'POST', reqPayload);
@@ -422,14 +628,200 @@ DOM.btnExecuteSign.addEventListener('click', async () => {
         log('Firma', `Error firmando el archivo: ${e.message}`, 'error');
         alert(`Error al firmar: ${e.message}\nRevisa que AutoFirma Desktop se haya ejecutado o no esté cancelado el diálogo.`);
     } finally {
-        DOM.btnExecuteSign.disabled = false;
+        syncSignButtonState();
         DOM.btnExecuteSign.innerHTML = `<i class="fa-solid fa-signature"></i> Firmar Ahora`;
+    }
+});
+
+DOM.btnValidateFile?.addEventListener('click', async () => {
+    if (!AppState.connected || !AppState.selectedFileB64) {
+        log('Verificación', 'Conecta con el motor y selecciona un fichero para validar.', 'warn');
+        return;
+    }
+    const format = DOM.signFormat.value || 'auto';
+    const oldHtml = DOM.btnValidateFile.innerHTML;
+    DOM.btnValidateFile.disabled = true;
+    DOM.btnValidateFile.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Validando...`;
+    try {
+        const res = await apiCall('/verificar', 'POST', {
+            dataB64: AppState.selectedFileB64,
+            formato: format
+        }, { timeoutMs: 15000 });
+        const r = res?.result || {};
+        const valid = !!r.valid;
+        const signer = r.signerName || 'desconocido';
+        const fmt = r.format || format;
+        const msg = valid
+            ? `Firma válida (${fmt}). Firmante: ${signer}.`
+            : `Firma no válida (${fmt}). ${localizeBackendMessage(r.reason || 'Sin detalle.')}`;
+        log('Verificación', msg, valid ? 'success' : 'warn');
+        alert(msg);
+    } catch (e) {
+        const msg = localizeBackendMessage(e.message);
+        log('Verificación', `Error al validar: ${msg}`, 'error');
+        alert(`Error al validar: ${msg}`);
+    } finally {
+        DOM.btnValidateFile.innerHTML = oldHtml;
+        syncSignButtonState();
     }
 });
 
 DOM.btnCloseModal.addEventListener('click', () => {
     DOM.resultModal.classList.add('hidden');
 });
+
+DOM.signCertificate?.addEventListener('change', (e) => {
+    AppState.selectedCertId = e.target.value || '';
+    syncSignButtonState();
+});
+
+DOM.signFormat?.addEventListener('change', () => {
+    updateSealPreviewAvailability();
+});
+
+DOM.addVisibleSeal?.addEventListener('change', () => {
+    updateSealPreviewAvailability();
+});
+
+DOM.btnPreviewSeal?.addEventListener('click', async () => {
+    if (!AppState.connected) {
+        log('Sello', 'Conecta con el motor antes de previsualizar.', 'warn');
+        return;
+    }
+    if (!AppState.selectedFileB64 || !looksLikePDFSelected()) {
+        log('Sello', 'Selecciona un PDF antes de abrir el previsualizador.', 'warn');
+        return;
+    }
+    try {
+        const res = await apiCall('/pdf/previsualizar', 'POST', { dataB64: AppState.selectedFileB64, page: 1 }, { timeoutMs: 12000 });
+        if (!res?.ok || !res.data) throw new Error('No se recibió imagen de previsualización');
+        openSealPreviewModal(res);
+    } catch (e) {
+        log('Sello', `No se pudo abrir el previsualizador: ${e.message}`, 'error');
+        alert(`No se pudo abrir el previsualizador de PDF: ${e.message}`);
+    }
+});
+
+DOM.btnSealCancel?.addEventListener('click', () => closeSealPreviewModal());
+DOM.btnSealApply?.addEventListener('click', () => {
+    if (AppState.sealPreviewDraft) {
+        AppState.visibleSealRect = { ...AppState.sealPreviewDraft };
+    }
+    DOM.addVisibleSeal.checked = true;
+    updateSealPreviewAvailability();
+    log('Sello', `Área visible guardada x=${(AppState.visibleSealRect.x*100).toFixed(1)}% y=${(AppState.visibleSealRect.y*100).toFixed(1)}%`, 'success');
+    closeSealPreviewModal();
+});
+DOM.btnSealReset?.addEventListener('click', () => {
+    AppState.sealPreviewDraft = { page: 1, x: 0.62, y: 0.04, w: 0.34, h: 0.12, rotation: 0 };
+    renderSealPreviewRect();
+});
+
+function looksLikePDFSelected() {
+    const name = (AppState.selectedFile?.name || '').toLowerCase();
+    return name.endsWith('.pdf') || DOM.signFormat.value === 'PAdES';
+}
+
+function updateSealPreviewAvailability() {
+    if (!DOM.btnPreviewSeal) return;
+    const enabled = looksLikePDFSelected() && DOM.signFormat.value === 'PAdES';
+    DOM.btnPreviewSeal.disabled = !enabled;
+}
+
+function openSealPreviewModal(previewRes) {
+    AppState.sealPreviewDraft = { ...(AppState.visibleSealRect || { page: 1, x: 0.62, y: 0.04, w: 0.34, h: 0.12, rotation: 0 }) };
+    DOM.sealPreviewImage.onload = () => {
+        alignSealPreviewOverlay();
+        renderSealPreviewRect();
+    };
+    DOM.sealPreviewImage.src = `data:image/png;base64,${previewRes.data}`;
+    DOM.sealPreviewImage.dataset.sourceWidth = String(previewRes.width || 0);
+    DOM.sealPreviewImage.dataset.sourceHeight = String(previewRes.height || 0);
+    DOM.sealPreviewModal.classList.remove('hidden');
+    initSealPreviewInteractions();
+}
+
+function closeSealPreviewModal() {
+    DOM.sealPreviewModal.classList.add('hidden');
+}
+
+function alignSealPreviewOverlay() {
+    const imgRect = DOM.sealPreviewImage.getBoundingClientRect();
+    const stageRect = DOM.sealPreviewStage.getBoundingClientRect();
+    const left = DOM.sealPreviewImage.offsetLeft;
+    const top = DOM.sealPreviewImage.offsetTop;
+    DOM.sealPreviewOverlay.style.left = `${left}px`;
+    DOM.sealPreviewOverlay.style.top = `${top}px`;
+    DOM.sealPreviewOverlay.style.right = 'auto';
+    DOM.sealPreviewOverlay.style.bottom = 'auto';
+    DOM.sealPreviewOverlay.style.width = `${imgRect.width || Math.max(0, stageRect.width - 16)}px`;
+    DOM.sealPreviewOverlay.style.height = `${imgRect.height || Math.max(0, stageRect.height - 16)}px`;
+}
+
+function renderSealPreviewRect() {
+    if (!AppState.sealPreviewDraft) return;
+    const r = DOM.sealPreviewOverlay.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const seal = AppState.sealPreviewDraft;
+    DOM.sealPreviewRect.style.display = 'block';
+    DOM.sealPreviewRect.style.left = `${DOM.sealPreviewOverlay.offsetLeft + (seal.x * r.width)}px`;
+    DOM.sealPreviewRect.style.width = `${Math.max(1, seal.w * r.width)}px`;
+    DOM.sealPreviewRect.style.top = `${DOM.sealPreviewOverlay.offsetTop + ((1 - (seal.y + seal.h)) * r.height)}px`;
+    DOM.sealPreviewRect.style.height = `${Math.max(1, seal.h * r.height)}px`;
+    DOM.sealPreviewInfo.textContent = `x=${(seal.x*100).toFixed(1)}% y=${(seal.y*100).toFixed(1)}% ancho=${(seal.w*100).toFixed(1)}% alto=${(seal.h*100).toFixed(1)}%`;
+}
+
+let sealPreviewInteractionsReady = false;
+function initSealPreviewInteractions() {
+    if (sealPreviewInteractionsReady) {
+        alignSealPreviewOverlay();
+        renderSealPreviewRect();
+        return;
+    }
+    let dragStart = null;
+    const overlay = DOM.sealPreviewOverlay;
+    const toNorm = (evt) => {
+        const rect = overlay.getBoundingClientRect();
+        const x = Math.min(1, Math.max(0, (evt.clientX - rect.left) / rect.width));
+        const yTop = Math.min(1, Math.max(0, (evt.clientY - rect.top) / rect.height));
+        const yBottom = 1 - yTop;
+        return { x, yBottom };
+    };
+    overlay.addEventListener('pointerdown', (evt) => {
+        if (!AppState.sealPreviewDraft) return;
+        evt.preventDefault();
+        overlay.setPointerCapture?.(evt.pointerId);
+        dragStart = toNorm(evt);
+    });
+    overlay.addEventListener('pointermove', (evt) => {
+        if (!dragStart || !AppState.sealPreviewDraft) return;
+        const cur = toNorm(evt);
+        const x0 = Math.min(dragStart.x, cur.x);
+        const x1 = Math.max(dragStart.x, cur.x);
+        const y0 = Math.min(dragStart.yBottom, cur.yBottom);
+        const y1 = Math.max(dragStart.yBottom, cur.yBottom);
+        AppState.sealPreviewDraft = {
+            ...AppState.sealPreviewDraft,
+            x: Math.max(0, Math.min(1, x0)),
+            y: Math.max(0, Math.min(1, y0)),
+            w: Math.max(0.01, Math.min(1, x1 - x0)),
+            h: Math.max(0.01, Math.min(1, y1 - y0)),
+            page: 1,
+            rotation: 0
+        };
+        renderSealPreviewRect();
+    });
+    const stop = () => { dragStart = null; };
+    overlay.addEventListener('pointerup', stop);
+    overlay.addEventListener('pointercancel', stop);
+    window.addEventListener('resize', () => {
+        if (!DOM.sealPreviewModal.classList.contains('hidden')) {
+            alignSealPreviewOverlay();
+            renderSealPreviewRect();
+        }
+    });
+    sealPreviewInteractionsReady = true;
+}
 
 function b64toBlob(b64Data, contentType='', sliceSize=512) {
     const byteCharacters = atob(b64Data);

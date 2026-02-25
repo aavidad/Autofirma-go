@@ -6,7 +6,10 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -18,6 +21,11 @@ type restServiceStatusResponse struct {
 type restServiceActionResponse struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
+}
+
+type restDesktopOpenRequest struct {
+	Frontend   string `json:"frontend"`
+	FrontendES string `json:"interfaz"`
 }
 
 type restServiceInstallRequest struct {
@@ -116,6 +124,41 @@ func (s *restServer) handleServiceStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, restServiceActionResponse{OK: true, Message: "Servicio detenido"})
+}
+
+func (s *restServer) handleDesktopOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, restError{OK: false, Error: "method not allowed"})
+		return
+	}
+	var req restDesktopOpenRequest
+	_ = decodeJSONBody(r, &req)
+	frontend := strings.ToLower(strings.TrimSpace(req.Frontend))
+	if frontend == "" {
+		frontend = strings.ToLower(strings.TrimSpace(req.FrontendES))
+	}
+	if frontend == "" {
+		frontend = "qt"
+	}
+	if frontend != "qt" && frontend != "fyne" && frontend != "gio" {
+		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "frontend no soportado (use qt|fyne|gio)"})
+		return
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
+		return
+	}
+	cmd := exec.Command(exePath, "-frontend", frontend)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
+		return
+	}
+	log.Printf("[REST] Lanzando GUI desktop pid=%d frontend=%s", cmd.Process.Pid, frontend)
+	writeJSON(w, http.StatusOK, restServiceActionResponse{OK: true, Message: "GUI desktop lanzada (" + frontend + ")"})
 }
 
 // decodeJSONBody is a helper to decode JSON ignoring errors on empty body.

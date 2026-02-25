@@ -1523,6 +1523,7 @@ Window {
                 property string svcMessage: ""
                 property bool svcConnected: true
                 property bool restServerRunning: false
+                property bool restServerChecking: false
 
                 Timer {
                     id: statusRetryTimer
@@ -1537,6 +1538,43 @@ Window {
 
                 function refreshServiceStatus() {
                     backend.getServiceStatus()
+                    refreshRestServerStatus()
+                }
+
+                function refreshRestServerStatus() {
+                    var port = (restPortField && restPortField.text && restPortField.text.length > 0) ? restPortField.text : "63118"
+                    var useHttps = restHttpsCheck ? restHttpsCheck.checked : false
+                    var protocol = useHttps ? "https://" : "http://"
+                    var url = protocol + "127.0.0.1:" + port + "/health"
+                    var xhr = new XMLHttpRequest()
+                    restServerChecking = true
+                    xhr.open("GET", url)
+                    xhr.timeout = 2500
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState !== XMLHttpRequest.DONE)
+                            return
+                        restServerChecking = false
+                        // 200 => OK. 401/403 => servidor vivo pero protegido.
+                        if (xhr.status === 200 || xhr.status === 401 || xhr.status === 403) {
+                            restServerRunning = true
+                        } else if (xhr.status !== 0) {
+                            restServerRunning = false
+                        }
+                    }
+                    xhr.ontimeout = function() {
+                        restServerChecking = false
+                        restServerRunning = false
+                    }
+                    xhr.onerror = function() {
+                        restServerChecking = false
+                        restServerRunning = false
+                    }
+                    try {
+                        xhr.send()
+                    } catch (e) {
+                        restServerChecking = false
+                        restServerRunning = false
+                    }
                 }
 
                 Connections {
@@ -1558,6 +1596,7 @@ Window {
                             configTab.svcMessage = message
                         }
                         statusRetryTimer.start()
+                        configTab.refreshRestServerStatus()
                     }
                 }
 
@@ -1818,15 +1857,15 @@ Window {
                                 // Estado actual del API REST
                                 Rectangle {
                                     Layout.fillWidth: true; height: 44; radius: 8
-                                    color: configTab.restServerRunning ? "#1a4a1a" : "#2a0a0a"
-                                    border.color: configTab.restServerRunning ? "#2ecc71" : "#e74c3c"
+                                    color: configTab.restServerChecking ? "#1f2937" : (configTab.restServerRunning ? "#1a4a1a" : "#2a0a0a")
+                                    border.color: configTab.restServerChecking ? "#9ca3af" : (configTab.restServerRunning ? "#2ecc71" : "#e74c3c")
                                     border.width: 1
 
                                     RowLayout {
                                         anchors.fill: parent; anchors.margins: 12; spacing: 10
                                         Text {
-                                            text: configTab.restServerRunning ? "● Servidor API REST en ejecución" : "● Servidor detenido"
-                                            color: configTab.restServerRunning ? "#2ecc71" : "#e74c3c"
+                                            text: configTab.restServerChecking ? "● Comprobando estado del servidor..." : (configTab.restServerRunning ? "● Servidor API REST en ejecución" : "● Servidor detenido")
+                                            color: configTab.restServerChecking ? "#d1d5db" : (configTab.restServerRunning ? "#2ecc71" : "#e74c3c")
                                             font.bold: true; font.pixelSize: 13; Layout.fillWidth: true
                                         }
                                     }
@@ -1882,7 +1921,7 @@ Window {
                                         text: "Iniciar servidor"
                                         palette.button: currentTheme.primaryColor; palette.buttonText: "white"
                                         onClicked: {
-                                            configTab.restServerRunning = true
+                                            configTab.restServerChecking = true
                                             backend.startBackend("0.0.0.0:" + restPortField.text, 
                                                                 restTokenField.text, 
                                                                 "ambas", 
@@ -1893,8 +1932,9 @@ Window {
                                     Button {
                                         text: "Detener"
                                         onClicked: {
-                                            configTab.restServerRunning = false
+                                            configTab.restServerChecking = true
                                             backend.stopBackend()
+                                            configTab.refreshRestServerStatus()
                                         }
                                     }
                                     Item { Layout.fillWidth: true } // Spacer
@@ -1904,12 +1944,25 @@ Window {
                                         enabled: configTab.restServerRunning
                                         onClicked: {
                                             var protocol = restHttpsCheck.checked ? "https://" : "http://"
-                                            var targetUrl = protocol + "127.0.0.1:" + restPortField.text + "/"
+                                            var port = (restPortField.text || "63118").trim()
+                                            var targetUrl = protocol + "127.0.0.1:" + port + "/"
                                             console.log("Intentando abrir web en:", targetUrl)
-                                            Qt.openUrlExternally(targetUrl)
+                                            backend.updateStatus("Abriendo consola web REST en " + targetUrl)
+                                            var opened = false
+                                            try {
+                                                opened = Qt.openUrlExternally(targetUrl)
+                                            } catch (e) {
+                                                console.log("Qt.openUrlExternally falló:", e)
+                                            }
+                                            if (!opened) {
+                                                console.log("Fallback backend.openExternal para:", targetUrl)
+                                                backend.openExternal(targetUrl)
+                                            }
                                         }
                                     }
                                 }
+
+                                Component.onCompleted: configTab.refreshRestServerStatus()
                             }
                         }
 

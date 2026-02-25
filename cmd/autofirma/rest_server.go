@@ -294,6 +294,8 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 	mux.HandleFunc("/service/uninstall", s.withAuth(s.handleServiceUninstall))
 	mux.HandleFunc("/service/start", s.withAuth(s.handleServiceStart))
 	mux.HandleFunc("/service/stop", s.withAuth(s.handleServiceStop))
+	mux.HandleFunc("/desktop/open", s.withAuth(s.handleDesktopOpen))
+	mux.HandleFunc("/escritorio/abrir", s.withAuth(s.handleDesktopOpen))
 
 	// User settings
 	mux.HandleFunc("/settings", s.withAuth(s.handleSettings))
@@ -362,6 +364,8 @@ func runRESTServerOnSocket(socketPath string, token string, sessionTTL time.Dura
 	mux.HandleFunc("/sign", s.withAuth(s.handleSign))
 	mux.HandleFunc("/verify", s.withAuth(s.handleVerify))
 	mux.HandleFunc("/certificates/import", s.withAuth(s.handleCertificatesImport))
+	mux.HandleFunc("/desktop/open", s.withAuth(s.handleDesktopOpen))
+	mux.HandleFunc("/escritorio/abrir", s.withAuth(s.handleDesktopOpen))
 	// Alias en castellano
 	mux.HandleFunc("/salud", s.withAuth(s.handleHealth))
 	mux.HandleFunc("/certificados", s.withAuth(s.handleCertificates))
@@ -423,6 +427,9 @@ func (s *restServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *restServer) authOK(r *http.Request) bool {
 	s.cleanupExpiredAuthState()
+	if s.allowLocalNoAuth(r) {
+		return true
+	}
 	raw := authHeaderToken(r)
 	if raw == "" {
 		return false
@@ -440,6 +447,20 @@ func (s *restServer) authOK(r *http.Request) bool {
 		delete(s.sessions, raw)
 		return false
 	}
+	return true
+}
+
+func (s *restServer) allowLocalNoAuth(r *http.Request) bool {
+	if strings.TrimSpace(s.token) != "" {
+		return false
+	}
+	if len(s.allowedCerts) > 0 {
+		return false
+	}
+	if !isLoopbackRemoteAddr(r.RemoteAddr) {
+		return false
+	}
+	log.Printf("[REST] Acceso local sin auth permitido (sin token/certs configurados) path=%s remote=%s", r.URL.Path, r.RemoteAddr)
 	return true
 }
 
@@ -807,14 +828,49 @@ func (s *restServer) handlePdfPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var params struct {
-		Path string `json:"path"`
-		Page int    `json:"page"`
+		Path      string `json:"path"`
+		Page      int    `json:"page"`
+		DataB64   string `json:"dataB64"`
+		DataB64ES string `json:"datosB64"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "invalid request body"})
 		return
 	}
-	b64, width, height, err := s.core.GeneratePdfPreview(params.Path, params.Page)
+	if strings.TrimSpace(params.DataB64) == "" && strings.TrimSpace(params.DataB64ES) != "" {
+		params.DataB64 = params.DataB64ES
+	}
+
+	previewPath := strings.TrimSpace(params.Path)
+	var tempFilePath string
+	if previewPath == "" && strings.TrimSpace(params.DataB64) != "" {
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(params.DataB64))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "dataB64 no es base64 válido"})
+			return
+		}
+		tmpF, err := os.CreateTemp("", "af_rest_pdf_preview_*.pdf")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: "error creando temporal de previsualización"})
+			return
+		}
+		if _, err := tmpF.Write(raw); err != nil {
+			_ = tmpF.Close()
+			_ = os.Remove(tmpF.Name())
+			writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: "error escribiendo temporal de previsualización"})
+			return
+		}
+		_ = tmpF.Close()
+		tempFilePath = tmpF.Name()
+		previewPath = tempFilePath
+		defer os.Remove(tempFilePath)
+	}
+	if previewPath == "" {
+		writeJSON(w, http.StatusBadRequest, restError{OK: false, Error: "path o dataB64 requerido"})
+		return
+	}
+
+	b64, width, height, err := s.core.GeneratePdfPreview(previewPath, params.Page)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, restError{OK: false, Error: err.Error()})
 		return
