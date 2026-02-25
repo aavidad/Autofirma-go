@@ -26,8 +26,8 @@ import (
 	"time"
 )
 
-const builtinFallbackAllowedSigningDomains = "*.gob.es,*.dipgra.es,localhost,127.0.0.1,::1"
-const builtinFallbackAutoTrustedSigningDomains = "*.gob.es,*.dipgra.es,localhost,127.0.0.1,::1"
+const builtinFallbackAllowedSigningDomains = "*.gob.es,redsara.es,*.redsara.es,*.dipgra.es,localhost,127.0.0.1,::1"
+const builtinFallbackAutoTrustedSigningDomains = "*.gob.es,redsara.es,*.redsara.es,*.dipgra.es,localhost,127.0.0.1,::1"
 
 var confirmFirstDomainUseFunc = protocolConfirmFirstDomainUseDialog
 

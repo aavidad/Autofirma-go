@@ -16,6 +16,9 @@ func TestValidateSigningServerURL_AllowAndDeny(t *testing.T) {
 	if err := validateSigningServerURL("https://autofirma.dipgra.es/version.json", "stservlet"); err != nil {
 		t.Fatalf("debería permitir host dipgra.es: %v", err)
 	}
+	if err := validateSigningServerURL("https://valide.redsara.es/valide/StorageService", "stservlet"); err != nil {
+		t.Fatalf("debería permitir host redsara.es (Valide): %v", err)
+	}
 	if err := validateSigningServerURL("http://localhost:63117/StorageService", "stservlet"); err != nil {
 		t.Fatalf("debería permitir localhost en http: %v", err)
 	}
