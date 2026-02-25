@@ -1,8 +1,8 @@
-import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
-import QtQuick.Dialogs
-import Qt.labs.settings
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 6.2
+import Qt.labs.settings 1.1
 
 Window {
     id: window
@@ -749,11 +749,13 @@ Window {
                                         onTextChanged: window.currentOutputPath = text
                                     }
                                     Button {
+                                        text: "Ver"
                                         icon.source: "../../../assets/eye_icon.png"
                                         icon.width: 22
                                         icon.height: 22
                                         icon.color: "white"
-                                        Layout.preferredWidth: 44
+                                        display: AbstractButton.TextBesideIcon
+                                        Layout.preferredWidth: 92
                                         Layout.preferredHeight: 44
                                         enabled: window.currentOutputPath !== ""
                                         onClicked: backend.openExternal(window.currentOutputPath)
@@ -762,11 +764,13 @@ Window {
                                         ToolTip.delay: 500
                                     }
                                     Button {
+                                        text: "Validar"
                                         icon.source: "../../../assets/search_icon.png"
                                         icon.width: 20
                                         icon.height: 20
                                         icon.color: "white"
-                                        Layout.preferredWidth: 44
+                                        display: AbstractButton.TextBesideIcon
+                                        Layout.preferredWidth: 110
                                         Layout.preferredHeight: 44
                                         enabled: window.currentOutputPath !== ""
                                         onClicked: jumpToVerify(window.currentOutputPath)
@@ -775,11 +779,13 @@ Window {
                                         ToolTip.delay: 500
                                     }
                                     Button {
+                                        text: "Cambiar"
                                         icon.source: "../../../assets/folder_icon.png"
                                         icon.width: 22
                                         icon.height: 22
                                         icon.color: "white"
-                                        Layout.preferredWidth: 44
+                                        display: AbstractButton.TextBesideIcon
+                                        Layout.preferredWidth: 112
                                         Layout.preferredHeight: 44
                                         onClicked: saveFileDialog.open()
                                         ToolTip.visible: hovered

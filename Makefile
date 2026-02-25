@@ -4,9 +4,15 @@
 # Copyright (C) 2026 Diputación de Granada
 # =============================================================================
 
-VERSION      ?= $(shell cat VERSION 2>/dev/null | tr -d '[:space:]' || echo '0.0.1')
+VERSION_GO   := $(shell grep -m1 'CurrentVersion' pkg/version/version.go 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/')
+VERSION_FILE := $(shell cat VERSION 2>/dev/null | tr -d '[:space:]')
+ifeq ($(origin VERSION), command line)
+VERSION      := $(VERSION)
+else
+VERSION      := $(if $(strip $(VERSION_GO)),$(VERSION_GO),$(if $(strip $(VERSION_FILE)),$(VERSION_FILE),0.0.1))
+endif
 PREFIX       ?= /opt/autofirma-dipgra
-QMAKE        ?= $(shell command -v qmake6 2>/dev/null || command -v qmake 2>/dev/null || echo qmake6)
+QMAKE        ?= $(shell command -v qmake6 2>/dev/null || command -v qmake 2>/dev/null || command -v qmake-qt5 2>/dev/null || echo qmake6)
 GO           ?= go
 NPROC        ?= $(shell nproc 2>/dev/null || echo 4)
 
@@ -43,8 +49,9 @@ build-core: $(DIST)  ## Compila el motor principal (incluye GUIs Fyne/Gio)
 build-qml: $(DIST)  ## Compila la interfaz moderna QML
 	@echo "▶  Compilando GUI Premium (QML)..."
 	@cd $(QML_DIR) && \
+		([ -f Makefile ] && $(MAKE) distclean >/dev/null 2>&1 || true) && \
 		$(QMAKE) *.pro -spec linux-g++ CONFIG+=release && \
-		make -j$(NPROC)
+		$(MAKE) -j$(NPROC)
 	@# Buscamos el ejecutable generado
 	@find $(QML_DIR) -maxdepth 1 -type f -executable -not -name "*.pro" -not -name "*.sh" -not -name "*.o" -exec cp {} $(DIST)/autofirma-gui-qml \;
 	@chmod +x $(DIST)/autofirma-gui-qml
@@ -53,8 +60,9 @@ build-qml: $(DIST)  ## Compila la interfaz moderna QML
 build-widgets: $(DIST)  ## Compila la interfaz clásica Qt Widgets
 	@echo "▶  Compilando GUI Clásica (Widgets)..."
 	@cd $(WIDGETS_DIR) && \
+		([ -f Makefile ] && $(MAKE) distclean >/dev/null 2>&1 || true) && \
 		$(QMAKE) *.pro -spec linux-g++ CONFIG+=release && \
-		make -j$(NPROC)
+		$(MAKE) -j$(NPROC)
 	@# Buscamos el ejecutable generado
 	@find $(WIDGETS_DIR) -maxdepth 1 -type f -executable -not -name "*.pro" -not -name "*.sh" -not -name "*.o" -exec cp {} $(DIST)/autofirma-gui-widgets \;
 	@chmod +x $(DIST)/autofirma-gui-widgets
