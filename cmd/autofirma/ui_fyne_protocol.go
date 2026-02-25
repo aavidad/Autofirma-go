@@ -137,6 +137,9 @@ func (ui *FyneUI) handleWebSocketLaunchFyne(uriString string) {
 	srv := NewWebSocketServer(req.Ports, req.SessionID, nil)
 	srv.signFunc = ui.signWebSocketProtocolInteractive
 	srv.saveDialogFuncAlt = protocolSaveDialog
+	srv.afterSaveFunc = func(savedPath string, _ int) {
+		ui.SetStatus("Firma guardada correctamente en: " + strings.TrimSpace(savedPath) + ". Ya puedes cerrar la app.")
+	}
 	if err := srv.Start(); err != nil {
 		log.Printf("[FyneUI][Protocol] No se pudo iniciar servidor WebSocket: %v", err)
 		ui.SetStatus("No se pudo iniciar servidor WebSocket local: " + err.Error())
@@ -158,6 +161,9 @@ func (ui *FyneUI) handleLegacyServiceLaunchFyne(state *ProtocolState) {
 	srv := NewWebSocketServer([]int{DefaultWebSocketPort}, getQueryParam(state.Params, "idsession", "idSession"), nil)
 	srv.signFunc = ui.signWebSocketProtocolInteractive
 	srv.saveDialogFuncAlt = protocolSaveDialog
+	srv.afterSaveFunc = func(savedPath string, _ int) {
+		ui.SetStatus("Firma guardada correctamente en: " + strings.TrimSpace(savedPath) + ". Ya puedes cerrar la app.")
+	}
 	result := strings.TrimSpace(srv.processServiceRequest(state))
 	if result != "OK" {
 		log.Printf("[FyneUI][Protocol] Error arrancando service legacy: %s", result)
@@ -243,6 +249,23 @@ func (ui *FyneUI) signWebSocketProtocolInteractive(state *ProtocolState, filePat
 		SaveToDisk:       false,
 		OverwritePolicy:  CoreOverwriteRename,
 		SignatureOptions: buildProtocolSignOptions(state, format),
+	}
+	if action == "sign" {
+		choice, askErr := chooseActionForExistingSignedFile(localPath, format)
+		if askErr != nil {
+			log.Printf("[FyneUI][Protocol] confirm already-signed error: %v", askErr)
+		} else if choice == existingSignedChoiceCancel {
+			ui.SetStatus("Operación cancelada: el documento ya estaba firmado.")
+			return SignatureResult{}, errProtocolUserCanceled
+		} else if choice == existingSignedChoiceCoSign {
+			action = "cosign"
+			req.Action = "cosign"
+			ui.SetStatus("Documento ya firmado detectado: se realizará cofirma.")
+		} else if choice == existingSignedChoiceCounter {
+			action = "countersign"
+			req.Action = "countersign"
+			ui.SetStatus("Documento ya firmado detectado: se realizará contrafirma.")
+		}
 	}
 	res, err := ui.Core.SignFile(req)
 	if err != nil {
@@ -408,6 +431,23 @@ func (ui *FyneUI) signCurrentProtocolCore(state *ProtocolState) {
 		SaveToDisk:       false,
 		OverwritePolicy:  CoreOverwriteRename,
 		SignatureOptions: buildProtocolSignOptions(state, format),
+	}
+	if action == "sign" {
+		choice, askErr := chooseActionForExistingSignedFile(ui.InputFile, format)
+		if askErr != nil {
+			log.Printf("[FyneUI][Protocol] confirm already-signed error: %v", askErr)
+		} else if choice == existingSignedChoiceCancel {
+			ui.SetStatus("Operación cancelada: el documento ya estaba firmado.")
+			return
+		} else if choice == existingSignedChoiceCoSign {
+			action = "cosign"
+			req.Action = "cosign"
+			ui.SetStatus("Documento ya firmado detectado: se realizará cofirma.")
+		} else if choice == existingSignedChoiceCounter {
+			action = "countersign"
+			req.Action = "countersign"
+			ui.SetStatus("Documento ya firmado detectado: se realizará contrafirma.")
+		}
 	}
 	res, err := ui.Core.SignFile(req)
 	if err != nil {

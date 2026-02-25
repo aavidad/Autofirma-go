@@ -63,6 +63,7 @@ type WebSocketServer struct {
 	ui                *UI
 	signFunc          func(state *ProtocolState, filePath string) (SignatureResult, error)
 	saveDialogFuncAlt func(defaultPath, exts string) (selectedPath string, canceled bool, err error)
+	afterSaveFunc     func(savedPath string, size int)
 	stopChan          chan struct{}
 	storeMux          sync.Mutex
 	store             map[string]string
@@ -998,6 +999,9 @@ func (s *WebSocketServer) processSaveRequest(state *ProtocolState) string {
 	}
 
 	log.Printf("[WebSocket] save completed file=%s bytes=%d", targetPath, len(data))
+	if s.afterSaveFunc != nil {
+		s.afterSaveFunc(targetPath, len(data))
+	}
 	return "SAVE_OK"
 }
 

@@ -148,6 +148,112 @@ func protocolConfirmOverwriteDialog(path string) (bool, error) {
 	}
 }
 
+func protocolConfirmAlreadySignedActionDialog(path string, format string) (existingSignedActionChoice, error) {
+	title := "Documento ya firmado"
+	msg := signedDocDialogMessage(path, format)
+
+	switch runtime.GOOS {
+	case "windows":
+		ps := "$ErrorActionPreference='Stop'; " +
+			"Add-Type -AssemblyName Microsoft.VisualBasic; " +
+			"$r=[Microsoft.VisualBasic.Interaction]::InputBox('" + psQuote(msg+"\n\nEscribe: continuar / cofirmar / contrafirmar") + "','" + psQuote(title) + "','cofirmar'); " +
+			"if ($null -eq $r -or [string]::IsNullOrWhiteSpace($r)) { 'CANCEL' } " +
+			"elseif ($r.ToLower().StartsWith('cont')) { 'CONTINUE' } " +
+			"elseif ($r.ToLower().StartsWith('cof')) { 'COSIGN' } " +
+			"elseif ($r.ToLower().StartsWith('contra')) { 'COUNTERSIGN' } else { 'CANCEL' }"
+		cmd := exec.Command("powershell", "-NoProfile", "-STA", "-NonInteractive", "-Command", ps)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return existingSignedChoiceCancel, err
+		}
+		switch strings.ToUpper(strings.TrimSpace(string(out))) {
+		case "CONTINUE":
+			return existingSignedChoiceContinue, nil
+		case "COSIGN":
+			return existingSignedChoiceCoSign, nil
+		case "COUNTERSIGN":
+			return existingSignedChoiceCounter, nil
+		default:
+			return existingSignedChoiceCancel, nil
+		}
+	case "darwin":
+		script := "choose from list {\"Continuar firmando\", \"Cofirmar (añadir firma)\", \"Contrafirmar (firma sobre firma)\"} with title \"" + osaQuote(title) + "\" with prompt \"" + osaQuote(msg) + "\" default items {\"Cofirmar (añadir firma)\"}"
+		cmd := exec.Command("osascript", "-e", script)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			if isDialogCancelErr(err) {
+				return existingSignedChoiceCancel, nil
+			}
+			return existingSignedChoiceCancel, err
+		}
+		v := strings.ToLower(strings.TrimSpace(string(out)))
+		if strings.Contains(v, "cofirmar") {
+			return existingSignedChoiceCoSign, nil
+		}
+		if strings.Contains(v, "contrafirmar") {
+			return existingSignedChoiceCounter, nil
+		}
+		if strings.Contains(v, "continuar") {
+			return existingSignedChoiceContinue, nil
+		}
+		return existingSignedChoiceCancel, nil
+	default:
+		cmd := exec.Command("zenity",
+			"--list",
+			"--title="+title,
+			"--text="+msg,
+			"--column=Acción",
+			"--height=280",
+			"--width=760",
+			"Continuar firmando",
+			"Cofirmar (añadir firma)",
+			"Contrafirmar (firma sobre firma)",
+		)
+		configureGUICommand(cmd)
+		out, err := cmd.Output()
+		if err == nil {
+			v := strings.ToLower(strings.TrimSpace(string(out)))
+			if strings.Contains(v, "cofirmar") {
+				return existingSignedChoiceCoSign, nil
+			}
+			if strings.Contains(v, "contrafirmar") {
+				return existingSignedChoiceCounter, nil
+			}
+			if strings.Contains(v, "continuar") {
+				return existingSignedChoiceContinue, nil
+			}
+			return existingSignedChoiceCancel, nil
+		}
+		if isDialogCancelErr(err) {
+			return existingSignedChoiceCancel, nil
+		}
+		kcmd := exec.Command("kdialog",
+			"--menu", msg,
+			"--title", title,
+			"continue", "Continuar firmando",
+			"cosign", "Cofirmar (añadir firma)",
+			"countersign", "Contrafirmar (firma sobre firma)",
+		)
+		configureGUICommand(kcmd)
+		out, err = kcmd.Output()
+		if err == nil {
+			switch strings.ToLower(strings.TrimSpace(string(out))) {
+			case "cosign":
+				return existingSignedChoiceCoSign, nil
+			case "countersign":
+				return existingSignedChoiceCounter, nil
+			case "continue":
+				return existingSignedChoiceContinue, nil
+			default:
+				return existingSignedChoiceCancel, nil
+			}
+		}
+		return existingSignedChoiceCancel, nil
+	}
+}
+
 func protocolSaveDialog(defaultPath string, exts string) (string, bool, error) {
 	defaultPath = strings.TrimSpace(defaultPath)
 	switch runtime.GOOS {

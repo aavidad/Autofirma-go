@@ -1310,6 +1310,21 @@ func (ui *FyneUI) signCurrentFileCore() {
 		OverwritePolicy:  policy,
 		SignatureOptions: ui.buildFynePadesSignatureOptions(),
 	}
+	if strings.EqualFold(req.Action, "sign") || strings.TrimSpace(req.Action) == "" {
+		choice, askErr := chooseActionForExistingSignedFile(req.FilePath, req.Format)
+		if askErr != nil {
+			log.Printf("[FyneUI] confirm already-signed error: %v", askErr)
+		} else if choice == existingSignedChoiceCancel {
+			ui.SetStatus("Operación cancelada: el documento ya estaba firmado.")
+			return
+		} else if choice == existingSignedChoiceCoSign {
+			req.Action = "cosign"
+			ui.SetStatus("Documento ya firmado detectado: se realizará cofirma.")
+		} else if choice == existingSignedChoiceCounter {
+			req.Action = "countersign"
+			ui.SetStatus("Documento ya firmado detectado: se realizará contrafirma.")
+		}
+	}
 	start := time.Now()
 	res, err := ui.Core.SignFile(req)
 	if err != nil {

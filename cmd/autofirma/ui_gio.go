@@ -2934,6 +2934,24 @@ func (ui *UI) signCurrentFile() {
 		if strings.EqualFold(effectiveFormat, "pades") && ui.Protocol == nil {
 			signOptions = mergeSignOptions(signOptions, ui.buildPadesSignatureOptions())
 		}
+		if ui.Protocol == nil && strings.EqualFold(opAction, "sign") {
+			choice, askErr := chooseActionForExistingSignedFile(filePath, effectiveFormat)
+			if askErr != nil {
+				log.Printf("[UI] confirm already-signed error: %v", askErr)
+			} else if choice == existingSignedChoiceCancel {
+				ui.StatusMsg = "Operación cancelada: el documento ya estaba firmado."
+				ui.Window.Invalidate()
+				return
+			} else if choice == existingSignedChoiceCoSign {
+				opAction = "cosign"
+				ui.StatusMsg = "Documento ya firmado detectado: se realizará cofirma."
+				ui.Window.Invalidate()
+			} else if choice == existingSignedChoiceCounter {
+				opAction = "countersign"
+				ui.StatusMsg = "Documento ya firmado detectado: se realizará contrafirma."
+				ui.Window.Invalidate()
+			}
+		}
 		signatureB64, err := protocolSignOperation(opAction, dataB64, certID, "", effectiveFormat, signOptions)
 		if err != nil {
 			ui.updateSessionDiagnostics("ui-local", opAction, getProtocolSessionID(ui.Protocol), effectiveFormat, "error_firma")
