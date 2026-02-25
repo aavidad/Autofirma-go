@@ -36,6 +36,17 @@ func (ui *FyneUI) HandleProtocolInit(uriString string) {
 	log.Printf("[FyneUI][Protocol] Solicitud web recibida: %s", protocolRequestSummaryES(state))
 	action := normalizeProtocolAction(state.Action)
 
+	if action == "websocket" {
+		ui.SetStatus("Solicitud de arranque WebSocket detectada. Iniciando servidor local...")
+		go ui.handleWebSocketLaunchFyne(uriString)
+		return
+	}
+	if action == "service" {
+		ui.SetStatus("Solicitud de arranque service detectada. Iniciando servicio local...")
+		go ui.handleLegacyServiceLaunchFyne(state)
+		return
+	}
+
 	if action == "selectcert" {
 		ui.SetStatus("Solicitud de identificación recibida. Seleccione su certificado.")
 		go ui.handleProtocolSelectCertFyne(state)
@@ -114,6 +125,135 @@ func (ui *FyneUI) HandleProtocolInit(uriString string) {
 		}
 		ui.SetStatus("Iniciado modo firma local web. Seleccione archivo y certificado.")
 	}()
+}
+
+func (ui *FyneUI) handleWebSocketLaunchFyne(uriString string) {
+	req, err := parseWebSocketLaunchURI(uriString)
+	if err != nil {
+		log.Printf("[FyneUI][Protocol] URI websocket launch inválida: %v", err)
+		ui.SetStatus("Error en arranque WebSocket: " + err.Error())
+		return
+	}
+	srv := NewWebSocketServer(req.Ports, req.SessionID, nil)
+	srv.signFunc = ui.signWebSocketProtocolInteractive
+	srv.saveDialogFuncAlt = protocolSaveDialog
+	if err := srv.Start(); err != nil {
+		log.Printf("[FyneUI][Protocol] No se pudo iniciar servidor WebSocket: %v", err)
+		ui.SetStatus("No se pudo iniciar servidor WebSocket local: " + err.Error())
+		return
+	}
+	ui.mu.Lock()
+	ui.WebSocketServer = srv
+	ui.Protocol = &ProtocolState{IsActive: true, Action: "websocket"}
+	ui.mu.Unlock()
+	log.Printf("[FyneUI][Protocol] Servidor WebSocket iniciado en Fyne puertos=%v sesión=%s", req.Ports, maskSessionForLog(req.SessionID))
+	ui.SetStatus("Servidor AutoFirma activo. Esperando solicitudes del navegador...")
+}
+
+func (ui *FyneUI) handleLegacyServiceLaunchFyne(state *ProtocolState) {
+	if state == nil {
+		ui.SetStatus("Error en arranque service: estado inválido.")
+		return
+	}
+	srv := NewWebSocketServer([]int{DefaultWebSocketPort}, getQueryParam(state.Params, "idsession", "idSession"), nil)
+	srv.signFunc = ui.signWebSocketProtocolInteractive
+	srv.saveDialogFuncAlt = protocolSaveDialog
+	result := strings.TrimSpace(srv.processServiceRequest(state))
+	if result != "OK" {
+		log.Printf("[FyneUI][Protocol] Error arrancando service legacy: %s", result)
+		ui.SetStatus("No se pudo iniciar servicio local: " + result)
+		return
+	}
+	ui.mu.Lock()
+	ui.WebSocketServer = srv
+	ui.Protocol = &ProtocolState{IsActive: true, Action: "service", Params: state.Params}
+	ui.mu.Unlock()
+	log.Printf("[FyneUI][Protocol] Servicio legacy iniciado en Fyne sesión=%s", maskSessionForLog(getQueryParam(state.Params, "idsession", "idSession")))
+	ui.SetStatus("Servicio AutoFirma activo. Esperando solicitudes del navegador...")
+}
+
+func (ui *FyneUI) signWebSocketProtocolInteractive(state *ProtocolState, filePath string) (SignatureResult, error) {
+	if state == nil {
+		return SignatureResult{}, fmt.Errorf("estado protocolario inválido")
+	}
+	ui.SetStatus("Solicitud de firma recibida. Preparando selección de documento/certificado...")
+	localPath := strings.TrimSpace(filePath)
+	if localPath == "" {
+		ui.SetStatus("La web no envió documento descargable. Seleccione un PDF/archivo local.")
+		paths, canceled, err := protocolLoadDialog("", "pdf,xml,csig,sig", false)
+		if canceled {
+			return SignatureResult{}, errProtocolUserCanceled
+		}
+		if err != nil {
+			return SignatureResult{}, fmt.Errorf("error seleccionando fichero local: %w", err)
+		}
+		if len(paths) == 0 || strings.TrimSpace(paths[0]) == "" {
+			return SignatureResult{}, fmt.Errorf("no se seleccionó fichero local")
+		}
+		localPath = strings.TrimSpace(paths[0])
+	}
+	ui.InputFile = localPath
+	fyneSetFileLabel(ui, localPath)
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil {
+		return SignatureResult{}, fmt.Errorf("error cargando certificados: %w", err)
+	}
+	filtered, _ := filterSelectCertByDefaultStore(certs, state)
+	if len(filtered) == 0 {
+		filtered = certs
+	}
+	if len(filtered) == 0 {
+		return SignatureResult{}, fmt.Errorf("no hay certificados disponibles")
+	}
+	ui.SetStatus("Seleccione certificado para firmar.")
+	chosen, canceled, err := protocolSelectCertDialog(filtered)
+	if canceled {
+		return SignatureResult{}, errProtocolUserCanceled
+	}
+	if err != nil {
+		return SignatureResult{}, fmt.Errorf("error en selector de certificado: %w", err)
+	}
+	if chosen < 0 || chosen >= len(filtered) {
+		return SignatureResult{}, fmt.Errorf("selección de certificado inválida")
+	}
+	selected := filtered[chosen]
+	for i := range ui.Certs {
+		if ui.Certs[i].ID == selected.ID {
+			ui.SelectedCert = &ui.Certs[i]
+			break
+		}
+	}
+
+	format := normalizeProtocolFormat(state.SignFormat)
+	if format == "" {
+		format = detectLocalSignFormat(localPath)
+	}
+	action := normalizeProtocolAction(state.Action)
+	if action == "" {
+		action = "sign"
+	}
+	ui.SetStatus("Firmando documento...")
+	req := CoreSignRequest{
+		FilePath:         localPath,
+		CertificateID:    selected.ID,
+		Action:           action,
+		Format:           format,
+		AllowInvalidPDF:  ui.AllowInvalidPDF,
+		SaveToDisk:       false,
+		OverwritePolicy:  CoreOverwriteRename,
+		SignatureOptions: buildProtocolSignOptions(state, format),
+	}
+	res, err := ui.Core.SignFile(req)
+	if err != nil {
+		return SignatureResult{}, fmt.Errorf("error firmando (%s): %w", format, err)
+	}
+	ui.SetStatus("Firma completada. Enviando resultado a la web...")
+	log.Printf("[FyneUI][Protocol] Firma WebSocket lista para retorno format=%s file=%s cert=%s", format, filepath.Base(localPath), strings.TrimSpace(selected.ID))
+	return SignatureResult{
+		SignatureB64: res.SignatureB64,
+		CertDER:      selected.Content,
+	}, nil
 }
 
 func (ui *FyneUI) handleProtocolSelectCertFyne(state *ProtocolState) {

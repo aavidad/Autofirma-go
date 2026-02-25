@@ -59,6 +59,8 @@ type WebSocketServer struct {
 	conn     *websocket.Conn
 	connMux  sync.Mutex
 	ui       *UI
+	signFunc func(state *ProtocolState, filePath string) (SignatureResult, error)
+	saveDialogFuncAlt func(defaultPath, exts string) (selectedPath string, canceled bool, err error)
 	stopChan chan struct{}
 	storeMux sync.Mutex
 	store    map[string]string
@@ -485,7 +487,7 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 		return s.formatError("ERROR_UNSUPPORTED_OPERATION", "Codigo de operacion no soportado")
 	}
 
-	if s.ui == nil {
+	if s.ui == nil && s.signFunc == nil {
 		return "SAF_09: Interfaz de firma no disponible"
 	}
 
@@ -539,22 +541,43 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 	}
 
 	// 5. TRIGGER UI for user selection and signing
-	s.ui.Protocol = state
-	s.ui.InputFile.SetText(filePath)
-	if isLocalOnlyWebsocketSignFlow(state) {
-		s.ui.StatusMsg = "Solicitud de firma local recibida. Se firmará en local y no se enviará automáticamente a un servidor de sede."
-		log.Printf("[WebSocket] Aviso: flujo de firma local detectado (sin rtservlet/stservlet ni datos remotos). La descarga posterior en sede puede no estar disponible.")
-	} else {
-		s.ui.StatusMsg = "Solicitud de firma recibida. Seleccione su certificado."
-	}
-	s.ui.Window.Invalidate()
+	var sigResult SignatureResult
+	if s.ui != nil {
+		s.ui.Protocol = state
+		s.ui.InputFile.SetText(filePath)
+		if isLocalOnlyWebsocketSignFlow(state) {
+			s.ui.StatusMsg = "Solicitud de firma local recibida. Se firmará en local y no se enviará automáticamente a un servidor de sede."
+			log.Printf("[WebSocket] Aviso: flujo de firma local detectado (sin rtservlet/stservlet ni datos remotos). La descarga posterior en sede puede no estar disponible.")
+		} else {
+			s.ui.StatusMsg = "Solicitud de firma recibida. Seleccione su certificado."
+		}
+		s.ui.Window.Invalidate()
 
-	// Wait for user to finish signing via UI
-	log.Printf("[WebSocket] Waiting for user signature via UI...")
-	s.ui.PendingWork.Add(1)
-	defer s.ui.PendingWork.Done()
-	sigResult := <-s.ui.SignatureDone
-	log.Printf("[WebSocket] Signature received from UI.")
+		// Wait for user to finish signing via UI
+		log.Printf("[WebSocket] Waiting for user signature via UI...")
+		s.ui.PendingWork.Add(1)
+		defer s.ui.PendingWork.Done()
+		sigResult = <-s.ui.SignatureDone
+		log.Printf("[WebSocket] Signature received from UI.")
+	} else {
+		if s.signFunc == nil {
+			return "SAF_09: Interfaz de firma no disponible"
+		}
+		if isLocalOnlyWebsocketSignFlow(state) {
+			log.Printf("[WebSocket] Aviso: flujo de firma local detectado (sin rtservlet/stservlet ni datos remotos). Firma interactiva via callback.")
+		}
+		log.Printf("[WebSocket] Waiting for user signature via callback...")
+		var signErr error
+		sigResult, signErr = s.signFunc(state, filePath)
+		if signErr != nil {
+			if errors.Is(signErr, errProtocolUserCanceled) {
+				return "CANCEL"
+			}
+			log.Printf("[WebSocket] Error en callback de firma: %v", signErr)
+			return s.formatError("ERROR_SIGNATURE_FAILED", signErr.Error())
+		}
+		log.Printf("[WebSocket] Signature received from callback.")
+	}
 
 	sigBytes, _ := base64.StdEncoding.DecodeString(sigResult.SignatureB64)
 
@@ -565,8 +588,10 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 	}
 
 	// Reset UI Status
-	s.ui.StatusMsg = "¡Firma completada con éxito!"
-	s.ui.Window.Invalidate()
+	if s.ui != nil {
+		s.ui.StatusMsg = "¡Firma completada con éxito!"
+		s.ui.Window.Invalidate()
+	}
 
 	// Logging
 	log.Printf("[WebSocket] Returning result (len=%d)", len(resp))
@@ -888,6 +913,18 @@ func (s *WebSocketServer) processSaveRequest(state *ProtocolState) string {
 		}
 		if selErr != nil {
 			log.Printf("[WebSocket] save dialog error: %v", selErr)
+			return "SAF_05: No se pudo guardar el fichero"
+		}
+		if strings.TrimSpace(selectedPath) != "" {
+			targetPath = strings.TrimSpace(selectedPath)
+		}
+	} else if s.saveDialogFuncAlt != nil {
+		selectedPath, canceled, selErr := s.saveDialogFuncAlt(targetPath, getQueryParam(state.Params, "exts", "extensions"))
+		if canceled {
+			return "CANCEL"
+		}
+		if selErr != nil {
+			log.Printf("[WebSocket] save dialog (alt) error: %v", selErr)
 			return "SAF_05: No se pudo guardar el fichero"
 		}
 		if strings.TrimSpace(selectedPath) != "" {

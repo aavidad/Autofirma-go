@@ -568,6 +568,7 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 		if ui.Protocol != nil {
 			protocolAction = normalizeProtocolAction(ui.Protocol.Action)
 		}
+		isWebSocketLaunchFlow := protocolAction == "websocket" || protocolAction == "service"
 		isSelectCertFlow := protocolAction == "selectcert"
 		isBatchFlow := protocolAction == "batch"
 		requiresDocument := protocolAction == "" || protocolAction == "sign" || protocolAction == "cosign" || protocolAction == "countersign" || protocolAction == "signandsave"
@@ -583,7 +584,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						// Title
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							title := "Solicitud de Firma"
-							if isSelectCertFlow {
+							if isWebSocketLaunchFlow {
+								title = "Servicio AutoFirma (WebSocket)"
+							} else if isSelectCertFlow {
 								title = "Solicitud de Identificación"
 							} else if isBatchFlow {
 								title = "Solicitud de Firma por Lote"
@@ -596,7 +599,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						// Instruction
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							msg := "El sitio web solicita firmar un documento."
-							if isSelectCertFlow {
+							if isWebSocketLaunchFlow {
+								msg = "Servidor AutoFirma activo. Esperando solicitudes del navegador..."
+							} else if isSelectCertFlow {
 								msg = "El sitio web solicita seleccionar su certificado de identificación."
 							} else if isBatchFlow {
 								msg = "El sitio web solicita procesar una firma por lotes."
@@ -610,6 +615,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// File selector if empty (for local file flows)
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if isWebSocketLaunchFlow {
+								return layout.Dimensions{}
+							}
 							if !requiresDocument || ui.InputFile.Text() != "" {
 								return layout.Dimensions{}
 							}
@@ -636,6 +644,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Certificate List (carrusel horizontal)
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if isWebSocketLaunchFlow {
+								return layout.Dimensions{}
+							}
 							carouselH := gtx.Dp(unit.Dp(130))
 							gtx.Constraints.Min.Y = carouselH
 							gtx.Constraints.Max.Y = carouselH
@@ -666,6 +677,9 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Visible Seal Checkbox (only if PAdES)
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if isWebSocketLaunchFlow {
+								return layout.Dimensions{}
+							}
 							if !requiresDocument {
 								return layout.Dimensions{}
 							}
@@ -692,6 +706,22 @@ func (ui *UI) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						// Status/Spinner/Sign Button
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if isWebSocketLaunchFlow {
+								if ui.IsSigning {
+									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											gtx.Constraints.Max.X = gtx.Dp(24)
+											gtx.Constraints.Max.Y = gtx.Dp(24)
+											return material.Loader(ui.Theme).Layout(gtx)
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return material.Body2(ui.Theme, "Procesando solicitud...").Layout(gtx)
+										}),
+									)
+								}
+								return layout.Dimensions{}
+							}
 							if isBatchFlow {
 								if ui.IsSigning {
 									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,

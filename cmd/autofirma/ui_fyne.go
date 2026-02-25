@@ -86,6 +86,7 @@ type FyneUI struct {
 	Protocol *ProtocolState
 	// Modo reducido para invocaciones afirma:// (selector/flujo protocolario).
 	ProtocolQuickMode bool
+	WebSocketServer   *WebSocketServer
 
 	Core *CoreService
 	mu   sync.Mutex
@@ -152,6 +153,9 @@ func newFyneUI(protocolQuickMode bool) *FyneUI {
 	})
 
 	w.SetOnClosed(func() {
+		if ui.WebSocketServer != nil {
+			ui.WebSocketServer.Stop()
+		}
 		log.Println("[FyneUI] Ventana cerrada.")
 	})
 
