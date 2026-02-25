@@ -810,6 +810,12 @@ func (s *WebSocketServer) executeRemoteTriphaseBatch(state *ProtocolState, rawBa
 	if preURL == "" || postURL == "" {
 		return "", fmt.Errorf("SAF_03: Faltan URLs de prefirma/postfirma de lote")
 	}
+	if err := validateSigningServerURL(preURL, "batchpresignerurl"); err != nil {
+		return "", err
+	}
+	if err := validateSigningServerURL(postURL, "batchpostsignerurl"); err != nil {
+		return "", err
+	}
 
 	type batchEncodingVariant struct {
 		name string

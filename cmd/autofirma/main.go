@@ -355,7 +355,7 @@ func main() {
 
 	go func() {
 		w := new(app.Window)
-		w.Option(app.Title("AutoFirma - Diputación de Granada"), app.Size(unit.Dp(800), unit.Dp(600)))
+		w.Option(app.Title("AutoFirma - Diputación de Granada (v"+version.CurrentVersion+")"), app.Size(unit.Dp(800), unit.Dp(600)))
 
 		// Create UI here to control lifecycle
 		ui := NewUI(w)

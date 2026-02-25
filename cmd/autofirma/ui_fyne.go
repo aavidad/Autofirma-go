@@ -7,6 +7,7 @@ package main
 import (
 	"autofirma-host/pkg/protocol"
 	"autofirma-host/pkg/signer"
+	"autofirma-host/pkg/version"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -123,7 +124,7 @@ func newFyneUI(protocolQuickMode bool) *FyneUI {
 	ensureFyneLocale()
 
 	a := app.NewWithID("es.dipgra.autofirma")
-	w := a.NewWindow("AutoFirma - Diputación de Granada")
+	w := a.NewWindow("AutoFirma - Diputación de Granada (v" + version.CurrentVersion + ")")
 	w.SetFixedSize(false)
 	if protocolQuickMode {
 		w.Resize(fyne.NewSize(560, 180))

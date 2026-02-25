@@ -58,6 +58,27 @@ func getEnvInt(name string, def int) int {
 	return n
 }
 
+func getEnvBool(name string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 func fileSize(path string) int64 {
 	if path == "" {
 		return 0
@@ -247,6 +268,8 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 
 	// Generar contraseña aleatoria para P12 temporal
 	tempPassword := fmt.Sprintf("auto-%d-%d", time.Now().UnixNano(), os.Getpid())
+	strictNoKeyExport := getEnvBool("AUTOFIRMA_STRICT_NO_KEY_EXPORT", false)
+	strictNoDiskKeyMaterial := getEnvBool("AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL", false)
 	var windowsPadesStoreErr error
 	// Estrategia prioritaria en Windows para CAdES:
 	// 1) firmar directamente desde el almacén de certificados (sin exportar clave privada)
@@ -287,6 +310,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	var memoryCert *x509.Certificate
 	var memoryChains [][]*x509.Certificate
 	var cleanupSigner func()
+	signSecurityMode := "unknown"
 
 	srcLower := strings.ToLower(strings.TrimSpace(cert.Source))
 	if srcLower == "smartcard" || srcLower == "dnie" {
@@ -298,7 +322,11 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		memorySigner = pkcs11Signer
 		memoryChains, _ = buildCertChains(memoryCert, []*x509.Certificate{memoryCert})
 		cleanupSigner = pkcs11Signer.Close
+		signSecurityMode = "pkcs11_direct"
 	} else if runtime.GOOS == "linux" {
+		if strictNoKeyExport {
+			return "", fmt.Errorf("modo estricto: no se permite exportar clave desde NSS (AUTOFIRMA_STRICT_NO_KEY_EXPORT=1)")
+		}
 		log.Printf("[Signer] Iniciando exportación NSS a memoria (vía OpenSSL pipe)")
 
 		// 1. Obtener P12 desde NSS directamente a memoria (stdout)
@@ -310,6 +338,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		if err != nil {
 			return "", fmt.Errorf("fallo al exportar desde NSS: %v", err)
 		}
+		defer zeroBytes(p12Data)
 
 		// 2. Usar OpenSSL como filtro para extraer Private Key (normaliza BER -> PEM)
 		keyPEM, err := runCommandWithStdin(
@@ -319,6 +348,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		if err != nil {
 			return "", fmt.Errorf("openssl no pudo procesar la clave: %v", err)
 		}
+		defer zeroBytes(keyPEM)
 
 		// 3. Usar OpenSSL como filtro para extraer Certificados
 		certsPEM, err := runCommandWithStdin(
@@ -328,6 +358,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		if err != nil {
 			return "", fmt.Errorf("openssl no pudo procesar los certificados: %v", err)
 		}
+		defer zeroBytes(certsPEM)
 
 		// 4. Parsear resultados PEM en memoria
 		// Parsear clave privada
@@ -385,7 +416,11 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		memoryChains, _ = buildCertChains(memoryCert, chainCerts)
 		cleanupSigner = func() {}
 		log.Printf("[Signer] Certificado NSS cargado exitosamente (operación 100%% en RAM)")
+		signSecurityMode = "nss_memory_export"
 	} else {
+		if strictNoKeyExport {
+			return "", fmt.Errorf("modo estricto: no se permite exportación de clave privada para este almacén (AUTOFIRMA_STRICT_NO_KEY_EXPORT=1)")
+		}
 		// Windows fallback file logic (no cambia en esta iteración para CAdES, PAdES ya entró por winstore más arriba)
 		p12Path, err := exportCertificateToP12(nickname, tempPassword)
 		if err != nil {
@@ -406,6 +441,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 			chainCerts = append(chainCerts, caCerts...)
 			memoryChains, _ = buildCertChains(parsedCert, chainCerts)
 			cleanupSigner = func() {}
+			signSecurityMode = "p12_disk_export"
 		} else {
 			return "", fmt.Errorf("fallo cargando el P12 exportado: %v", err)
 		}
@@ -424,13 +460,32 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	if err := os.WriteFile(inputFile, data, 0600); err != nil {
 		return "", fmt.Errorf("fallo al escribir archivo de entrada: %v", err)
 	}
+	if signSecurityMode != "unknown" {
+		log.Printf("[Signer] Modo de firma seleccionado cert=%s format=%s mode=%s", applog.MaskID(certificateID), format, signSecurityMode)
+	}
 
 	// Ruta CAdES detached sin Node.js (backend OpenSSL). (Pendiente refactor CAdES pure-Go)
 	if strings.EqualFold(format, "cades") {
+		if memorySigner != nil && memoryCert != nil {
+			signedData, memErr := signCadesWithGo(data, memoryCert, memorySigner, memoryChains, options)
+			if memErr == nil {
+				log.Printf("[Signer] Firma CAdES en memoria completada (pkcs7)")
+				sig := base64.StdEncoding.EncodeToString(signedData)
+				log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+				return sig, nil
+			}
+			log.Printf("[Signer] Fallback CAdES a OpenSSL tras fallo pkcs7 en memoria: %v", memErr)
+			if strictNoDiskKeyMaterial {
+				return "", fmt.Errorf("modo estricto: CAdES en memoria falló y se prohíbe fallback con material en disco (AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL=1): %v", memErr)
+			}
+		}
 		// CAdES actualmente necesita fichero p12 temporal (requiere openssl).
 		// Por ahora lo exportamos otra vez temporalmente si es desde p12 (NSS fallback o DNIe fallback openSSL)
 		// FIXME: CAdES en DNIe por openssl está ROTO si no se migra a pure-Go también.
 		// Pero al menos PAdES sí funciona perfecto en memoria.
+		if strictNoDiskKeyMaterial {
+			return "", fmt.Errorf("modo estricto: ruta CAdES OpenSSL con P12 temporal deshabilitada (AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL=1)")
+		}
 		p12Path, _ := exportCertificateToP12(nickname, tempPassword)
 		if p12Path != "" {
 			defer os.Remove(p12Path)

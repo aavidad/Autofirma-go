@@ -566,7 +566,12 @@ func validateSigningServerURL(rawURL string, fieldName string) error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("%s fuera de lista blanca: %s (permitidos: %s)", fieldName, host, strings.Join(allowed, ","))
+		log.Printf(
+			"[Protocol] Dominio fuera de lista blanca base para %s: host=%s permitidos=%s. Se solicitará confirmación de confianza al usuario.",
+			fieldName,
+			host,
+			strings.Join(allowed, ","),
+		)
 	}
 	if !strings.EqualFold(u.Scheme, "https") && host != "localhost" && host != "127.0.0.1" && host != "::1" {
 		return fmt.Errorf("%s debe usar HTTPS para host remoto: %s", fieldName, host)

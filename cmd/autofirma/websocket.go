@@ -54,23 +54,65 @@ var (
 )
 
 type WebSocketServer struct {
-	ports    []int
-	session  string
-	conn     *websocket.Conn
-	connMux  sync.Mutex
-	ui       *UI
-	signFunc func(state *ProtocolState, filePath string) (SignatureResult, error)
+	ports             []int
+	session           string
+	conn              *websocket.Conn
+	connMux           sync.Mutex
+	writeMux          sync.Mutex
+	cancelSent        bool
+	ui                *UI
+	signFunc          func(state *ProtocolState, filePath string) (SignatureResult, error)
 	saveDialogFuncAlt func(defaultPath, exts string) (selectedPath string, canceled bool, err error)
-	stopChan chan struct{}
-	storeMux sync.Mutex
-	store    map[string]string
-	stickyID string
+	stopChan          chan struct{}
+	storeMux          sync.Mutex
+	store             map[string]string
+	stickyID          string
 
 	serviceMux           sync.Mutex
 	serviceListener      net.Listener
 	serviceFragments     []string
 	serviceResponseParts []string
 	serviceProtocolVer   int
+}
+
+type signFuncResult struct {
+	res SignatureResult
+	err error
+}
+
+func (s *WebSocketServer) writeCurrentConnMessage(messageType int, payload []byte) error {
+	s.writeMux.Lock()
+	defer s.writeMux.Unlock()
+	s.connMux.Lock()
+	conn := s.conn
+	s.connMux.Unlock()
+	if conn == nil {
+		return fmt.Errorf("conexion websocket no disponible")
+	}
+	return conn.WriteMessage(messageType, payload)
+}
+
+func (s *WebSocketServer) sendCancelToBrowserBestEffort(reason string) bool {
+	s.writeMux.Lock()
+	defer s.writeMux.Unlock()
+	s.connMux.Lock()
+	conn := s.conn
+	if conn == nil {
+		s.connMux.Unlock()
+		return false
+	}
+	if s.cancelSent {
+		s.connMux.Unlock()
+		return true
+	}
+	s.cancelSent = true
+	s.connMux.Unlock()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("CANCEL")); err != nil {
+		log.Printf("[WebSocket] No se pudo enviar CANCEL (%s): %v", reason, err)
+		return false
+	}
+	log.Printf("[WebSocket] CANCEL enviado al navegador (%s)", reason)
+	return true
 }
 
 func NewWebSocketServer(ports []int, sessionID string, ui *UI) *WebSocketServer {
@@ -361,7 +403,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		if s.session != "" {
 			msgSession := extractMessageSessionID(msg)
 			if msgSession == "" || msgSession != s.session {
-				_ = conn.WriteMessage(messageType, []byte("SAF_46: Id de sesion invalido"))
+				_ = s.writeCurrentConnMessage(messageType, []byte("SAF_46: Id de sesion invalido"))
 				log.Printf("[WebSocket] Id de sesión inválido (esperado=%s recibido=%s)", applog.MaskID(s.session), applog.MaskID(msgSession))
 				continue
 			}
@@ -373,7 +415,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 
 		if strings.HasPrefix(msg, EchoRequestPrefix) {
 			// Respond with OK
-			if err := conn.WriteMessage(messageType, []byte(EchoOKResponse)); err != nil {
+			if err := s.writeCurrentConnMessage(messageType, []byte(EchoOKResponse)); err != nil {
 				log.Printf("[WebSocket] Error de escritura: %v", err)
 				break
 			}
@@ -408,9 +450,14 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		}
 
 		// Send result back
-		if err := conn.WriteMessage(messageType, []byte(result)); err != nil {
+		if err := s.writeCurrentConnMessage(messageType, []byte(result)); err != nil {
 			log.Printf("[WebSocket] Error de escritura: %v", err)
 			break
+		}
+		if strings.EqualFold(strings.TrimSpace(result), "CANCEL") {
+			s.connMux.Lock()
+			s.cancelSent = true
+			s.connMux.Unlock()
 		}
 		upper := strings.ToUpper(result)
 		log.Printf(
@@ -567,8 +614,20 @@ func (s *WebSocketServer) processProtocolRequest(uriString string) string {
 			log.Printf("[WebSocket] Aviso: flujo de firma local detectado (sin rtservlet/stservlet ni datos remotos). Firma interactiva via callback.")
 		}
 		log.Printf("[WebSocket] Waiting for user signature via callback...")
+		done := make(chan signFuncResult, 1)
+		go func() {
+			res, err := s.signFunc(state, filePath)
+			done <- signFuncResult{res: res, err: err}
+		}()
 		var signErr error
-		sigResult, signErr = s.signFunc(state, filePath)
+		select {
+		case out := <-done:
+			sigResult = out.res
+			signErr = out.err
+		case <-s.stopChan:
+			log.Printf("[WebSocket] Callback de firma abortado por cierre/parada; devolviendo CANCEL")
+			return "CANCEL"
+		}
 		if signErr != nil {
 			if errors.Is(signErr, errProtocolUserCanceled) {
 				return "CANCEL"
@@ -1301,12 +1360,28 @@ func (s *WebSocketServer) formatError(code string, message string) string {
 }
 
 func (s *WebSocketServer) Stop() {
-	close(s.stopChan)
-	s.connMux.Lock()
-	if s.conn != nil {
-		s.conn.Close()
+	select {
+	case <-s.stopChan:
+		// Ya cerrado.
+	default:
+		close(s.stopChan)
 	}
+	s.connMux.Lock()
+	conn := s.conn
 	s.connMux.Unlock()
+	if conn != nil {
+		cancelSent := false
+		// Mejor esfuerzo: informar cancelación a la web si el usuario cierra la app
+		// con una sesión WebSocket activa.
+		if s.sendCancelToBrowserBestEffort("cierre/parada") {
+			cancelSent = true
+			// Dejamos el socket abierto para que el navegador reciba el mensaje; el
+			// proceso cerrará después y el peer terminará cerrando la sesión.
+		}
+		if !cancelSent {
+			_ = conn.Close()
+		}
+	}
 	s.serviceMux.Lock()
 	if s.serviceListener != nil {
 		_ = s.serviceListener.Close()

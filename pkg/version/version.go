@@ -5,7 +5,7 @@
 package version
 
 const (
-	CurrentVersion   = "0.1.0"
+	CurrentVersion   = "0.1.4"
 	DefaultUpdateURL = "https://autofirma.dipgra.es/version.json"
 )
 
