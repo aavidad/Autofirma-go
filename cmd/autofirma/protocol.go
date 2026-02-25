@@ -1666,6 +1666,7 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 			ui.InputFile.SetText(path)
 			ui.StatusMsg = "Documento descargado. Seleccione certificado y firme."
 			ui.updateSessionDiagnostics("afirma-protocol", state.Action, getProtocolSessionID(state), normalizeProtocolFormat(ui.Protocol.SignFormat), "file_ready")
+			go ui.tryProtocolAutoSelectAndSign(state)
 		} else {
 			// No se descargó archivo (flujo local)
 			log.Println("[Protocol] No se descargó documento. Esperando selección manual.")
@@ -1676,6 +1677,68 @@ func (ui *UI) HandleProtocolInit(uriString string) {
 		ui.Mode = 0 // Asegurar modo Firma
 		ui.Window.Invalidate()
 	}()
+}
+
+// Bypass de interacción para flujos protocolarios donde la UI minimalista no
+// recibe clics correctamente: usa selector nativo y lanza firma.
+func (ui *UI) tryProtocolAutoSelectAndSign(state *ProtocolState) {
+	if state == nil {
+		return
+	}
+	switch normalizeProtocolAction(state.Action) {
+	case "sign", "cosign", "countersign", "signandsave":
+	default:
+		return
+	}
+	if strings.TrimSpace(ui.InputFile.Text()) == "" {
+		return
+	}
+
+	certs, err := loadCertificatesForState(state)
+	if err != nil {
+		log.Printf("[Protocol] Auto-select cert (sign) error cargando certificados: %v", err)
+		return
+	}
+	filtered, _ := filterSelectCertByDefaultStore(certs, state)
+	if len(filtered) == 0 {
+		filtered = certs
+	}
+	if len(filtered) == 0 {
+		log.Printf("[Protocol] Auto-select cert (sign): sin certificados disponibles")
+		return
+	}
+
+	log.Printf("[Protocol] Auto-select cert (sign): abriendo selector nativo (%d certificados)", len(filtered))
+	chosen, canceled, err := protocolSelectCertDialog(filtered)
+	if canceled {
+		ui.StatusMsg = "Selección de certificado cancelada."
+		ui.Window.Invalidate()
+		return
+	}
+	if err != nil {
+		log.Printf("[Protocol] Auto-select cert (sign) error en diálogo: %v", err)
+		ui.StatusMsg = "Error en selector de certificado: " + err.Error()
+		ui.Window.Invalidate()
+		return
+	}
+	if chosen < 0 || chosen >= len(filtered) {
+		return
+	}
+	chosenID := filtered[chosen].ID
+
+	for idx := range ui.Certs {
+		if ui.Certs[idx].ID == chosenID {
+			ui.SelectedCert = idx
+			ui.Window.Invalidate()
+			log.Printf("[Protocol] Auto-select cert (sign): certificado seleccionado idx=%d id=%s", idx, chosenID)
+			ui.signCurrentFile()
+			return
+		}
+	}
+
+	log.Printf("[Protocol] Auto-select cert (sign): certificado seleccionado no encontrado en lista UI id=%s", chosenID)
+	ui.StatusMsg = "No se pudo sincronizar la selección de certificado con la UI."
+	ui.Window.Invalidate()
 }
 
 func (ui *UI) handleProtocolSelectCert(state *ProtocolState) {
