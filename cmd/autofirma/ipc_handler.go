@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -36,7 +35,7 @@ func runIPCServer(socketPath string, core *CoreService) error {
 		return err
 	}
 	defer l.Close()
-	os.Chmod(socketPath, 0666)
+	os.Chmod(socketPath, 0600)
 
 	log.Printf("[IPC] Servidor activo en socket Unix: %s", socketPath)
 
@@ -104,7 +103,7 @@ func processIPCRequest(req ipcRequest, core *CoreService) ipcResponse {
 		if err != nil {
 			return ipcResponse{OK: false, Error: "invalid base64"}
 		}
-		tmpFile, err := ioutil.TempFile("", "autofirma-import-*.p12")
+		tmpFile, err := os.CreateTemp("", "autofirma-import-*.p12")
 		if err != nil {
 			return ipcResponse{OK: false, Error: "failed to create temp file"}
 		}

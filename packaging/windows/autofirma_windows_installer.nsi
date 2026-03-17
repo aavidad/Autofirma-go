@@ -88,9 +88,9 @@ SectionGroup "Interfaces de Usuario" SEC_FE
 
   Section "Interfaz Qt 6 (Recomendada)" SEC_QT
     SetOutPath "$INSTDIR"
-    File "${BUNDLE_DIR}\autofirma-desktop-qt-bin.exe"
-    File "${BUNDLE_DIR}\autofirma-desktop-qt-real.exe"
-    File /r "${BUNDLE_DIR}\qml"
+    File /nonfatal "${BUNDLE_DIR}\autofirma-desktop-qt-bin.exe"
+    File /nonfatal "${BUNDLE_DIR}\autofirma-desktop-qt-real.exe"
+    File /nonfatal /r "${BUNDLE_DIR}\qml"
     ; Incluir DLLs de Qt si existen
     File /nonfatal "${BUNDLE_DIR}\*.dll"
     File /nonfatal /r "${BUNDLE_DIR}\platforms"
@@ -98,11 +98,15 @@ SectionGroup "Interfaces de Usuario" SEC_FE
     File /nonfatal /r "${BUNDLE_DIR}\imageformats"
     File /nonfatal /r "${BUNDLE_DIR}\tls"
 
-    CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\AutoFirma Dipgra.lnk" "$INSTDIR\autofirma-desktop-qt-bin.exe" "" "$INSTDIR\autofirma.ico" 0
-    CreateShortcut "$DESKTOP\AutoFirma Dipgra.lnk" "$INSTDIR\autofirma-desktop-qt-bin.exe" "" "$INSTDIR\autofirma.ico" 0
-    
-    ; Update protocol to use Qt by default if installed
-    WriteRegStr HKCR "afirma\shell\open\command" "" '"$INSTDIR\autofirma-desktop-qt-bin.exe" "%1"'
+    IfFileExists "$INSTDIR\autofirma-desktop-qt-bin.exe" 0 qt_missing
+      CreateShortcut "$SMPROGRAMS\Autofirma Dipgra\AutoFirma Dipgra.lnk" "$INSTDIR\autofirma-desktop-qt-bin.exe" "" "$INSTDIR\autofirma.ico" 0
+      CreateShortcut "$DESKTOP\AutoFirma Dipgra.lnk" "$INSTDIR\autofirma-desktop-qt-bin.exe" "" "$INSTDIR\autofirma.ico" 0
+      ; Update protocol to use Qt by default if installed
+      WriteRegStr HKCR "afirma\shell\open\command" "" '"$INSTDIR\autofirma-desktop-qt-bin.exe" "%1"'
+      Goto qt_done
+    qt_missing:
+      DetailPrint "Frontend Qt no incluido en este bundle; se omite su registro."
+    qt_done:
   SectionEnd
 SectionGroupEnd
 

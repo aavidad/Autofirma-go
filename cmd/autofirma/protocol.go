@@ -30,6 +30,7 @@ const builtinFallbackAllowedSigningDomains = "*.gob.es,redsara.es,*.redsara.es,*
 const builtinFallbackAutoTrustedSigningDomains = "*.gob.es,redsara.es,*.redsara.es,*.dipgra.es,localhost,127.0.0.1,::1"
 
 var confirmFirstDomainUseFunc = protocolConfirmFirstDomainUseDialog
+var protocolIntermediateServerMu sync.Mutex
 
 var trustedSigningDomainsState = struct {
 	mu     sync.Mutex
@@ -63,7 +64,7 @@ type ProtocolState struct {
 	RTServlet            string
 	STServlet            string // URL dedicada de almacenamiento
 	FileID               string
-	RequestID            string // fileid original de la URI (usado en el bucle WAIT)
+	RequestID            string // identificador actual usado para WAIT/subida final
 	Key                  string
 	Action               string // "sign"
 	SourceURL            string
@@ -1353,6 +1354,9 @@ func (p *ProtocolState) UploadCertificate(certB64 string) error {
 // UploadResultData sube un resultado textual (base64/urlsafe/etc.) al storage servlet.
 // Se utiliza para operaciones batch/selectcert donde no se sube par cert|firma.
 func (p *ProtocolState) UploadResultData(dat string) error {
+	protocolIntermediateServerMu.Lock()
+	defer protocolIntermediateServerMu.Unlock()
+
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	uploadServlet := strings.TrimSpace(p.STServlet)
@@ -1480,6 +1484,48 @@ func isStorageUploadOKResponse(bodyText string) bool {
 	return false
 }
 
+func applyProtocolEnvelopeState(p *ProtocolState, params map[string]string) error {
+	if p == nil {
+		return fmt.Errorf("estado de protocolo nulo")
+	}
+
+	if rt := strings.TrimSpace(params["rtservlet"]); rt != "" {
+		if err := validateSigningServerURL(rt, "rtservlet"); err != nil {
+			return err
+		}
+		p.RTServlet = rt
+		log.Printf("[Protocol] RTServlet actualizado desde envelope/XML: %s", rt)
+	}
+
+	if st := strings.TrimSpace(params["stservlet"]); st != "" {
+		if err := validateSigningServerURL(st, "stservlet"); err != nil {
+			return err
+		}
+		p.STServlet = st
+		log.Printf("[Protocol] STServlet actualizado desde envelope/XML: %s", st)
+	}
+
+	if id := strings.TrimSpace(params["id"]); id != "" {
+		p.FileID = id
+		p.RequestID = id
+		log.Printf("[Protocol] Id de sesión actualizado desde envelope/XML: %s", id)
+	}
+
+	if k := strings.TrimSpace(params["key"]); k != "" {
+		p.Key = k
+	}
+
+	if awRaw, ok := params["aw"]; ok {
+		p.ActiveWaiting = parseBoolParam(awRaw)
+	}
+
+	if format := strings.TrimSpace(params["format"]); format != "" {
+		p.SignFormat = format
+	}
+
+	return nil
+}
+
 // SendWaitSignal envía marcador WAIT compatible con Java al storage servlet.
 func (p *ProtocolState) SendWaitSignal() error {
 	if p == nil {
@@ -1494,6 +1540,9 @@ func (p *ProtocolState) SendWaitSignal() error {
 	if p.RequestID == "" {
 		return fmt.Errorf("identificador de solicitud vacío")
 	}
+
+	protocolIntermediateServerMu.Lock()
+	defer protocolIntermediateServerMu.Unlock()
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	reqURL, err := url.Parse(p.STServlet)
@@ -1905,24 +1954,8 @@ func parseAutoFirmaXML(xmlData []byte, p *ProtocolState) ([]byte, string, error)
 		p.Params.Set(e.Key, val)
 	}
 
-	// Crítico: actualizar STServlet si está presente
-	if st := params["stservlet"]; st != "" {
-		if err := validateSigningServerURL(st, "stservlet"); err != nil {
-			return nil, "", err
-		}
-		p.STServlet = st
-		log.Printf("[Protocol] STServlet actualizado desde XML: %s", st)
-	}
-
-	// El id de subida viene del id de sesión XML cuando está presente.
-	if id := params["id"]; id != "" {
-		p.FileID = id
-		log.Printf("[Protocol] Id de sesión actualizado desde XML (id de subida): %s", id)
-	}
-
-	// Crítico: actualizar Key si está presente
-	if k := params["key"]; k != "" {
-		p.Key = k
+	if err := applyProtocolEnvelopeState(p, params); err != nil {
+		return nil, "", err
 	}
 
 	// Extraer datos ('dat')

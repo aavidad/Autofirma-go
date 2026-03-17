@@ -326,7 +326,7 @@ func runRESTServer(addr string, token string, sessionTTL time.Duration, allowedF
 	if len(allowed) > 0 {
 		log.Printf("[REST] Autenticación por certificado: habilitada (lista blanca huellas SHA-256=%d, ttl=%s)", len(allowed), sessionTTL.String())
 	} else {
-		log.Printf("[REST] Autenticación por certificado: habilitada (acepta cualquier certificado válido, ttl=%s)", sessionTTL.String())
+		log.Printf("[REST] AVISO: sin lista blanca de certificados — cualquier titular de certificado puede autenticarse. Configura AUTOFIRMA_REST_ALLOWED_CERTS para restringir acceso.")
 	}
 	return (&http.Server{
 		Addr:    addr,
@@ -384,7 +384,7 @@ func runRESTServerOnSocket(socketPath string, token string, sessionTTL time.Dura
 		return err
 	}
 	defer l.Close()
-	os.Chmod(socketPath, 0666) // Permitir acceso al socket
+	os.Chmod(socketPath, 0600)
 
 	srv := &http.Server{
 		Handler: mux,

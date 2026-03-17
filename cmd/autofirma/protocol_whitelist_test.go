@@ -22,8 +22,27 @@ func TestValidateSigningServerURL_AllowAndDeny(t *testing.T) {
 	if err := validateSigningServerURL("http://localhost:63117/StorageService", "stservlet"); err != nil {
 		t.Fatalf("debería permitir localhost en http: %v", err)
 	}
+	if err := validateSigningServerURL("https://evil.example.com/StorageService", "stservlet"); err != nil {
+		t.Fatalf("con trust automático debería permitir host remoto no listado para primer uso: %v", err)
+	}
+}
+
+func TestValidateSigningServerURL_BlockUnknownWithoutTrust(t *testing.T) {
+	t.Setenv("AUTOFIRMA_ALLOWED_SIGN_DOMAINS", "*.gob.es,redsara.es,*.redsara.es,*.dipgra.es,localhost,127.0.0.1")
+	t.Setenv("AUTOFIRMA_DOMAIN_TRUST_AUTO_ALLOW", "")
+	resetTrustedDomainsForTest()
+	orig := confirmFirstDomainUseFunc
+	defer func() {
+		confirmFirstDomainUseFunc = orig
+		resetTrustedDomainsForTest()
+	}()
+
+	confirmFirstDomainUseFunc = func(host string) (bool, error) {
+		return false, nil
+	}
+
 	if err := validateSigningServerURL("https://evil.example.com/StorageService", "stservlet"); err == nil {
-		t.Fatalf("debería bloquear host fuera de lista blanca")
+		t.Fatalf("debería bloquear host remoto no confiado cuando no hay auto-allow")
 	}
 }
 

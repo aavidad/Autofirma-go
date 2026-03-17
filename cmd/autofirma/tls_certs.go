@@ -23,7 +23,10 @@ const (
 	javaCompatRootCertFilename   = "Autofirma_ROOT.cer"
 	javaCompatServerCertFilename = "autofirma.cer"
 	javaCompatPKCS12Filename     = "autofirma.pfx"
-	javaCompatPKCS12Password     = "654321"
+	// javaCompatPKCS12Password es la contraseña pública de interoperabilidad usada por
+	// AutoFirma original (MPTFP). No es un secreto: es una constante conocida del protocolo.
+	// El fichero .pfx generado se protege con permisos 0600.
+	javaCompatPKCS12Password = "654321"
 	javaCompatPKCS12Alias        = "SocketAutoFirma"
 )
 
@@ -159,7 +162,7 @@ func exportJavaCompatibilityCerts(targetDir string) error {
 }
 
 func writeJavaCompatibilityCertFiles(rootCACertPath string, serverCertPath string, serverKeyPath string, outputDir string) error {
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o700); err != nil {
 		return fmt.Errorf("creando directorio de salida %s: %w", outputDir, err)
 	}
 

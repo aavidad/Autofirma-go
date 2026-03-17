@@ -6,6 +6,7 @@ package main
 
 import (
 	"autofirma-host/pkg/protocol"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -166,7 +167,14 @@ func batchHTTPPostOnceMode(client *http.Client, rawURL string, sendQueryAsFormBo
 }
 
 func shouldFallbackToFormBody(httpErr *batchHTTPError) bool {
-	if httpErr == nil || httpErr.StatusCode != http.StatusBadRequest {
+	if httpErr == nil {
+		return false
+	}
+	// 414 Request-URI Too Long: la URL con los params del lote es demasiado grande → POST
+	if httpErr.StatusCode == http.StatusRequestURITooLong {
+		return true
+	}
+	if httpErr.StatusCode != http.StatusBadRequest {
 		return false
 	}
 	body := strings.ToLower(strings.TrimSpace(httpErr.Body))
@@ -562,14 +570,53 @@ func (s *WebSocketServer) processBatchRequest(state *ProtocolState) string {
 		"batchPostSignerUrl",
 		"batchPostSignerURL",
 	))
-	if !isLocalBatch && !isJSONBatch && (preURL == "" || postURL == "") {
-		return s.formatError("ERROR_UNSUPPORTED_OPERATION", "Lote trifasico XML no soportado")
-	}
-
+	// Cuando no hay 'dat' embebido pero sí fileid+rtservlet, descargamos el payload
+	// antes de comprobar el formato: algunos integradores (p.ej. pfirma) sirven el
+	// lote en JSON desde el servlet aunque no envíen jsonbatch=true en la URL.
 	rawBatch, err := extractBatchPayload(state)
 	if err != nil {
 		return s.formatError("ERROR_DOWNLOAD", err.Error())
 	}
+
+	// Si el contenido descargado es un envelope <batch><e k="..." v="..."/> de afirma,
+	// inyectar los parámetros en state y releer las variables derivadas.
+	// Esto ocurre cuando el RetrieveService devuelve los parámetros de la petición
+	// en lugar del lote directamente (flujo fileid+rtservlet de pfirma/PortaFirmas).
+	if tryParseAfirmaEnvelope(rawBatch, state) {
+		// Re-leer parámetros que pueden haber cambiado tras la inyección
+		if !isJSONBatch {
+			isJSONBatch = parseBoolParam(getQueryParam(state.Params, "jsonbatch", "jsonBatch"))
+		}
+		if preURL == "" {
+			preURL = strings.TrimSpace(getQueryParam(state.Params, "batchpresignerurl", "batchPreSignerUrl", "batchPreSignerURL"))
+		}
+		if postURL == "" {
+			postURL = strings.TrimSpace(getQueryParam(state.Params, "batchpostsignerurl", "batchPostSignerUrl", "batchPostSignerURL"))
+		}
+		// Actualizar campos struct de state que pueden haber llegado en el envelope
+		if state.STServlet == "" {
+			state.STServlet = strings.TrimSpace(getQueryParam(state.Params, "stservlet", "storageservlet", "storageServlet"))
+		}
+		if state.Key == "" {
+			state.Key = strings.TrimSpace(getQueryParam(state.Params, "key"))
+		}
+		// El dat real está ahora en state.Params; volver a extraer el payload
+		rawBatch2, err2 := extractBatchPayload(state)
+		if err2 != nil {
+			return s.formatError("ERROR_DOWNLOAD", err2.Error())
+		}
+		rawBatch = rawBatch2
+	}
+
+	// Autodetectar JSON si el caller no lo indicó explícitamente.
+	if !isJSONBatch && looksLikeJSON(rawBatch) {
+		isJSONBatch = true
+	}
+
+	if !isLocalBatch && !isJSONBatch && (preURL == "" || postURL == "") {
+		return s.formatError("ERROR_UNSUPPORTED_OPERATION", "Lote trifasico XML no soportado")
+	}
+
 	req, err := parseBatchRequest(rawBatch, isJSONBatch)
 	if err != nil {
 		if isJSONBatch {
@@ -647,6 +694,65 @@ func (s *WebSocketServer) processBatchRequest(state *ProtocolState) string {
 		return plain
 	}
 	return plain + "|" + base64.StdEncoding.EncodeToString(cert.Content)
+}
+
+// looksLikeJSON devuelve true si raw parece un objeto JSON (empieza por '{').
+func looksLikeJSON(raw []byte) bool {
+	for _, b := range raw {
+		if b == ' ' || b == '\t' || b == '\r' || b == '\n' {
+			continue
+		}
+		return b == '{'
+	}
+	return false
+}
+
+// afirmaParamEnvelope representa el XML <batch><e k="..." v="..."/></batch>
+// que el RetrieveService devuelve para codificar los parámetros de una petición.
+type afirmaParamEnvelope struct {
+	XMLName xml.Name        `xml:"batch"`
+	Entries []afirmaParamKV `xml:"e"`
+}
+
+type afirmaParamKV struct {
+	K string `xml:"k,attr"`
+	V string `xml:"v,attr"`
+}
+
+// tryParseAfirmaEnvelope detecta si raw es un envelope <batch><e k="..." v="..."/></batch>
+// y en ese caso inyecta los parámetros extraídos en state.Params y devuelve true.
+// Esto ocurre cuando el RetrieveService devuelve los parámetros de firma en XML.
+func tryParseAfirmaEnvelope(raw []byte, state *ProtocolState) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if !bytes.HasPrefix(trimmed, []byte("<batch>")) && !bytes.HasPrefix(trimmed, []byte("<batch ")) {
+		return false
+	}
+	var env afirmaParamEnvelope
+	if err := xml.Unmarshal(trimmed, &env); err != nil || len(env.Entries) == 0 {
+		return false
+	}
+	if state.Params == nil {
+		state.Params = make(url.Values)
+	}
+	params := make(map[string]string, len(env.Entries))
+	for _, kv := range env.Entries {
+		k := strings.ToLower(strings.TrimSpace(kv.K))
+		v := strings.TrimSpace(kv.V)
+		if k == "" || v == "" {
+			continue
+		}
+		if decoded, err := url.QueryUnescape(v); err == nil {
+			v = decoded
+		}
+		params[k] = v
+		state.Params.Set(k, v)
+	}
+	if err := applyProtocolEnvelopeState(state, params); err != nil {
+		log.Printf("[Batch] envelope afirma inválido: %v", err)
+		return false
+	}
+	log.Printf("[Batch] envelope afirma parseado: %d parámetros inyectados en state", len(env.Entries))
+	return true
 }
 
 func extractBatchPayload(state *ProtocolState) ([]byte, error) {

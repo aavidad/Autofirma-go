@@ -32,25 +32,25 @@ func Init(appName string) (string, error) {
 	if err != nil || strings.TrimSpace(logDir) == "" {
 		logDir = fallbackLogDir()
 	}
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0700); err != nil {
 		alt := fallbackLogDir()
 		if alt != logDir {
-			_ = os.MkdirAll(alt, 0755)
+			_ = os.MkdirAll(alt, 0700)
 			logDir = alt
 		}
 	}
 
 	fileName := fmt.Sprintf("%s-%s.log", sanitizeName(appName), time.Now().Format("2006-01-02"))
 	path := filepath.Join(logDir, fileName)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		// Last-resort fallback to temp directory.
 		tmpPath := filepath.Join(os.TempDir(), "AutofirmaDipgra", "logs")
-		if mkErr := os.MkdirAll(tmpPath, 0755); mkErr != nil {
+		if mkErr := os.MkdirAll(tmpPath, 0700); mkErr != nil {
 			return "", err
 		}
 		path = filepath.Join(tmpPath, fileName)
-		f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return "", err
 		}

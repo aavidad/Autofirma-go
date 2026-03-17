@@ -354,9 +354,33 @@ func (ui *FyneUI) handleProtocolBatchFyne() {
 	}
 
 	ui.SetStatus("Procesando lote protocolario...")
+	var stopWait chan struct{}
+	if state.ActiveWaiting && strings.TrimSpace(state.STServlet) != "" && strings.TrimSpace(state.RequestID) != "" {
+		stopWait = make(chan struct{})
+		go func() {
+			if err := state.SendWaitSignal(); err != nil {
+				log.Printf("[FyneUI][Protocol][Batch] fallo WAIT inicial: %v", err)
+			}
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopWait:
+					return
+				case <-ticker.C:
+					if err := state.SendWaitSignal(); err != nil {
+						log.Printf("[FyneUI][Protocol][Batch] fallo WAIT periódico: %v", err)
+					}
+				}
+			}
+		}()
+	}
 	srv := &WebSocketServer{stickyID: strings.TrimSpace(ui.SelectedCert.ID)}
 	state.Params.Set("sticky", "true")
 	result := strings.TrimSpace(srv.processBatchRequest(state))
+	if stopWait != nil {
+		close(stopWait)
+	}
 	upper := strings.ToUpper(result)
 	if strings.HasPrefix(upper, "SAF_") || strings.HasPrefix(upper, "ERR-") || strings.HasPrefix(upper, "ERROR_") || upper == "CANCEL" {
 		ui.SetStatus("Error procesando lote: " + result)

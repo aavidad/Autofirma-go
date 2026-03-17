@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -53,13 +52,22 @@ func ImportP12ToSystem(p12Path, password string) error {
 
 // ImportP12ToNSS imports a PKCS#12 file into an NSS database using pk12util.
 func ImportP12ToNSS(dbPath, p12Path, password string) error {
-	// Try to use pk12util
-	// -i: input file
-	// -d: database directory
-	// -W: password for the P12 file
-	// -K: password for the NSS database (usually empty for user databases)
+	// Escribir password en fichero temporal (evita exposición en argv / /proc)
+	pwFile, err := os.CreateTemp("", "autofirma-pw-*")
+	if err != nil {
+		return fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+	}
+	pwPath := pwFile.Name()
+	defer os.Remove(pwPath)
+	os.Chmod(pwPath, 0600)
+	if _, err := pwFile.WriteString(password); err != nil {
+		pwFile.Close()
+		return fmt.Errorf("fallo al escribir password temporal: %v", err)
+	}
+	pwFile.Close()
 
-	args := []string{"pk12util", "-i", p12Path, "-d", "sql:" + dbPath, "-W", password}
+	// -i: input file, -d: database, -w: fichero con password del P12
+	args := []string{"pk12util", "-i", p12Path, "-d", "sql:" + dbPath, "-w", pwPath}
 
 	cmd := exec.Command(args[0], args[1:]...)
 	output, err := cmd.CombinedOutput()
@@ -130,7 +138,7 @@ func DiscoverFirefoxProfiles() []string {
 	var profiles []string
 
 	// Check if base itself is a profile (unlikely) or list subdirs
-	files, err := ioutil.ReadDir(base)
+	files, err := os.ReadDir(base)
 	if err != nil {
 		return nil
 	}

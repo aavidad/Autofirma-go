@@ -22,7 +22,13 @@ func signCadesDetachedOpenSSL(inputFile, p12Path, p12Password string, options ma
 	defer os.Remove(keyPEM)
 	defer os.Remove(outFile)
 
-	passArg := "pass:" + p12Password
+	pwFile, err := writeTempPasswordFile(p12Password)
+	if err != nil {
+		return nil, fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+	}
+	defer os.Remove(pwFile)
+
+	passArg := "file:" + pwFile
 	timeout := timeoutForBytes(
 		fileSize(inputFile),
 		"AUTOFIRMA_SIGN_TIMEOUT_SMALL_SEC",
@@ -113,10 +119,14 @@ func verifyCadesDetachedOpenSSL(originalFile, signatureFile string) (*protocol.V
 		return nil, err
 	}
 
+	// La verificacion CAdES usa -noverify: valida integridad y estructura de la firma
+	// pero NO valida la cadena de confianza del certificado del firmante.
+	// TrustValidated queda false hasta que se implemente validacion de cadena completa.
 	return &protocol.VerifyResult{
-		Valid:     true,
-		Format:    "cades",
-		Algorithm: "sha256WithRSA",
-		Reason:    strings.TrimSpace("Verificacion CAdES correcta con OpenSSL"),
+		Valid:          true,
+		TrustValidated: false,
+		Format:         "cades",
+		Algorithm:      "sha256WithRSA",
+		Reason:         "Verificacion CAdES: integridad de firma correcta (cadena de confianza no validada)",
 	}, nil
 }

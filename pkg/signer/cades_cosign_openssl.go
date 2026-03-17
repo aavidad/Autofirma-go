@@ -25,7 +25,13 @@ func coSignCadesOpenSSL(inputSignature []byte, p12Path, p12Password string, opti
 		return nil, fmt.Errorf("no se pudo escribir firma de entrada: %v", err)
 	}
 
-	passArg := "pass:" + p12Password
+	pwFile, err := writeTempPasswordFile(p12Password)
+	if err != nil {
+		return nil, fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+	}
+	defer os.Remove(pwFile)
+
+	passArg := "file:" + pwFile
 	timeout := timeoutForBytes(
 		int64(len(inputSignature)),
 		"AUTOFIRMA_SIGN_TIMEOUT_SMALL_SEC",

@@ -9,8 +9,10 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -45,6 +47,48 @@ var (
 	getSystemCertificatesFunc            = certstore.GetSystemCertificates
 	getSystemCertificatesWithOptionsFunc = certstore.GetSystemCertificatesWithOptions
 )
+
+// randomHexPassword genera una contraseña aleatoria criptográficamente segura (64 hex chars).
+func randomHexPassword() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("crypto/rand fallo: %v", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// writeTempPasswordFile escribe una contraseña en un fichero temporal con permisos 0600.
+// El llamador es responsable de borrar el fichero con os.Remove tras su uso.
+func writeTempPasswordFile(password string) (string, error) {
+	f, err := os.CreateTemp("", "autofirma-pw-*")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := os.Chmod(path, 0600); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	if _, err := f.WriteString(password); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	f.Close()
+	return path, nil
+}
+
+// validateThumbprint comprueba que el thumbprint solo contiene caracteres hexadecimales
+// en mayúsculas, rechazando cualquier valor que pudiera inyectarse en un script PowerShell.
+func validateThumbprint(thumb string) error {
+	for _, c := range thumb {
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+			return fmt.Errorf("carácter no hexadecimal en thumbprint: %q", string(c))
+		}
+	}
+	return nil
+}
 
 func getEnvInt(name string, def int) int {
 	v := strings.TrimSpace(os.Getenv(name))
@@ -267,7 +311,10 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	}
 
 	// Generar contraseña aleatoria para P12 temporal
-	tempPassword := fmt.Sprintf("auto-%d-%d", time.Now().UnixNano(), os.Getpid())
+	tempPassword, err := randomHexPassword()
+	if err != nil {
+		return "", fmt.Errorf("fallo al generar password temporal: %v", err)
+	}
 	strictNoKeyExport := getEnvBool("AUTOFIRMA_STRICT_NO_KEY_EXPORT", false)
 	strictNoDiskKeyMaterial := getEnvBool("AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL", false)
 	var windowsPadesStoreErr error
@@ -329,10 +376,17 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		}
 		log.Printf("[Signer] Iniciando exportación NSS a memoria (vía OpenSSL pipe)")
 
-		// 1. Obtener P12 desde NSS directamente a memoria (stdout)
+		// Fichero temporal de password (evita exposición en argv / /proc)
 		nssDB := filepath.Join(os.Getenv("HOME"), ".pki/nssdb")
+		pwFile, err := writeTempPasswordFile(tempPassword)
+		if err != nil {
+			return "", fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+		}
+		defer os.Remove(pwFile)
+
+		// 1. Obtener P12 desde NSS directamente a memoria (stdout)
 		p12Data, err := runBinaryCommand(
-			[]string{"pk12util", "-o", "/dev/stdout", "-d", "sql:" + nssDB, "-n", nickname, "-W", tempPassword},
+			[]string{"pk12util", "-o", "/dev/stdout", "-d", "sql:" + nssDB, "-n", nickname, "-w", pwFile},
 			10*time.Second, 1, "pk12util export",
 		)
 		if err != nil {
@@ -342,7 +396,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 
 		// 2. Usar OpenSSL como filtro para extraer Private Key (normaliza BER -> PEM)
 		keyPEM, err := runCommandWithStdin(
-			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "pass:" + tempPassword, "-nocerts", "-nodes"},
+			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "file:" + pwFile, "-nocerts", "-nodes"},
 			p12Data, 10*time.Second, "openssl key filter",
 		)
 		if err != nil {
@@ -352,7 +406,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 
 		// 3. Usar OpenSSL como filtro para extraer Certificados
 		certsPEM, err := runCommandWithStdin(
-			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "pass:" + tempPassword, "-nokeys"},
+			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "file:" + pwFile, "-nokeys"},
 			p12Data, 10*time.Second, "openssl cert filter",
 		)
 		if err != nil {
@@ -570,6 +624,9 @@ func signCadesWithWindowsStore(data []byte, thumbprint string, options map[strin
 	thumb := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(thumbprint), " ", ""))
 	if thumb == "" {
 		return nil, fmt.Errorf("thumbprint vacío")
+	}
+	if err := validateThumbprint(thumb); err != nil {
+		return nil, fmt.Errorf("thumbprint inválido: %v", err)
 	}
 
 	// Usar .NET SignedCms (detached) con clave del almacén.
@@ -869,13 +926,18 @@ func exportCertificateToP12(nickname, password string) (string, error) {
 		if thumb == "" {
 			return "", fmt.Errorf("thumbprint de certificado vacio")
 		}
+		if err := validateThumbprint(thumb); err != nil {
+			return "", fmt.Errorf("thumbprint inválido: %v", err)
+		}
 		log.Printf("[Signer] Intentando exportar certificado a PFX. thumb=%s destino=%s", maskThumbprint(thumb), tmpFile)
-		logWindowsCertificateDiagnostics(thumb)
+		if getEnvBool("AUTOFIRMA_WIN_CERT_DIAG", false) {
+			logWindowsCertificateDiagnostics(thumb)
+		}
 
 		ps := "$ErrorActionPreference='Stop'; " +
-			"$pwd = ConvertTo-SecureString -String '" + password + "' -AsPlainText -Force; " +
-			"$cert = Get-Item 'Cert:\\CurrentUser\\My\\" + thumb + "'; " +
-			"Export-PfxCertificate -Cert $cert -FilePath '" + tmpFile + "' -Password $pwd -Force | Out-Null"
+			"$pwd = ConvertTo-SecureString -String '" + psSingleQuote(password) + "' -AsPlainText -Force; " +
+			"$cert = Get-Item 'Cert:\\CurrentUser\\My\\" + psSingleQuote(thumb) + "'; " +
+			"Export-PfxCertificate -Cert $cert -FilePath '" + psSingleQuote(tmpFile) + "' -Password $pwd -Force | Out-Null"
 
 		_, err := runCommandWithRetry(
 			[]string{"powershell", "-NoProfile", "-NonInteractive", "-Command", ps},
@@ -892,8 +954,14 @@ func exportCertificateToP12(nickname, password string) (string, error) {
 	nssDB := filepath.Join(os.Getenv("HOME"), ".pki/nssdb")
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-cert-%d.p12", time.Now().UnixNano()))
 
-	_, err := runCommandWithRetry(
-		[]string{"pk12util", "-o", tmpFile, "-d", "sql:" + nssDB, "-n", nickname, "-W", password},
+	pwFile, err := writeTempPasswordFile(password)
+	if err != nil {
+		return "", fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+	}
+	defer os.Remove(pwFile)
+
+	_, err = runCommandWithRetry(
+		[]string{"pk12util", "-o", tmpFile, "-d", "sql:" + nssDB, "-n", nickname, "-w", pwFile},
 		timeout,
 		retries,
 		"pk12util",
@@ -915,6 +983,10 @@ func loadP12MemoryFromDisk(p12Path, password string) (interface{}, *x509.Certifi
 func buildCertChains(leaf *x509.Certificate, certs []*x509.Certificate) ([][]*x509.Certificate, error) {
 	if leaf == nil {
 		return nil, fmt.Errorf("falta certificado hoja")
+	}
+	if time.Now().After(leaf.NotAfter) {
+		log.Printf("[Signer] AVISO: el certificado ha caducado (NotAfter=%s subject=%s)",
+			leaf.NotAfter.Format(time.RFC3339), leaf.Subject.CommonName)
 	}
 	if len(certs) <= 1 {
 		return nil, nil

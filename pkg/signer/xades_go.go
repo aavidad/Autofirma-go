@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -66,20 +67,9 @@ func signXadesWithGo(inputFile string, leaf *x509.Certificate, signer crypto.Sig
 }
 
 func signXadesElementEnveloped(el *etree.Element, signer crypto.Signer, certChain [][]byte, options map[string]interface{}) (*etree.Element, error) {
-	if el == nil {
-		return nil, fmt.Errorf("elemento XML nulo")
-	}
-	ctx, err := dsig.NewSigningContext(signer, certChain)
-	if err != nil {
-		return nil, err
-	}
-	digest := resolveDigestHash(options, crypto.SHA256)
-	if digest == crypto.SHA1 || digest == crypto.SHA256 || digest == crypto.SHA384 || digest == crypto.SHA512 {
-		ctx.Hash = digest
-	}
-	ctx.Prefix = ""
-	ctx.Canonicalizer = dsig.MakeC14N10RecCanonicalizer()
-	return ctx.SignEnveloped(el)
+	// Delegar a la implementacion XAdES-BES que incluye xades:QualifyingProperties
+	// con la referencia a xades:SignedProperties cubierta por ds:SignedInfo.
+	return signXadesElementEnvelopedBES(el, signer, certChain, options)
 }
 
 func counterSignXadesTree(root *etree.Element, signer crypto.Signer, certChain [][]byte, options map[string]interface{}) error {
@@ -287,27 +277,83 @@ func verifyXadesWithGo(xmlFile string) (*protocol.VerifyResult, error) {
 		}, nil
 	}
 
+	// 1. Verificar integridad criptografica de la firma XML.
+	// Se usa el certificado embebido como anchor solo para validar la firma matematica.
 	vc := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{
 		Roots: []*x509.Certificate{cert},
 	})
-
 	if _, err := vc.Validate(root); err != nil {
 		return &protocol.VerifyResult{
-			Valid:      false,
-			SignerName: cert.Subject.CommonName,
-			Format:     "xades",
-			Reason:     err.Error(),
+			Valid:          false,
+			TrustValidated: false,
+			SignerName:     cert.Subject.CommonName,
+			Format:         "xades",
+			Reason:         fmt.Sprintf("Firma XML invalida: %v", err),
 		}, nil
 	}
 
+	// 2. Verificar cadena de confianza del certificado del firmante contra el trust store del sistema.
+	trustValidated := false
+	reason := "Firma XML valida (integridad verificada)"
+	systemPool, sysErr := x509.SystemCertPool()
+	if sysErr != nil {
+		log.Printf("[Signer] No se pudo obtener el trust store del sistema para verificacion XAdES: %v", sysErr)
+		reason = "Firma XML valida (integridad ok; trust store del sistema no disponible)"
+	} else {
+		_, chainErr := cert.Verify(x509.VerifyOptions{
+			Roots:     systemPool,
+			KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		})
+		if chainErr == nil {
+			trustValidated = true
+			reason = "Firma XML valida (integridad y cadena de confianza verificadas)"
+		} else {
+			log.Printf("[Signer] Cadena de certificacion XAdES no verificada: %v", chainErr)
+			reason = fmt.Sprintf("Firma XML valida (integridad ok; cadena no verificada: %v)", chainErr)
+		}
+	}
+
+	// 3. Extraer timestamp real de firma (xades:SigningTime), si existe.
+	timestamp := extractXadesSigningTime(root)
+
 	return &protocol.VerifyResult{
-		Valid:      true,
-		SignerName: cert.Subject.CommonName,
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
-		Format:     "xades",
-		Algorithm:  "sha256WithRSA",
-		Reason:     "Firma XML valida",
+		Valid:          true,
+		TrustValidated: trustValidated,
+		SignerName:     cert.Subject.CommonName,
+		Timestamp:      timestamp,
+		Format:         "xades",
+		Algorithm:      "sha256WithRSA",
+		Reason:         reason,
 	}, nil
+}
+
+// extractXadesSigningTime busca el elemento xades:SigningTime en el arbol XML
+// y devuelve su valor en formato RFC3339, o cadena vacia si no existe o no es parseable.
+func extractXadesSigningTime(root *etree.Element) string {
+	var raw string
+	walkElements(root, func(el *etree.Element) {
+		if raw != "" {
+			return
+		}
+		if strings.EqualFold(xmlLocalName(el.Tag), "SigningTime") {
+			raw = strings.TrimSpace(el.Text())
+		}
+	})
+	if raw == "" {
+		return ""
+	}
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05.999999999Z07:00",
+		"2006-01-02T15:04:05",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, raw); err == nil {
+			return t.UTC().Format(time.RFC3339)
+		}
+	}
+	return raw // devolver tal cual si no se puede parsear
 }
 
 func extractSignatureCertificate(root *etree.Element) (*x509.Certificate, error) {

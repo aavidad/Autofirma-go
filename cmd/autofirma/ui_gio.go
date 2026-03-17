@@ -6343,7 +6343,11 @@ func (ui *UI) startRestServer() {
 	if port == "" {
 		port = "63118"
 	}
-	addr := "0.0.0.0:" + port
+	bindHost := os.Getenv("AUTOFIRMA_BIND_ADDR")
+	if bindHost == "" {
+		bindHost = "127.0.0.1"
+	}
+	addr := bindHost + ":" + port
 	token := strings.TrimSpace(ui.ServerToken.Text())
 	fingerprints := strings.TrimSpace(ui.ServerFingerprints.Text())
 	useHTTPS := ui.ChkServerHTTPS.Value

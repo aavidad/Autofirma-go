@@ -4,7 +4,7 @@ Licencia: GPLv3.
 Autor: Alberto Avidad Fernandez.
 Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 
-Ultima actualizacion: 2026-02-20  
+Ultima actualizacion: 2026-03-17  
 Workspace: `/home/alberto/Trabajo/AutoFirma_Dipgra/autofirma_migracion/work/native-host-src`
 
 ## Estado de documentacion (unificado)
@@ -70,6 +70,16 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
   - Flujo protocolario en Fyne incluye subida legacy `RTServlet/STServlet` y `WAIT` activo.
   - `main.go` deja Fyne como ruta por defecto para arranques protocolarios; Gio queda como fallback explícito con `-gio`.
   - Nuevo archivo de integración protocolaria Fyne: `cmd/gui/fyne_protocol.go`.
+- Paridad Java cerrada en `batch` remoto con envelope:
+  - el cliente Go ya rehidrata el estado de sesion desde el XML/envelope descargado (`id`, `stservlet`, `key`, `aw`, formato),
+  - `WAIT` en Fyne batch se comporta ya como en Java y se serializa con la subida final,
+  - se elimina la divergencia donde el resultado se subia con identificadores heredados del retrieve inicial.
+- Suite de regresión ampliada para esta brecha:
+  - `cmd/autofirma/protocol_envelope_state_test.go` cubre rehidratacion de estado desde envelope y `WAIT` activo en batch.
+- Packaging Linux actualizado con binario corregido y scripts Windows alineados con el layout actual del repo:
+  - `cmd/autofirma` como desktop real,
+  - `cmd/browser-bridge` como native host,
+  - binario Qt opcional en empaquetado Windows.
 - Validación integral endurecida para entornos restringidos:
   - `scripts/run_full_validation.sh` ahora trata bloqueo de socket/sandbox en `web-compat` como `ENV_BLOCKED`.
   - `scripts/run_full_validation.sh` trata ausencia de evidencias recientes de sede en logs como `SKIP_NO_ACTIVITY`.
@@ -89,6 +99,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - cierre trust TLS en navegadores objetivo,
 - cierre release Windows/Linux (Go/No-Go).
 - ejecutar `run_sede_e2e.sh check --require-xades-countersign` y adjuntar reporte en evidencias de cierre.
+- si Windows debe usar frontend QML/Qt nativo, falta todavia el toolchain Qt for Windows para compilar y desplegar esa GUI desde este entorno.
 
 4. Hardening de seguridad para futuras versiones (consideracion persistente):
 - reforzar canal Native Messaging (`autofirma-host`) con allowlist estricta de extensiones autorizadas por navegador.
@@ -103,6 +114,7 @@ Este archivo pasa a ser un resumen ejecutivo de paridad para compatibilidad con 
 - P2 Firma avanzada CAdES/PAdES/XAdES: **baseline operativo completo**, pendiente cierre de casuistica avanzada por sede.
 - P3 Certificados/dispositivos: **avanzado**, pendiente cierre multi-token y paridad fuera de Linux en PKCS#11 directo.
 - P4 Packaging/integracion: **avanzado**, pendiente cierre final por plataforma.
+- P4.1 Windows QML release: **preparado a nivel de scripts**, pendiente toolchain Qt for Windows.
 - P5 E2E regresion sedes reales: **pendiente de cierre formal**.
 
 ## Referencia principal
