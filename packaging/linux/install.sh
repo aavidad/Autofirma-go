@@ -72,9 +72,11 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SRC="${SCRIPT_DIR}/AutofirmaDipgra"
 FNMT_ACCOMP_CERT="${SCRIPT_DIR}/certs/fnmt-accomp.crt"
-HOST_NAME="${AUTOFIRMA_NATIVE_HOST_NAME:-com.autofirma.native}"
+HOST_NAME="${AUTOFIRMA_NATIVE_HOST_NAME:-com.dipgra.autofirma}"
+HOST_ALIASES_RAW="${AUTOFIRMA_NATIVE_HOST_ALIASES:-com.autofirma.native}"
 CHROMIUM_IDS_RAW="${AUTOFIRMA_CHROMIUM_EXTENSION_IDS:-}"
-FIREFOX_IDS_RAW="${AUTOFIRMA_FIREFOX_EXTENSION_IDS:-}"
+FIREFOX_IDS_RAW="${AUTOFIRMA_FIREFOX_EXTENSION_IDS:-extension@dipgra.es}"
+CHROMIUM_UPDATE_URL_RAW="${AUTOFIRMA_CHROMIUM_EXTENSION_UPDATE_URL:-}"
 
 USER_NAME="${SUDO_USER:-}"
 USER_HOME=""
@@ -126,6 +128,27 @@ install_fnmt_accomp_system_ca() {
     echo "[install] CA FNMT ACCOMP instalada/actualizada en trust del sistema (update-ca-trust)."
   else
     echo "[install] Aviso: no se encontró update-ca-certificates/update-ca-trust para registrar FNMT ACCOMP."
+  fi
+}
+
+install_system_dependencies() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    return 0
+  fi
+
+  echo "[install] Verificando e instalando dependencias del sistema..."
+
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq || true
+    apt-get install -y -qq poppler-utils libnss3-tools || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q poppler-utils nss-tools || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q poppler-utils nss-tools || true
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper install -y poppler-utils mozilla-nss-tools || true
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sy --noconfirm poppler nss || true
   fi
 }
 
@@ -250,12 +273,122 @@ write_native_manifest() {
   printf '%s\n' "${payload}" > "${target}"
 }
 
+install_browser_extensions_linux() {
+  local ext_root="${PREFIX}/extensiones"
+  local firefox_xpi="${ext_root}/dipgra-extension-firefox.xpi"
+  local firefox_zip="${ext_root}/dipgra-extension-firefox.zip"
+  local firefox_dir="${ext_root}/firefox"
+  local firefox_id="extension@dipgra.es"
+
+  if [[ -f "${firefox_xpi}" ]]; then
+    :
+  elif [[ -f "${firefox_zip}" ]]; then
+    cp -f "${firefox_zip}" "${firefox_xpi}" || true
+  elif [[ -d "${firefox_dir}" ]] && command -v zip >/dev/null 2>&1; then
+    (
+      cd "${ext_root}"
+      rm -f "${firefox_xpi}" "${firefox_zip}"
+      zip -qr "${firefox_zip}" firefox
+      cp -f "${firefox_zip}" "${firefox_xpi}"
+    ) || true
+  fi
+
+  if [[ -f "${firefox_xpi}" ]]; then
+    declare -a ff_system_dirs=(
+      "/usr/lib/firefox/distribution/extensions"
+      "/usr/lib64/firefox/distribution/extensions"
+      "/usr/lib/firefox-esr/distribution/extensions"
+      "/usr/lib64/firefox-esr/distribution/extensions"
+    )
+    local ff_dir
+    for ff_dir in "${ff_system_dirs[@]}"; do
+      if [[ -d "${ff_dir%/extensions}" || "${ff_dir}" == "/usr/lib/firefox/distribution/extensions" || "${ff_dir}" == "/usr/lib/firefox-esr/distribution/extensions" ]]; then
+        mkdir -p "${ff_dir}" 2>/dev/null || true
+        cp -f "${firefox_xpi}" "${ff_dir}/${firefox_id}.xpi" 2>/dev/null || true
+      fi
+    done
+
+    if [[ -n "${USER_HOME}" && -d "${USER_HOME}/.mozilla/firefox" ]]; then
+      local prof
+      for prof in "${USER_HOME}"/.mozilla/firefox/*; do
+        [[ -d "${prof}" ]] || continue
+        mkdir -p "${prof}/extensions" 2>/dev/null || true
+        cp -f "${firefox_xpi}" "${prof}/extensions/${firefox_id}.xpi" 2>/dev/null || true
+        chown "${USER_NAME}:${USER_NAME}" "${prof}/extensions/${firefox_id}.xpi" 2>/dev/null || true
+      done
+    fi
+    echo "[install] Extensión Firefox instalada (ID ${firefox_id})."
+  else
+    echo "[install] Aviso: no se encontró paquete XPI de Firefox en ${ext_root}."
+  fi
+
+  local chromium_update_url
+  chromium_update_url="$(echo "${CHROMIUM_UPDATE_URL_RAW}" | tr -d '[:space:]')"
+  declare -a chromium_policy_ids=()
+  local cid
+  while IFS= read -r cid; do
+    [[ -n "${cid}" ]] || continue
+    if append_unique "${cid}" "${chromium_policy_ids[@]}"; then
+      chromium_policy_ids+=("${cid}")
+    fi
+  done < <(split_ids "${CHROMIUM_IDS_RAW}")
+
+  if [[ -n "${USER_HOME}" ]]; then
+    while IFS= read -r cid; do
+      [[ -n "${cid}" ]] || continue
+      if append_unique "${cid}" "${chromium_policy_ids[@]}"; then
+        chromium_policy_ids+=("${cid}")
+      fi
+    done < <(detect_chromium_extension_ids "${USER_HOME}")
+  fi
+
+  if [[ "${#chromium_policy_ids[@]}" -gt 0 && -n "${chromium_update_url}" ]]; then
+    local forcelist_json="["
+    local first=1
+    for cid in "${chromium_policy_ids[@]}"; do
+      if [[ "${first}" -eq 0 ]]; then
+        forcelist_json+=","
+      fi
+      forcelist_json+="\"${cid};${chromium_update_url}\""
+      first=0
+    done
+    forcelist_json+="]"
+    local policy_payload
+    policy_payload="$(cat <<JSON
+{
+  "ExtensionInstallForcelist": ${forcelist_json}
+}
+JSON
+)"
+
+    declare -a chromium_policy_dirs=(
+      "/etc/opt/chrome/policies/managed"
+      "/etc/chromium/policies/managed"
+      "/etc/opt/edge/policies/managed"
+      "/etc/brave/policies/managed"
+      "/etc/opt/brave.com/brave/policies/managed"
+    )
+    local pdir
+    for pdir in "${chromium_policy_dirs[@]}"; do
+      mkdir -p "${pdir}" 2>/dev/null || true
+      printf '%s\n' "${policy_payload}" > "${pdir}/autofirma-dipgra-extension.json" 2>/dev/null || true
+    done
+    echo "[install] Política Chromium/Edge/Brave instalada para extensión (force install)."
+  elif [[ "${#chromium_policy_ids[@]}" -gt 0 ]]; then
+    echo "[install] Aviso: faltó AUTOFIRMA_CHROMIUM_EXTENSION_UPDATE_URL; no se pudo forzar instalación automática en Chromium/Edge/Brave."
+    echo "[install] La extensión Chromium queda en: ${ext_root}/chromium"
+  else
+    echo "[install] Aviso: no se detectaron IDs Chromium para instalación automática de extensión."
+  fi
+}
+
 if [[ ! -d "${APP_SRC}" ]]; then
   echo "ERROR: payload not found at ${APP_SRC}" >&2
   exit 1
 fi
 
 stop_running_instances
+install_system_dependencies
 
 echo "[install] Installing into ${PREFIX} (perfil=${PROFILE})"
 mkdir -p "${PREFIX}"
@@ -263,6 +396,9 @@ cp -a "${APP_SRC}/." "${PREFIX}/"
 chmod +x "${PREFIX}/autofirma-desktop"
 if [[ -f "${PREFIX}/autofirma-host" ]]; then
   chmod +x "${PREFIX}/autofirma-host"
+fi
+if [[ "${ENABLE_NATIVE_PROFILE}" -eq 1 ]]; then
+  install_browser_extensions_linux
 fi
 
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
@@ -293,7 +429,7 @@ mkdir -p /usr/local/bin
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   # Evita sobrescribir el binario real si existían symlinks legacy
   # (p.ej. /usr/local/bin/autofirma-dipgra -> /opt/.../autofirma-desktop).
-  rm -f /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio /usr/local/bin/autofirma-dipgra-qt
+  rm -f /usr/local/bin/autofirma-dipgra /usr/local/bin/autofirma-dipgra-fyne /usr/local/bin/autofirma-dipgra-gio /usr/local/bin/autofirma-dipgra-qt /usr/local/bin/autofirma-dipgra-server
 
   if [[ "${DESKTOP_SUBPROFILE}" == "qt" && ! -x "${PREFIX}/autofirma-desktop-qt-bin" ]]; then
     echo "[install] Aviso: subperfil qt solicitado pero no se encontró ${PREFIX}/autofirma-desktop-qt-bin; se usará fyne."
@@ -336,8 +472,19 @@ exec "${PREFIX}/autofirma-desktop" -frontend "${DESKTOP_SUBPROFILE}" "\$@"
 WRAP
   fi
   chmod 0755 /usr/local/bin/autofirma-dipgra
+
+  cat > /usr/local/bin/autofirma-dipgra-server <<WRAP
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" --server "\$@"
+WRAP
+  chmod 0755 /usr/local/bin/autofirma-dipgra-server
 else
   ln -sf "${PREFIX}/autofirma-desktop" /usr/local/bin/autofirma-dipgra
+  cat > /usr/local/bin/autofirma-dipgra-server <<WRAP
+#!/usr/bin/env bash
+exec "${PREFIX}/autofirma-desktop" --server "\$@"
+WRAP
+  chmod 0755 /usr/local/bin/autofirma-dipgra-server
 fi
 
 if [[ -f "${PREFIX}/autofirma-host" ]]; then
@@ -420,6 +567,14 @@ if [[ "${ENABLE_NATIVE_PROFILE}" -ne 1 ]]; then
 elif [[ ! -x "${PREFIX}/autofirma-host" ]]; then
   echo "[install] Warning: autofirma-host not found in ${PREFIX}. Native Messaging will not be installed."
 else
+  declare -a host_manifest_names=("${HOST_NAME}")
+  while IFS= read -r alias_name; do
+    [[ -n "${alias_name}" ]] || continue
+    if append_unique "${alias_name}" "${host_manifest_names[@]}"; then
+      host_manifest_names+=("${alias_name}")
+    fi
+  done < <(split_ids "${HOST_ALIASES_RAW}")
+
   declare -a chromium_ids=()
   declare -a firefox_ids=()
 
@@ -460,19 +615,24 @@ else
 
   chromium_array="$(json_array "${chromium_origins[@]}")"
   firefox_array="$(json_array "${firefox_ids[@]}")"
+  chromium_ids_array="$(json_array "${chromium_ids[@]}")"
+  firefox_ids_array="$(json_array "${firefox_ids[@]}")"
 
-  if [[ "${#chromium_origins[@]}" -gt 0 ]]; then
-    chromium_manifest="$(cat <<JSON
+  # Allowlist local para endurecer validación de caller en autofirma-host.
+  allow_require="false"
+  if [[ "${#chromium_ids[@]}" -gt 0 || "${#firefox_ids[@]}" -gt 0 ]]; then
+    allow_require="true"
+  fi
+  cat > "${PREFIX}/native_messaging_allowlist.json" <<JSON
 {
-  "name": "${HOST_NAME}",
-  "description": "AutoFirma Native Messaging Host",
-  "path": "${PREFIX}/autofirma-host",
-  "type": "stdio",
-  "allowed_origins": ${chromium_array}
+  "chromium_ids": ${chromium_ids_array},
+  "firefox_ids": ${firefox_ids_array},
+  "require_match": ${allow_require}
 }
 JSON
-)"
+  chmod 0644 "${PREFIX}/native_messaging_allowlist.json"
 
+  if [[ "${#chromium_origins[@]}" -gt 0 ]]; then
     declare -a chromium_manifest_dirs=(
       "/etc/opt/chrome/native-messaging-hosts"
       "/etc/chromium/native-messaging-hosts"
@@ -480,7 +640,19 @@ JSON
       "/etc/opt/brave.com/brave/native-messaging-hosts"
     )
     for dir in "${chromium_manifest_dirs[@]}"; do
-      write_native_manifest "${dir}/${HOST_NAME}.json" "${chromium_manifest}"
+      for manifest_name in "${host_manifest_names[@]}"; do
+        chromium_manifest="$(cat <<JSON
+{
+  "name": "${manifest_name}",
+  "description": "AutoFirma Native Messaging Host",
+  "path": "${PREFIX}/autofirma-host",
+  "type": "stdio",
+  "allowed_origins": ${chromium_array}
+}
+JSON
+)"
+        write_native_manifest "${dir}/${manifest_name}.json" "${chromium_manifest}"
+      done
     done
 
     if [[ -n "${USER_HOME}" ]]; then
@@ -491,8 +663,20 @@ JSON
         "${USER_HOME}/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
       )
       for dir in "${user_chromium_dirs[@]}"; do
-        write_native_manifest "${dir}/${HOST_NAME}.json" "${chromium_manifest}"
-        chown "${USER_NAME}:${USER_NAME}" "${dir}/${HOST_NAME}.json" 2>/dev/null || true
+        for manifest_name in "${host_manifest_names[@]}"; do
+          chromium_manifest="$(cat <<JSON
+{
+  "name": "${manifest_name}",
+  "description": "AutoFirma Native Messaging Host",
+  "path": "${PREFIX}/autofirma-host",
+  "type": "stdio",
+  "allowed_origins": ${chromium_array}
+}
+JSON
+)"
+          write_native_manifest "${dir}/${manifest_name}.json" "${chromium_manifest}"
+          chown "${USER_NAME}:${USER_NAME}" "${dir}/${manifest_name}.json" 2>/dev/null || true
+        done
       done
     fi
   else
@@ -501,9 +685,16 @@ JSON
   fi
 
   if [[ "${#firefox_ids[@]}" -gt 0 ]]; then
-    firefox_manifest="$(cat <<JSON
+    declare -a firefox_manifest_dirs=(
+      "/usr/lib/mozilla/native-messaging-hosts"
+      "/usr/lib64/mozilla/native-messaging-hosts"
+      "/etc/firefox/native-messaging-hosts"
+    )
+    for dir in "${firefox_manifest_dirs[@]}"; do
+      for manifest_name in "${host_manifest_names[@]}"; do
+        firefox_manifest="$(cat <<JSON
 {
-  "name": "${HOST_NAME}",
+  "name": "${manifest_name}",
   "description": "AutoFirma Native Messaging Host",
   "path": "${PREFIX}/autofirma-host",
   "type": "stdio",
@@ -511,20 +702,26 @@ JSON
 }
 JSON
 )"
-
-    declare -a firefox_manifest_dirs=(
-      "/usr/lib/mozilla/native-messaging-hosts"
-      "/usr/lib64/mozilla/native-messaging-hosts"
-      "/etc/firefox/native-messaging-hosts"
-    )
-    for dir in "${firefox_manifest_dirs[@]}"; do
-      write_native_manifest "${dir}/${HOST_NAME}.json" "${firefox_manifest}"
+        write_native_manifest "${dir}/${manifest_name}.json" "${firefox_manifest}"
+      done
     done
 
     if [[ -n "${USER_HOME}" ]]; then
       user_firefox_dir="${USER_HOME}/.mozilla/native-messaging-hosts"
-      write_native_manifest "${user_firefox_dir}/${HOST_NAME}.json" "${firefox_manifest}"
-      chown "${USER_NAME}:${USER_NAME}" "${user_firefox_dir}/${HOST_NAME}.json" 2>/dev/null || true
+      for manifest_name in "${host_manifest_names[@]}"; do
+        firefox_manifest="$(cat <<JSON
+{
+  "name": "${manifest_name}",
+  "description": "AutoFirma Native Messaging Host",
+  "path": "${PREFIX}/autofirma-host",
+  "type": "stdio",
+  "allowed_extensions": ${firefox_array}
+}
+JSON
+)"
+        write_native_manifest "${user_firefox_dir}/${manifest_name}.json" "${firefox_manifest}"
+        chown "${USER_NAME}:${USER_NAME}" "${user_firefox_dir}/${manifest_name}.json" 2>/dev/null || true
+      done
     fi
   else
     echo "[install] Warning: no Firefox extension IDs detected for Native Messaging."
@@ -538,13 +735,17 @@ echo "[install] Command: autofirma-dipgra"
 if [[ "${ENABLE_DESKTOP_PROFILE}" -eq 1 ]]; then
   echo "[install] Integración de escritorio: habilitada"
   echo "[install] Subperfil escritorio por defecto: ${DESKTOP_SUBPROFILE}"
-  echo "[install] Lanzadores: autofirma-dipgra-fyne | autofirma-dipgra-gio | autofirma-dipgra-qt"
+  echo "[install] Lanzadores: autofirma-dipgra-fyne | autofirma-dipgra-gio | autofirma-dipgra-qt | autofirma-dipgra-server"
 else
   echo "[install] Integración de escritorio: omitida"
+  echo "[install] Lanzador servidor: autofirma-dipgra-server"
 fi
 if [[ -x "${PREFIX}/autofirma-host" ]]; then
   echo "[install] Native host: ${PREFIX}/autofirma-host"
   echo "[install] Native host command: autofirma-host"
+  if [[ -f "${PREFIX}/native_messaging_allowlist.json" ]]; then
+    echo "[install] Allowlist Native Messaging: ${PREFIX}/native_messaging_allowlist.json"
+  fi
   if [[ "${ENABLE_NATIVE_PROFILE}" -eq 1 ]]; then
     echo "[install] Native Messaging: habilitado"
   else

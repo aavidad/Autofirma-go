@@ -26,7 +26,7 @@ if (-not $env:GOCACHE -or [string]::IsNullOrWhiteSpace($env:GOCACHE)) {
 function Build-Bin {
   Write-Host '[web-compat-win] compilando servidor GUI...'
   Set-Location $RootDir
-  & go build -o $Bin ./cmd/gui
+  & go build -o $Bin ./cmd/autofirma
 }
 
 function Get-RunningPid {

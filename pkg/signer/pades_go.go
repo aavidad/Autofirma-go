@@ -5,22 +5,20 @@
 package signer
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/digitorus/pdf"
 	pdfsign "github.com/digitorus/pdfsign/sign"
 	pdfverify "github.com/digitorus/pdfsign/verify"
 
@@ -54,10 +52,9 @@ func (s *windowsStorePadesSigner) Sign(_ io.Reader, digest []byte, opts crypto.S
 	return signDigestWithWindowsStoreKey(s.thumbprint, digest, hashName, s.publicKey)
 }
 
-func signPadesWithGo(inputFile, p12Path, p12Password string, options map[string]interface{}) ([]byte, error) {
-	cert, signer, chains, err := loadP12ForPades(p12Path, p12Password)
-	if err != nil {
-		return nil, err
+func signPadesWithGo(inputFile string, cert *x509.Certificate, signer crypto.Signer, chains [][]*x509.Certificate, options map[string]interface{}) ([]byte, error) {
+	if cert == nil || signer == nil {
+		return nil, fmt.Errorf("certificado y signer son obligatorios para PAdES en memoria")
 	}
 
 	outFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-%d.pdf", time.Now().UnixNano()))
@@ -214,6 +211,72 @@ func signDigestWithWindowsStoreKey(thumbprint string, digest []byte, hashName st
 	return sig, nil
 }
 
+// GetPadesPageSize extrae el tamaño de una página específica de un PDF en puntos
+func GetPadesPageSize(pdfPath string, pageNum uint32) (float64, float64, error) {
+	if pageNum == 0 {
+		pageNum = 1
+	}
+	r, err := pdf.Open(pdfPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	if r.NumPage() < int(pageNum) {
+		return 0, 0, fmt.Errorf("página %d no encontrada", pageNum)
+	}
+
+	p := r.Page(int(pageNum))
+	if p.V.IsNull() {
+		return 0, 0, fmt.Errorf("página %d no válida", pageNum)
+	}
+
+	box := inheritedPageBox(p.V, "CropBox")
+	if box.IsNull() {
+		box = inheritedPageBox(p.V, "MediaBox")
+	}
+	if box.IsNull() || box.Len() < 4 {
+		return 0, 0, fmt.Errorf("no se pudo obtener dimensiones de la página %d", pageNum)
+	}
+
+	llx := box.Index(0).Float64()
+	lly := box.Index(1).Float64()
+	urx := box.Index(2).Float64()
+	ury := box.Index(3).Float64()
+	w := urx - llx
+	h := ury - lly
+
+	// Respetar la rotación intrínseca de la página para el escalado visual
+	rotate := inheritedPageInt(p.V, "Rotate")
+	if rotate == 90 || rotate == 270 || rotate == -90 || rotate == -270 {
+		w, h = h, w
+	}
+
+	if w <= 0 || h <= 0 {
+		return 0, 0, fmt.Errorf("dimensiones de página inválidas: %f x %f", w, h)
+	}
+
+	return w, h, nil
+}
+
+func inheritedPageInt(v pdf.Value, key string) int64 {
+	for !v.IsNull() {
+		if val := v.Key(key); !val.IsNull() {
+			return val.Int64()
+		}
+		v = v.Key("Parent")
+	}
+	return 0
+}
+
+func inheritedPageBox(v pdf.Value, key string) pdf.Value {
+	for !v.IsNull() {
+		if box := v.Key(key); !box.IsNull() {
+			return box
+		}
+		v = v.Key("Parent")
+	}
+	return pdf.Value{}
+}
+
 func verifyPadesWithGo(pdfFile string) (*protocol.VerifyResult, error) {
 	f, err := os.Open(pdfFile)
 	if err != nil {
@@ -221,7 +284,10 @@ func verifyPadesWithGo(pdfFile string) (*protocol.VerifyResult, error) {
 	}
 	defer f.Close()
 
-	resp, err := pdfverify.VerifyFileWithOptions(f, pdfverify.DefaultVerifyOptions())
+	opts := pdfverify.DefaultVerifyOptions()
+	opts.RequireDigitalSignatureKU = false
+
+	resp, err := pdfverify.VerifyFileWithOptions(f, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -264,180 +330,6 @@ func verifyPadesWithGo(pdfFile string) (*protocol.VerifyResult, error) {
 		Algorithm:  "sha256WithRSA",
 		Reason:     reason,
 	}, nil
-}
-
-func loadP12ForPades(p12Path, password string) (*x509.Certificate, crypto.Signer, [][]*x509.Certificate, error) {
-	certPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-cert-%d.pem", time.Now().UnixNano()))
-	chainPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-chain-%d.pem", time.Now().UnixNano()))
-	keyPEM := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-pades-key-%d.pem", time.Now().UnixNano()))
-	defer os.Remove(certPEM)
-	defer os.Remove(chainPEM)
-	defer os.Remove(keyPEM)
-
-	passArg := "pass:" + password
-	timeout := time.Duration(getEnvInt("AUTOFIRMA_EXPORT_TIMEOUT_SEC", defaultExportTimeoutSec)) * time.Second
-	retries := getEnvInt("AUTOFIRMA_EXPORT_RETRIES", defaultRetriesSmall)
-
-	if _, err := runCommandWithRetry(
-		[]string{"openssl", "pkcs12", "-in", p12Path, "-passin", passArg, "-clcerts", "-nokeys", "-out", certPEM},
-		timeout,
-		retries,
-		"openssl pades cert",
-	); err != nil {
-		return nil, nil, nil, err
-	}
-	if _, err := runCommandWithRetry(
-		[]string{"openssl", "pkcs12", "-in", p12Path, "-passin", passArg, "-cacerts", "-nokeys", "-out", chainPEM},
-		timeout,
-		retries,
-		"openssl pades chain",
-	); err != nil {
-		log.Printf("[Signer] WARNING: no se pudo extraer cadena de certificados para PAdES: %v", err)
-	}
-	if _, err := runCommandWithRetry(
-		[]string{"openssl", "pkcs12", "-in", p12Path, "-passin", passArg, "-nocerts", "-nodes", "-out", keyPEM},
-		timeout,
-		retries,
-		"openssl pades key",
-	); err != nil {
-		return nil, nil, nil, err
-	}
-
-	certs, err := parsePEMCertificates(certPEM)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if chainCerts, err := parsePEMCertificates(chainPEM); err == nil && len(chainCerts) > 0 {
-		certs = append(certs, chainCerts...)
-	}
-	signer, err := parseSignerFromPEMFile(keyPEM)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	if signer == nil {
-		return nil, nil, nil, fmt.Errorf("no se encontro clave privada en P12")
-	}
-	if len(certs) == 0 {
-		return nil, nil, nil, fmt.Errorf("no se encontro certificado en P12")
-	}
-
-	leaf := selectLeafForSigner(certs, signer)
-	if leaf == nil {
-		leaf = certs[0]
-	}
-
-	var chains [][]*x509.Certificate
-	if ch, err := buildCertChains(leaf, certs); err == nil {
-		chains = ch
-	}
-
-	return leaf, signer, chains, nil
-}
-
-func parseSignerFromPEMFile(path string) (crypto.Signer, error) {
-	pemData, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	for len(pemData) > 0 {
-		var block *pem.Block
-		block, pemData = pem.Decode(pemData)
-		if block == nil {
-			break
-		}
-		signer, err := parseSignerFromPEMBlock(block)
-		if err == nil {
-			return signer, nil
-		}
-	}
-	return nil, fmt.Errorf("no se encontro clave privada compatible en %s", path)
-}
-
-func parseSignerFromPEMBlock(block *pem.Block) (crypto.Signer, error) {
-	if block == nil {
-		return nil, fmt.Errorf("bloque PEM nulo")
-	}
-	if keyAny, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		if signer, ok := keyAny.(crypto.Signer); ok {
-			return signer, nil
-		}
-	}
-	if rsaKey, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return rsaKey, nil
-	}
-	if ecKey, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return ecKey, nil
-	}
-	return nil, fmt.Errorf("clave privada no soportada")
-}
-
-func parsePEMCertificates(path string) ([]*x509.Certificate, error) {
-	pemData, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var certs []*x509.Certificate
-	for len(pemData) > 0 {
-		var block *pem.Block
-		block, pemData = pem.Decode(pemData)
-		if block == nil {
-			break
-		}
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err == nil {
-			certs = append(certs, cert)
-		}
-	}
-	if len(certs) == 0 {
-		return nil, fmt.Errorf("no se encontraron certificados PEM en %s", path)
-	}
-	return certs, nil
-}
-
-func selectLeafForSigner(certs []*x509.Certificate, signer crypto.Signer) *x509.Certificate {
-	if len(certs) == 0 || signer == nil {
-		return nil
-	}
-	signerPub, err := x509.MarshalPKIXPublicKey(signer.Public())
-	if err != nil {
-		return nil
-	}
-	for _, c := range certs {
-		certPub, err := x509.MarshalPKIXPublicKey(c.PublicKey)
-		if err == nil && bytes.Equal(certPub, signerPub) {
-			return c
-		}
-	}
-	return nil
-}
-
-func buildCertChains(leaf *x509.Certificate, certs []*x509.Certificate) ([][]*x509.Certificate, error) {
-	if leaf == nil {
-		return nil, fmt.Errorf("falta certificado hoja")
-	}
-	if len(certs) <= 1 {
-		return nil, nil
-	}
-	intermediates := x509.NewCertPool()
-	for _, c := range certs {
-		if c.Equal(leaf) {
-			continue
-		}
-		intermediates.AddCert(c)
-	}
-	chains, err := leaf.Verify(x509.VerifyOptions{
-		Intermediates: intermediates,
-		CurrentTime:   leaf.NotBefore,
-		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return chains, nil
 }
 
 func optionString(options map[string]interface{}, key, def string) string {
@@ -573,18 +465,24 @@ func applyPadesAppearanceOptions(signData *pdfsign.SignData, options map[string]
 	y := optionFloat64(options, "y", 0)
 	w := optionFloat64(options, "width", 0)
 	h := optionFloat64(options, "height", 0)
+	rotation := optionInt(options, "rotation", 0)
 
 	if w <= 0 || h <= 0 {
 		return
 	}
 
+	if rotation != 0 {
+		fmt.Printf("[Signer] Rotación de firma solicitada: %d grados\n", rotation)
+	}
+
+	signData.Appearance.Rotation = rotation
 	signData.Appearance.Visible = true
 	signData.Appearance.Page = page
 	signData.Appearance.LowerLeftX = x
 	signData.Appearance.LowerLeftY = y
 	signData.Appearance.UpperRightX = x + w
 	signData.Appearance.UpperRightY = y + h
-	signData.Appearance.Text = buildPadesVisibleSignatureText(cert, signingTime)
+	signData.Appearance.Text = buildPadesVisibleSignatureText(options, cert, signingTime)
 }
 
 func buildCertificateLabel(options map[string]interface{}) string {
@@ -602,12 +500,68 @@ func buildCertificateLabel(options map[string]interface{}) string {
 	}
 }
 
-func buildPadesVisibleSignatureText(cert *x509.Certificate, signingTime time.Time) string {
-	cn := "Desconocido"
-	if cert != nil {
-		if v := strings.TrimSpace(cert.Subject.CommonName); v != "" {
-			cn = v
+func buildPadesVisibleSignatureText(options map[string]interface{}, cert *x509.Certificate, signingTime time.Time) string {
+	signerName := optionString(options, "signerName", "")
+	if signerName == "" && cert != nil {
+		signerName = cert.Subject.CommonName
+	}
+	if signerName == "" {
+		signerName = "Desconocido"
+	}
+
+	signerDNI := optionString(options, "signerDNI", "")
+	issuerName := optionString(options, "issuerName", "")
+	issuerOrg := optionString(options, "issuerOrg", "")
+
+	text := "Firmado digitalmente por:\n" + signerName
+	if signerDNI != "" {
+		text += "\nID: " + signerDNI
+	}
+
+	issuerLabel := ""
+	if issuerName != "" && issuerOrg != "" {
+		issuerLabel = issuerOrg + " (" + issuerName + ")"
+	} else if issuerName != "" {
+		issuerLabel = issuerName
+	} else if issuerOrg != "" {
+		issuerLabel = issuerOrg
+	}
+
+	if issuerLabel != "" {
+		text += "\nEmitido por: " + issuerLabel
+	} else {
+		text += "\nEmitido por un certificado cualificado"
+	}
+
+	text += "\nFecha: " + signingTime.Format("02/01/2006 15:04:05")
+	return text
+}
+
+func optionInt(options map[string]interface{}, key string, def int) int {
+	if options == nil {
+		return def
+	}
+	v, ok := options[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		s := strings.TrimSpace(n)
+		if s == "" {
+			return def
+		}
+		if parsed, err := strconv.Atoi(s); err == nil {
+			return parsed
 		}
 	}
-	return "CN=" + cn + "\nFirmado el " + signingTime.Format("02/01/2006 15:04:05") + " por un certificado de la FNMT"
+	return def
 }

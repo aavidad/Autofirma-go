@@ -26,12 +26,12 @@ sudo -v
 echo "[install-trust] Running installer..."
 sudo "${INSTALLER_PATH}" --perfil "${PROFILE}" --subperfil-escritorio "${DESKTOP_SUBPROFILE}"
 
-APP_BIN="/opt/autofirma-dipgra/autofirma-desktop"
+APP_BIN="/opt/autofirma-dipgra/autofirma"
 if [[ ! -x "${APP_BIN}" ]]; then
   if command -v autofirma-dipgra >/dev/null 2>&1; then
     APP_BIN="$(command -v autofirma-dipgra)"
   else
-    echo "[install-trust] ERROR: autofirma-desktop not found after install" >&2
+    echo "[install-trust] ERROR: autofirma not found after install" >&2
     exit 1
   fi
 fi

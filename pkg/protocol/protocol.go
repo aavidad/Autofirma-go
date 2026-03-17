@@ -32,14 +32,19 @@ type Response struct {
 
 // VerifyResult signature verification result
 type VerifyResult struct {
-	Valid       bool   `json:"valid"`
-	SignerName  string `json:"signerName,omitempty"`
-	SignerEmail string `json:"signerEmail,omitempty"`
-	SignerOrg   string `json:"signerOrg,omitempty"`
-	Timestamp   string `json:"timestamp,omitempty"`
-	Format      string `json:"format,omitempty"`
-	Algorithm   string `json:"algorithm,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	Valid           bool   `json:"valid"`
+	// TrustValidated indica si la cadena de certificacion del firmante ha sido
+	// validada contra una trust store de confianza. Un valor false puede significar
+	// que la firma es criptograficamente correcta pero el certificado no esta anclado
+	// a ninguna CA conocida, o que la verificacion de cadena no se ha intentado.
+	TrustValidated  bool   `json:"trustValidated"`
+	SignerName      string `json:"signerName,omitempty"`
+	SignerEmail     string `json:"signerEmail,omitempty"`
+	SignerOrg       string `json:"signerOrg,omitempty"`
+	Timestamp       string `json:"timestamp,omitempty"`
+	Format          string `json:"format,omitempty"`
+	Algorithm       string `json:"algorithm,omitempty"`
+	Reason          string `json:"reason,omitempty"`
 }
 
 // Certificate information
@@ -56,5 +61,8 @@ type Certificate struct {
 	Nickname     string            `json:"nickname,omitempty"` // NSS nickname for signing
 	CanSign      bool              `json:"canSign"`
 	SignIssue    string            `json:"signIssue,omitempty"`
-	Content      []byte            `json:"-"` // Raw DER content (internal use, not serialized)
+	SubjectName  string            `json:"subjectName"` // UI friendly name
+	IssuerName   string            `json:"issuerName"`  // UI friendly issuer
+	Status       string            `json:"status"`      // e.g. "Válido", "Caducado"
+	Content      []byte            `json:"-"`           // Raw DER content (internal use, not serialized)
 }

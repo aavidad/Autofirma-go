@@ -12,15 +12,15 @@ param(
 
 function Resolve-AppBinary {
   $candidates = @(
-    (Join-Path $env:ProgramFiles 'AutofirmaDipgra\\autofirma-desktop.exe'),
-    (Join-Path $env:LOCALAPPDATA 'AutofirmaDipgra\\autofirma-desktop.exe')
+    (Join-Path $env:ProgramFiles 'AutofirmaDipgra\\autofirma.exe'),
+    (Join-Path $env:LOCALAPPDATA 'AutofirmaDipgra\\autofirma.exe')
   )
   foreach ($c in $candidates) {
     if (Test-Path $c) { return $c }
   }
   $cmd = Get-Command autofirma-dipgra.exe -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
-  throw 'No se encontró autofirma-desktop/autofirma-dipgra en el sistema.'
+  throw 'No se encontró autofirma/autofirma-dipgra en el sistema.'
 }
 
 if (-not $SkipInstaller) {

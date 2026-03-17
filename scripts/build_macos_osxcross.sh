@@ -34,7 +34,7 @@ echo "[1/2] Compilando macOS amd64..."
   GOOS=darwin \
   GOARCH=amd64 \
   GOCACHE="${GOCACHE_DIR}" \
-  go build -mod=readonly -o "${OUT_DIR}/autofirma-desktop-darwin-amd64" ./cmd/gui
+  go build -mod=readonly -o "${OUT_DIR}/autofirma-darwin-amd64" ./cmd/autofirma
 )
 
 echo "[2/2] Compilando macOS arm64..."
@@ -46,8 +46,8 @@ echo "[2/2] Compilando macOS arm64..."
   GOOS=darwin \
   GOARCH=arm64 \
   GOCACHE="${GOCACHE_DIR}" \
-  go build -mod=readonly -o "${OUT_DIR}/autofirma-desktop-darwin-arm64" ./cmd/gui
+  go build -mod=readonly -o "${OUT_DIR}/autofirma-darwin-arm64" ./cmd/autofirma
 )
 
 echo "OK: binarios generados en ${OUT_DIR}"
-ls -lh "${OUT_DIR}"/autofirma-desktop-darwin-*
+ls -lh "${OUT_DIR}"/autofirma-darwin-*

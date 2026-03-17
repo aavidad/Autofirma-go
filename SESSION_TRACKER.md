@@ -124,3 +124,25 @@ Conseguir compatibilidad operativa con flujo de sede usando protocolo `afirma://
 - [x] Limpieza de warning de locale en Fyne:
   - `cmd/gui/fyne_ui.go` fuerza fallback `C.UTF-8` cuando `LANG/LC_ALL` vienen como `C/POSIX`.
   - evita trazas `Error parsing user locale C` en arranque de GUI.
+
+## Avance sesion 2026-03-17
+- [x] Comparativa Java -> Go completa del flujo `batch` con `fileid + rtservlet`.
+- [x] Corregida rehidratacion de estado desde envelope/XML:
+  - `cmd/autofirma/protocol.go`
+  - `cmd/autofirma/websocket_batch.go`
+  - el upload final usa ya el `id`/`stservlet` efectivos del envelope, igual que Java.
+- [x] Corregido `WAIT` activo en Fyne batch cuando `aw=true` y serializado con el `put` final:
+  - `cmd/autofirma/ui_fyne_protocol.go`
+  - `cmd/autofirma/protocol.go`
+- [x] Validacion dirigida en verde:
+  - `go test -mod=mod ./cmd/autofirma -run 'TestParseProtocolURI_ActiveWaitingParam|TestParseAutoFirmaXMLUpdatesSessionStateFromEnvelope|TestTryParseAfirmaEnvelopeRehydratesBatchSessionState|TestStorageService|TestBatch'`
+- [x] Instalador Linux regenerado con binario corregido:
+  - `release/linux/AutofirmaDipgra-linux-installer.run`
+- [x] Packaging Windows actualizado al layout real:
+  - desktop: `cmd/autofirma`
+  - native host: `cmd/browser-bridge`
+  - Qt: opcional si existe binario wrapper
+- [x] Backup fuente comprimido creado antes de continuar:
+  - `/home/alberto/Trabajo/AutoFirma_Dipgra_source_core_20260317_2336.zip`
+- [ ] Pendiente de entorno:
+  - build/instalador Windows QML nativo real bloqueado por ausencia de toolchain Qt for Windows (`qmake/windeployqt` para `win32-g++`) en esta maquina.

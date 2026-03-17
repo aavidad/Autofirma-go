@@ -8,7 +8,12 @@ import (
 	"autofirma-host/pkg/applog"
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
@@ -21,6 +26,8 @@ import (
 
 	"autofirma-host/pkg/certstore"
 	"autofirma-host/pkg/protocol"
+
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 const (
@@ -41,6 +48,48 @@ var (
 	getSystemCertificatesWithOptionsFunc = certstore.GetSystemCertificatesWithOptions
 )
 
+// randomHexPassword genera una contraseña aleatoria criptográficamente segura (64 hex chars).
+func randomHexPassword() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("crypto/rand fallo: %v", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// writeTempPasswordFile escribe una contraseña en un fichero temporal con permisos 0600.
+// El llamador es responsable de borrar el fichero con os.Remove tras su uso.
+func writeTempPasswordFile(password string) (string, error) {
+	f, err := os.CreateTemp("", "autofirma-pw-*")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := os.Chmod(path, 0600); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	if _, err := f.WriteString(password); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	f.Close()
+	return path, nil
+}
+
+// validateThumbprint comprueba que el thumbprint solo contiene caracteres hexadecimales
+// en mayúsculas, rechazando cualquier valor que pudiera inyectarse en un script PowerShell.
+func validateThumbprint(thumb string) error {
+	for _, c := range thumb {
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+			return fmt.Errorf("carácter no hexadecimal en thumbprint: %q", string(c))
+		}
+	}
+	return nil
+}
+
 func getEnvInt(name string, def int) int {
 	v := strings.TrimSpace(os.Getenv(name))
 	if v == "" {
@@ -51,6 +100,27 @@ func getEnvInt(name string, def int) int {
 		return def
 	}
 	return n
+}
+
+func getEnvBool(name string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 func fileSize(path string) int64 {
@@ -89,24 +159,76 @@ func runCommandWithRetry(args []string, timeout time.Duration, retries int, labe
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 		configureCommandForOS(cmd)
-		output, err := cmd.CombinedOutput()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
 		cancel()
 
 		if err == nil {
-			if len(strings.TrimSpace(string(output))) > 0 {
-				log.Printf("[Exec] %s salida (ok): %s", label, truncateForLog(string(output), 800))
+			if len(strings.TrimSpace(stdout.String())) > 0 {
+				log.Printf("[Exec] %s salida (ok): %s", label, truncateForLog(stdout.String(), 800))
 			}
-			return output, nil
+			return stdout.Bytes(), nil
+		}
+
+		outStr := stdout.String()
+		errStr := stderr.String()
+		combined := outStr
+		if errStr != "" {
+			if combined != "" {
+				combined += "\nERROR: "
+			}
+			combined += errStr
 		}
 
 		if ctx.Err() == context.DeadlineExceeded {
 			lastErr = fmt.Errorf("%s timeout tras %s (intento %d/%d): %s",
-				label, timeout, attempt+1, retries+1, string(output))
+				label, timeout, attempt+1, retries+1, combined)
 		} else {
 			lastErr = fmt.Errorf("%s fallo (intento %d/%d): %v, salida: %s",
-				label, attempt+1, retries+1, err, string(output))
+				label, attempt+1, retries+1, err, combined)
 		}
 		log.Printf("[Exec] %s error intento %d/%d: %v", label, attempt+1, retries+1, lastErr)
+
+		if attempt < retries {
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+	return nil, lastErr
+}
+
+// runBinaryCommand es como runCommandWithRetry pero NUNCA hace log del contenido del stdout.
+// Ideal para comandos que devuelven datos binarios (como certificados).
+func runBinaryCommand(args []string, timeout time.Duration, retries int, label string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("%s: comando vacío", label)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		log.Printf("[Exec] %s intento %d/%d (binario)", label, attempt+1, retries+1)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		configureCommandForOS(cmd)
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		cancel()
+
+		if err == nil {
+			log.Printf("[Exec] %s éxito (%d bytes recibidos)", label, len(stdout.Bytes()))
+			return stdout.Bytes(), nil
+		}
+
+		errStr := stderr.String()
+		if ctx.Err() == context.DeadlineExceeded {
+			lastErr = fmt.Errorf("%s timeout tras %s: %s", label, timeout, errStr)
+		} else {
+			lastErr = fmt.Errorf("%s fallo: %v, stderr: %s", label, err, errStr)
+		}
 
 		if attempt < retries {
 			time.Sleep(time.Duration(attempt+1) * time.Second)
@@ -121,6 +243,36 @@ func truncateForLog(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncado)"
+}
+
+func runCommandWithStdin(args []string, input []byte, timeout time.Duration, label string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("%s: comando vacío", label)
+	}
+
+	log.Printf("[Exec] %s comando=%s timeout=%s (stdin %d bytes)", label, args[0], timeout, len(input))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	configureCommandForOS(cmd)
+	cmd.Stdin = bytes.NewReader(input)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%s timeout: %s", label, stderr.String())
+		}
+		return nil, fmt.Errorf("%s fallo: %v, stderr: %s", label, err, stderr.String())
+	}
+
+	// NO hacemos log del stdout porque puede contener claves privadas o certificados
+	log.Printf("[Exec] %s éxito (%d bytes recibidos)", label, len(stdout.Bytes()))
+	return stdout.Bytes(), nil
 }
 
 // SignData signs data using the specified certificate.
@@ -159,8 +311,12 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	}
 
 	// Generar contraseña aleatoria para P12 temporal
-	tempPassword := fmt.Sprintf("auto-%d-%d", time.Now().UnixNano(), os.Getpid())
-	var windowsStoreErr error
+	tempPassword, err := randomHexPassword()
+	if err != nil {
+		return "", fmt.Errorf("fallo al generar password temporal: %v", err)
+	}
+	strictNoKeyExport := getEnvBool("AUTOFIRMA_STRICT_NO_KEY_EXPORT", false)
+	strictNoDiskKeyMaterial := getEnvBool("AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL", false)
 	var windowsPadesStoreErr error
 	// Estrategia prioritaria en Windows para CAdES:
 	// 1) firmar directamente desde el almacén de certificados (sin exportar clave privada)
@@ -173,7 +329,6 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 			log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
 			return sig, nil
 		}
-		windowsStoreErr = storeErr
 		log.Printf("[Signer] Falló firma CAdES en almacén Windows, aplicando respaldo a ruta PFX: %v", storeErr)
 	}
 
@@ -197,29 +352,159 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		log.Printf("[Signer] Falló firma PAdES en almacén Windows, aplicando respaldo a ruta PFX: %v", storeErr)
 	}
 
-	// Exportar certificado y clave privada a PKCS#12 temporal
-	p12Path, err := exportCertificateToP12(nickname, tempPassword)
-	if err != nil {
-		if windowsStoreErr != nil && runtime.GOOS == "windows" && strings.EqualFold(format, "cades") {
-			if isNonExportableKeyError(err) {
-				return "", fmt.Errorf("fallo al firmar en el almacen de Windows: %v", windowsStoreErr)
-			}
-			return "", fmt.Errorf("fallo al firmar en el almacen de Windows: %v (el respaldo por exportación también falló: %v)", windowsStoreErr, err)
-		}
-		if windowsPadesStoreErr != nil && runtime.GOOS == "windows" && strings.EqualFold(format, "pades") {
-			if isNonExportableKeyError(err) {
-				return "", fmt.Errorf("fallo al firmar PAdES en el almacen de Windows: %v", windowsPadesStoreErr)
-			}
-			return "", fmt.Errorf("fallo al firmar PAdES en el almacen de Windows: %v (el respaldo por exportación también falló: %v)", windowsPadesStoreErr, err)
-		}
-		if runtime.GOOS == "windows" && isNonExportableKeyError(err) {
-			return "", fmt.Errorf("el certificado seleccionado no permite exportar su clave privada")
-		}
-		return "", fmt.Errorf("fallo al exportar certificado: %v", err)
-	}
-	defer os.Remove(p12Path)
+	// Si el certificado es de DNIe o Smartcard (Hardware), o es NSS en Linux
+	var memorySigner crypto.Signer
+	var memoryCert *x509.Certificate
+	var memoryChains [][]*x509.Certificate
+	var cleanupSigner func()
+	signSecurityMode := "unknown"
 
-	// Crear archivos temporales de entrada/salida
+	srcLower := strings.ToLower(strings.TrimSpace(cert.Source))
+	if srcLower == "smartcard" || srcLower == "dnie" {
+		pkcs11Signer, err := GetPKCS11SignerAndCert(cert.Content, tempPassword, options)
+		if err != nil {
+			return "", fmt.Errorf("fallo al instanciar signer PKCS11 hardware: %v", err)
+		}
+		memoryCert = pkcs11Signer.cert
+		memorySigner = pkcs11Signer
+		memoryChains, _ = buildCertChains(memoryCert, []*x509.Certificate{memoryCert})
+		cleanupSigner = pkcs11Signer.Close
+		signSecurityMode = "pkcs11_direct"
+	} else if runtime.GOOS == "linux" {
+		if strictNoKeyExport {
+			return "", fmt.Errorf("modo estricto: no se permite exportar clave desde NSS (AUTOFIRMA_STRICT_NO_KEY_EXPORT=1)")
+		}
+		log.Printf("[Signer] Iniciando exportación NSS a memoria (vía OpenSSL pipe)")
+
+		// Fichero temporal de password (evita exposición en argv / /proc)
+		nssDB := filepath.Join(os.Getenv("HOME"), ".pki/nssdb")
+		pwFile, err := writeTempPasswordFile(tempPassword)
+		if err != nil {
+			return "", fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+		}
+		defer os.Remove(pwFile)
+
+		// 1. Obtener P12 desde NSS directamente a memoria (stdout)
+		p12Data, err := runBinaryCommand(
+			[]string{"pk12util", "-o", "/dev/stdout", "-d", "sql:" + nssDB, "-n", nickname, "-w", pwFile},
+			10*time.Second, 1, "pk12util export",
+		)
+		if err != nil {
+			return "", fmt.Errorf("fallo al exportar desde NSS: %v", err)
+		}
+		defer zeroBytes(p12Data)
+
+		// 2. Usar OpenSSL como filtro para extraer Private Key (normaliza BER -> PEM)
+		keyPEM, err := runCommandWithStdin(
+			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "file:" + pwFile, "-nocerts", "-nodes"},
+			p12Data, 10*time.Second, "openssl key filter",
+		)
+		if err != nil {
+			return "", fmt.Errorf("openssl no pudo procesar la clave: %v", err)
+		}
+		defer zeroBytes(keyPEM)
+
+		// 3. Usar OpenSSL como filtro para extraer Certificados
+		certsPEM, err := runCommandWithStdin(
+			[]string{"openssl", "pkcs12", "-in", "-", "-passin", "file:" + pwFile, "-nokeys"},
+			p12Data, 10*time.Second, "openssl cert filter",
+		)
+		if err != nil {
+			return "", fmt.Errorf("openssl no pudo procesar los certificados: %v", err)
+		}
+		defer zeroBytes(certsPEM)
+
+		// 4. Parsear resultados PEM en memoria
+		// Parsear clave privada
+		block, _ := pem.Decode(keyPEM)
+		if block == nil {
+			return "", fmt.Errorf("error decodificando PEM de clave")
+		}
+		priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			priv, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+			if err != nil {
+				return "", fmt.Errorf("fallo al parsear clave privada: %v", err)
+			}
+		}
+		var ok bool
+		memorySigner, ok = priv.(crypto.Signer)
+		if !ok {
+			return "", fmt.Errorf("la clave extraída no es crypto.Signer")
+		}
+
+		// Parsear certificados y cadena
+		var chainCerts []*x509.Certificate
+		remaining := certsPEM
+		for {
+			block, remaining = pem.Decode(remaining)
+			if block == nil {
+				break
+			}
+			if block.Type == "CERTIFICATE" {
+				c, err := x509.ParseCertificate(block.Bytes)
+				if err == nil {
+					chainCerts = append(chainCerts, c)
+				}
+			}
+		}
+
+		pubSignerBytes, errPub := x509.MarshalPKIXPublicKey(memorySigner.Public())
+		if errPub == nil {
+			for _, c := range chainCerts {
+				pubCertBytes, errCert := x509.MarshalPKIXPublicKey(c.PublicKey)
+				if errCert == nil && bytes.Equal(pubSignerBytes, pubCertBytes) {
+					memoryCert = c
+					break
+				}
+			}
+		}
+
+		if memoryCert == nil {
+			if len(chainCerts) > 0 {
+				memoryCert = chainCerts[0]
+			} else {
+				return "", fmt.Errorf("no se encontró ningún certificado en la exportación NSS")
+			}
+		}
+		memoryChains, _ = buildCertChains(memoryCert, chainCerts)
+		cleanupSigner = func() {}
+		log.Printf("[Signer] Certificado NSS cargado exitosamente (operación 100%% en RAM)")
+		signSecurityMode = "nss_memory_export"
+	} else {
+		if strictNoKeyExport {
+			return "", fmt.Errorf("modo estricto: no se permite exportación de clave privada para este almacén (AUTOFIRMA_STRICT_NO_KEY_EXPORT=1)")
+		}
+		// Windows fallback file logic (no cambia en esta iteración para CAdES, PAdES ya entró por winstore más arriba)
+		p12Path, err := exportCertificateToP12(nickname, tempPassword)
+		if err != nil {
+			if windowsPadesStoreErr != nil && runtime.GOOS == "windows" && strings.EqualFold(format, "pades") {
+				return "", fmt.Errorf("fallo al firmar PAdES en almacén Windows: %v", windowsPadesStoreErr)
+			}
+			return "", fmt.Errorf("fallo al exportar certificado a temporal: %v", err)
+		}
+		defer os.Remove(p12Path)
+
+		// Fallback parse properties from P12 file just for signature
+		priv, parsedCert, caCerts, err := loadP12MemoryFromDisk(p12Path, tempPassword)
+		if err == nil {
+			memorySigner, _ = priv.(crypto.Signer)
+			memoryCert = parsedCert
+			var chainCerts []*x509.Certificate
+			chainCerts = append(chainCerts, parsedCert)
+			chainCerts = append(chainCerts, caCerts...)
+			memoryChains, _ = buildCertChains(parsedCert, chainCerts)
+			cleanupSigner = func() {}
+			signSecurityMode = "p12_disk_export"
+		} else {
+			return "", fmt.Errorf("fallo cargando el P12 exportado: %v", err)
+		}
+	}
+	if cleanupSigner != nil {
+		defer cleanupSigner()
+	}
+
+	// Crear archivos temporales de entrada/salida (sólo para CAdES openssl que sigue usando disco)
 	inputFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-input-%d", time.Now().UnixNano()))
 	outputFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-output-%d", time.Now().UnixNano()))
 	defer os.Remove(inputFile)
@@ -229,9 +514,36 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 	if err := os.WriteFile(inputFile, data, 0600); err != nil {
 		return "", fmt.Errorf("fallo al escribir archivo de entrada: %v", err)
 	}
+	if signSecurityMode != "unknown" {
+		log.Printf("[Signer] Modo de firma seleccionado cert=%s format=%s mode=%s", applog.MaskID(certificateID), format, signSecurityMode)
+	}
 
-	// Ruta CAdES detached sin Node.js (backend OpenSSL).
+	// Ruta CAdES detached sin Node.js (backend OpenSSL). (Pendiente refactor CAdES pure-Go)
 	if strings.EqualFold(format, "cades") {
+		if memorySigner != nil && memoryCert != nil {
+			signedData, memErr := signCadesWithGo(data, memoryCert, memorySigner, memoryChains, options)
+			if memErr == nil {
+				log.Printf("[Signer] Firma CAdES en memoria completada (pkcs7)")
+				sig := base64.StdEncoding.EncodeToString(signedData)
+				log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
+				return sig, nil
+			}
+			log.Printf("[Signer] Fallback CAdES a OpenSSL tras fallo pkcs7 en memoria: %v", memErr)
+			if strictNoDiskKeyMaterial {
+				return "", fmt.Errorf("modo estricto: CAdES en memoria falló y se prohíbe fallback con material en disco (AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL=1): %v", memErr)
+			}
+		}
+		// CAdES actualmente necesita fichero p12 temporal (requiere openssl).
+		// Por ahora lo exportamos otra vez temporalmente si es desde p12 (NSS fallback o DNIe fallback openSSL)
+		// FIXME: CAdES en DNIe por openssl está ROTO si no se migra a pure-Go también.
+		// Pero al menos PAdES sí funciona perfecto en memoria.
+		if strictNoDiskKeyMaterial {
+			return "", fmt.Errorf("modo estricto: ruta CAdES OpenSSL con P12 temporal deshabilitada (AUTOFIRMA_STRICT_NO_DISK_KEY_MATERIAL=1)")
+		}
+		p12Path, _ := exportCertificateToP12(nickname, tempPassword)
+		if p12Path != "" {
+			defer os.Remove(p12Path)
+		}
 		signedData, err := signCadesDetachedOpenSSL(inputFile, p12Path, tempPassword, options)
 		if err != nil {
 			log.Printf("[Signer] Error en firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
@@ -242,12 +554,13 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 		return sig, nil
 	}
 
-	// Ruta PAdES sin Node.js.
+	// Ruta PAdES en Memoria + Go sin extraer fichero!
 	if strings.EqualFold(format, "pades") {
-		signedData, err := signPadesWithGo(inputFile, p12Path, tempPassword, options)
+		signedData, err := signPadesWithGo(inputFile, memoryCert, memorySigner, memoryChains, options)
 		if err != nil {
 			log.Printf("[Signer] Error en firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
-			return "", fmt.Errorf("firma PAdES fallida (go): %v", err)
+			return "", fmt.Errorf("firma PAdES en memoria fallida: %v", err)
+
 		}
 		sig := base64.StdEncoding.EncodeToString(signedData)
 		log.Printf("[Signer] Firma completada cert=%s format=%s %s", applog.MaskID(certificateID), format, applog.SecretMeta("signatureB64", sig))
@@ -256,7 +569,7 @@ func SignData(dataB64 string, certificateID string, pin string, format string, o
 
 	// Ruta XAdES sin Node.js.
 	if strings.EqualFold(format, "xades") {
-		signedData, err := signXadesWithGo(inputFile, p12Path, tempPassword, options)
+		signedData, err := signXadesWithGo(inputFile, memoryCert, memorySigner, memoryChains, options)
 		if err != nil {
 			log.Printf("[Signer] Error en firma cert=%s format=%s err=%v", applog.MaskID(certificateID), format, err)
 			return "", fmt.Errorf("firma XAdES fallida (go): %v", err)
@@ -311,6 +624,9 @@ func signCadesWithWindowsStore(data []byte, thumbprint string, options map[strin
 	thumb := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(thumbprint), " ", ""))
 	if thumb == "" {
 		return nil, fmt.Errorf("thumbprint vacío")
+	}
+	if err := validateThumbprint(thumb); err != nil {
+		return nil, fmt.Errorf("thumbprint inválido: %v", err)
 	}
 
 	// Usar .NET SignedCms (detached) con clave del almacén.
@@ -610,13 +926,18 @@ func exportCertificateToP12(nickname, password string) (string, error) {
 		if thumb == "" {
 			return "", fmt.Errorf("thumbprint de certificado vacio")
 		}
+		if err := validateThumbprint(thumb); err != nil {
+			return "", fmt.Errorf("thumbprint inválido: %v", err)
+		}
 		log.Printf("[Signer] Intentando exportar certificado a PFX. thumb=%s destino=%s", maskThumbprint(thumb), tmpFile)
-		logWindowsCertificateDiagnostics(thumb)
+		if getEnvBool("AUTOFIRMA_WIN_CERT_DIAG", false) {
+			logWindowsCertificateDiagnostics(thumb)
+		}
 
 		ps := "$ErrorActionPreference='Stop'; " +
-			"$pwd = ConvertTo-SecureString -String '" + password + "' -AsPlainText -Force; " +
-			"$cert = Get-Item 'Cert:\\CurrentUser\\My\\" + thumb + "'; " +
-			"Export-PfxCertificate -Cert $cert -FilePath '" + tmpFile + "' -Password $pwd -Force | Out-Null"
+			"$pwd = ConvertTo-SecureString -String '" + psSingleQuote(password) + "' -AsPlainText -Force; " +
+			"$cert = Get-Item 'Cert:\\CurrentUser\\My\\" + psSingleQuote(thumb) + "'; " +
+			"Export-PfxCertificate -Cert $cert -FilePath '" + psSingleQuote(tmpFile) + "' -Password $pwd -Force | Out-Null"
 
 		_, err := runCommandWithRetry(
 			[]string{"powershell", "-NoProfile", "-NonInteractive", "-Command", ps},
@@ -633,8 +954,14 @@ func exportCertificateToP12(nickname, password string) (string, error) {
 	nssDB := filepath.Join(os.Getenv("HOME"), ".pki/nssdb")
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("autofirma-cert-%d.p12", time.Now().UnixNano()))
 
-	_, err := runCommandWithRetry(
-		[]string{"pk12util", "-o", tmpFile, "-d", "sql:" + nssDB, "-n", nickname, "-W", password},
+	pwFile, err := writeTempPasswordFile(password)
+	if err != nil {
+		return "", fmt.Errorf("fallo al crear fichero de password temporal: %v", err)
+	}
+	defer os.Remove(pwFile)
+
+	_, err = runCommandWithRetry(
+		[]string{"pk12util", "-o", tmpFile, "-d", "sql:" + nssDB, "-n", nickname, "-w", pwFile},
 		timeout,
 		retries,
 		"pk12util",
@@ -643,6 +970,43 @@ func exportCertificateToP12(nickname, password string) (string, error) {
 		return "", fmt.Errorf("pk12util falló: %v", err)
 	}
 	return tmpFile, nil
+}
+
+func loadP12MemoryFromDisk(p12Path, password string) (interface{}, *x509.Certificate, []*x509.Certificate, error) {
+	data, err := os.ReadFile(p12Path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return pkcs12.DecodeChain(data, password)
+}
+
+func buildCertChains(leaf *x509.Certificate, certs []*x509.Certificate) ([][]*x509.Certificate, error) {
+	if leaf == nil {
+		return nil, fmt.Errorf("falta certificado hoja")
+	}
+	if time.Now().After(leaf.NotAfter) {
+		log.Printf("[Signer] AVISO: el certificado ha caducado (NotAfter=%s subject=%s)",
+			leaf.NotAfter.Format(time.RFC3339), leaf.Subject.CommonName)
+	}
+	if len(certs) <= 1 {
+		return nil, nil
+	}
+	intermediates := x509.NewCertPool()
+	for _, c := range certs {
+		if c.Equal(leaf) {
+			continue
+		}
+		intermediates.AddCert(c)
+	}
+	chains, err := leaf.Verify(x509.VerifyOptions{
+		Intermediates: intermediates,
+		CurrentTime:   leaf.NotBefore,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return chains, nil
 }
 
 // ExportCertificateP12ByID exporta un certificado a PKCS#12 a partir de su ID.
@@ -710,11 +1074,15 @@ func enrichPadesOptions(opts map[string]interface{}, cert *protocol.Certificate)
 	if _, ok := opts["signerName"]; !ok {
 		if cn := strings.TrimSpace(cert.Subject["CN"]); cn != "" {
 			opts["signerName"] = cn
+		} else if cert.SubjectName != "" {
+			opts["signerName"] = cert.SubjectName
 		}
 	}
 	if _, ok := opts["issuerName"]; !ok {
 		if icn := strings.TrimSpace(cert.Issuer["CN"]); icn != "" {
 			opts["issuerName"] = icn
+		} else if cert.IssuerName != "" {
+			opts["issuerName"] = cert.IssuerName
 		}
 	}
 	if _, ok := opts["issuerOrg"]; !ok {
@@ -723,11 +1091,9 @@ func enrichPadesOptions(opts map[string]interface{}, cert *protocol.Certificate)
 		}
 	}
 	if _, ok := opts["signerDNI"]; !ok {
-		// Mejor esfuerzo: usar serialNumber del subject si existe; en su defecto, el serial del certificado.
-		if sn := strings.TrimSpace(cert.Subject["SERIALNUMBER"]); sn != "" {
+		// Intentar buscar el serialNumber que suele contener el DNI
+		if sn := strings.TrimSpace(cert.SerialNumber); sn != "" {
 			opts["signerDNI"] = sn
-		} else if serial := strings.TrimSpace(cert.SerialNumber); serial != "" {
-			opts["signerDNI"] = serial
 		}
 	}
 	return opts

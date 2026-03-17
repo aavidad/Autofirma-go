@@ -1,0 +1,104 @@
+#ifndef BACKENDBRIDGE_H
+#define BACKENDBRIDGE_H
+#include <QCoreApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QObject>
+#include <QProcess>
+#include <QString>
+#include <QVariantList>
+#include <QVariantMap>
+
+class BackendBridge : public QObject {
+  Q_OBJECT
+  Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+  Q_PROPERTY(bool expertMode READ expertMode WRITE setExpertMode NOTIFY
+                 expertModeChanged)
+
+public:
+  explicit BackendBridge(QObject *parent = nullptr);
+  ~BackendBridge();
+
+  QString status() const { return m_status; }
+  bool expertMode() const { return m_expertMode; }
+  void setExpertMode(bool v);
+
+  Q_INVOKABLE void startBackend(const QString &addr, const QString &token,
+                                const QString &mode = "rest",
+                                const QString &fingerprints = "",
+                                bool useTLS = false);
+  Q_INVOKABLE void stopBackend();
+  Q_INVOKABLE bool canStopOwnedBackend() const;
+  Q_INVOKABLE void signFile(const QString &inputPath, const QString &outputPath,
+                            int certIndex, const QString &format);
+  Q_INVOKABLE void signFileAdvanced(const QString &inputPath,
+                                    const QString &outputPath, int certIndex,
+                                    const QVariantMap &options);
+  Q_INVOKABLE void refreshCertificates();
+  Q_INVOKABLE void verifyFile(const QString &inputPath);
+  Q_INVOKABLE void updateStatus(const QString &msg) { setStatus(msg); }
+  Q_INVOKABLE void openExternal(const QString &path);
+  Q_INVOKABLE void openCertManager();
+  Q_INVOKABLE void openLogFolder();
+  Q_INVOKABLE void openHelpManual();
+  Q_INVOKABLE void checkCertificates();
+  Q_INVOKABLE void runTLSDiagnostics();
+  Q_INVOKABLE void exportDiagnosticReport();
+  Q_INVOKABLE void clearTLSTrustStore();
+  // Service management
+  Q_INVOKABLE void getServiceStatus();
+  Q_INVOKABLE void installService();
+  Q_INVOKABLE void uninstallService();
+  Q_INVOKABLE void startService();
+  Q_INVOKABLE void stopService();
+  Q_INVOKABLE void getSettings();
+  Q_INVOKABLE void saveSettings(const QVariantMap &settings);
+  Q_INVOKABLE void getPdfPreview(const QString &path, int page = 1);
+  Q_INVOKABLE void installCamerfirmaCerts();
+  Q_INVOKABLE void importCertificate(const QString &path,
+                                     const QString &password);
+  Q_INVOKABLE void installPublicRoots();
+  Q_INVOKABLE QString getAppDirPath() const {
+#ifdef Q_OS_WIN
+    return QCoreApplication::applicationDirPath();
+#else
+    // On Linux AppImage or direct execution, the docs are relative to the bin
+    return QCoreApplication::applicationDirPath();
+#endif
+  }
+
+signals:
+  void statusChanged();
+  void expertModeChanged();
+  void certificatesLoaded(QVariantList certs);
+  void signingFinished(bool success, QString message, QString outputPath);
+  void verificationFinished(bool success, QString message, QVariantMap details);
+  void backendLogReceived(QString log);
+  void serviceStatusReceived(bool installed, bool running, QString platform,
+                             QString method);
+  void serviceActionFinished(bool ok, QString message);
+  void settingsLoaded(QVariantMap settings);
+  void pdfPreviewReceived(bool ok, QString data, double width, double height);
+  void certificateImportFinished(bool ok, QString message);
+  void publicRootsInstallationFinished(bool ok, QString message);
+
+private slots:
+  void onBackendReadyRead();
+  void onNetworkReplyFinished(QNetworkReply *reply);
+
+private:
+  QString m_status = "Iniciada";
+  bool m_expertMode = false;
+  QProcess *m_process = nullptr;
+  QNetworkAccessManager *m_nam = nullptr;
+  QString m_addr = "127.0.0.1:63118";
+  QString m_token;
+  bool m_useTLS = false;
+
+  void setStatus(const QString &s);
+};
+
+#endif // BACKENDBRIDGE_H

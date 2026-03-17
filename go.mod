@@ -4,19 +4,20 @@ go 1.24.0
 
 require (
 	fyne.io/fyne/v2 v2.7.2
+	fyne.io/systray v1.12.0
 	gioui.org v0.9.0
 	github.com/beevik/etree v1.5.0
 	github.com/digitorus/pdf v0.1.2
 	github.com/digitorus/pdfsign v0.0.0-20260102145623-a2800162ff5c
 	github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352
 	github.com/gorilla/websocket v1.5.3
-	github.com/miekg/pkcs11 v1.1.1
+	github.com/miekg/pkcs11 v1.1.2
 	github.com/russellhaering/goxmldsig v1.5.0
 	golang.org/x/sys v0.39.0
+	software.sslmate.com/src/go-pkcs12 v0.7.0
 )
 
 require (
-	fyne.io/systray v1.12.0 // indirect
 	gioui.org/shader v1.0.8 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

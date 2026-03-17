@@ -16,7 +16,7 @@ build() {
   if [[ " ${GOFLAGS:-} " != *" -mod="* ]]; then
     GOFLAGS="${GOFLAGS:-} -mod=readonly"
   fi
-  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN}" ./cmd/gui
+  GOCACHE=/tmp/go-build GOFLAGS="${GOFLAGS}" go build -o "${BIN}" ./cmd/autofirma
 }
 
 start() {

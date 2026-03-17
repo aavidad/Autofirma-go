@@ -12,7 +12,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"time"
 )
 
 var signDataCompatFallbackFunc = SignData
@@ -51,7 +50,10 @@ func CoSignData(dataB64 string, certificateID string, pin string, format string,
 		return "", fmt.Errorf("certificado no encontrado: %v", err)
 	}
 
-	tempPassword := fmt.Sprintf("auto-%d-%d", time.Now().UnixNano(), os.Getpid())
+	tempPassword, err := randomHexPassword()
+	if err != nil {
+		return "", fmt.Errorf("fallo al generar password temporal: %v", err)
+	}
 	p12Path, err := exportCertificateToP12(nickname, tempPassword)
 	if err != nil {
 		if runtime.GOOS == "windows" && isNonExportableKeyError(err) {

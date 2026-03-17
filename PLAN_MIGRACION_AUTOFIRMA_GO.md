@@ -4,9 +4,32 @@ Licencia: GPLv3.
 Autor: Alberto Avidad Fernandez.
 Organizacion: Oficina de Software Libre de la Diputacion de Granada.
 
-Fecha de revision: 2026-02-20
+Fecha de revision: 2026-03-17
 Repositorio: `work/native-host-src`
-Commit revisado: `60f3bb656201ff7a8ee8093450842554c0277608`
+Commit revisado: `65eb4112fe3d938b2865c26c7a873d283a251732`
+
+## Avance 2026-03-17 (paridad Java batch/fileid y empaquetado)
+- Corregida una brecha real de compatibilidad Java -> Go en `afirma://batch` con `fileid + rtservlet`:
+  - el cliente Go ya rehidrata el estado de sesion desde el envelope/XML descargado, igual que Java,
+  - `WAIT` y subida final usan el `id`, `stservlet`, `key` y flags efectivos del envelope, no los del retrieve inicial.
+- Corregido el flujo Fyne batch con `aw=true`:
+  - ahora emite `WAIT` periodico tambien en batch,
+  - se serializa `WAIT` con la subida final para no pisar `StorageService`.
+- Resultado funcional:
+  - desaparece la divergencia donde la sede/web quedaba cargando pese a obtener `200 OK` en `StorageService`,
+  - comportamiento alineado con `ProtocolInvocationLauncherBatch` y `ActiveWaitingThread` de Java.
+- Evidencia:
+  - logs reales de ejecucion con `WAIT -> 200 OK` y `put -> 200 OK`,
+  - tests dirigidos en verde:
+    - `TestParseProtocolURI_ActiveWaitingParam`
+    - `TestParseAutoFirmaXMLUpdatesSessionStateFromEnvelope`
+    - `TestTryParseAfirmaEnvelopeRehydratesBatchSessionState`
+    - `TestStorageService`
+    - `TestBatch`
+- Packaging:
+  - instalador Linux regenerado y validado con el binario corregido.
+  - scripts Windows alineados con el layout real actual (`cmd/autofirma`, `cmd/browser-bridge` y wrapper Qt opcional).
+  - pendiente real en Windows: toolchain Qt/QML para Windows (`qmake/windeployqt` de Qt for Windows) si el objetivo es instalador QML nativo, no solo build Go.
 
 ## Avance 2026-02-20 (cierre de migración GUI protocolaria a Fyne)
 - Implementado en `cmd/gui`:
@@ -119,6 +142,8 @@ Evidencias objetivas:
 - Instalación/actualización/desinstalación.
 - Registro `afirma://` en Chrome/Firefox/Edge.
 - Firma con certs exportables/no exportables + 1 escenario token.
+- Si el frontend objetivo es QML/Qt nativo en Windows:
+  - falta toolchain Qt for Windows en el entorno actual para generar y desplegar binarios QML reales.
 
 ## Lo que NO considero pendiente (ya avanzado)
 - Parser y compatibilidad protocolaria (`afirma://`, aliases, versiones, errores SAF).

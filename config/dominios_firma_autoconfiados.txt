@@ -1,0 +1,26 @@
+# Dominios auto-confiados por defecto (sin diálogo inicial).
+# Mantener acotado a dominios de administración pública conocidos.
+
+*.gob.es
+*.administracion.gob.es
+*.dipgra.es
+*.junta-andalucia.es
+*.xunta.gal
+*.gva.es
+*.generalitat.cat
+*.euskadi.eus
+*.jcyl.es
+*.navarra.es
+*.aragon.es
+*.cantabria.es
+*.asturias.es
+*.extremadura.es
+*.larioja.org
+*.carm.es
+*.canarias.org
+*.caib.es
+*.ceuta.es
+*.melilla.es
+localhost
+127.0.0.1
+::1

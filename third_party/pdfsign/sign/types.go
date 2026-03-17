@@ -51,6 +51,7 @@ type Appearance struct {
 	Image            []byte // Image data to use as signature appearance
 	ImageAsWatermark bool   // If true, the text will be drawn over the image
 	Text             string // Optional text to render in visible signature area
+	Rotation         int    // Rotation in degrees (0, 90, 180, 270)
 }
 
 type VisualSignData struct {

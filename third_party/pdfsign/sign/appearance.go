@@ -16,12 +16,29 @@ import (
 // writeAppearanceHeader writes the header for the appearance stream.
 //
 // Should be closed by writeFormTypeAndLength.
-func writeAppearanceHeader(buffer *bytes.Buffer, rectWidth, rectHeight float64) {
+func writeAppearanceHeader(buffer *bytes.Buffer, rectWidth, rectHeight float64, rotation int) {
 	buffer.WriteString("<<\n")
+	buffer.WriteString("  /Matrix [1 0 0 1 0 0]\n")
 	buffer.WriteString("  /Type /XObject\n")
 	buffer.WriteString("  /Subtype /Form\n")
-	fmt.Fprintf(buffer, "  /BBox [0 0 %f %f]\n", rectWidth, rectHeight)
-	buffer.WriteString("  /Matrix [1 0 0 1 0 0]\n") // No scaling or translation
+
+	effW, effH := rectWidth, rectHeight
+	if absRot := rotation % 360; absRot == 90 || absRot == -270 || absRot == 270 || absRot == -90 {
+		effW, effH = rectHeight, rectWidth
+	}
+
+	fmt.Fprintf(buffer, "  /BBox [0 0 %f %f]\n", effW, effH)
+
+	switch rotation {
+	case 90, -270: // 90 CW
+		fmt.Fprintf(buffer, "  /Matrix [0 -1 1 0 0 %f]\n", effH)
+	case 180, -180: // 180
+		fmt.Fprintf(buffer, "  /Matrix [-1 0 0 -1 %f %f]\n", effW, effH)
+	case 270, -90: // 270 CW (90 CCW)
+		fmt.Fprintf(buffer, "  /Matrix [0 1 -1 0 %f 0]\n", effW)
+	default:
+		buffer.WriteString("  /Matrix [1 0 0 1 0 0]\n")
+	}
 }
 
 func createFontResource(buffer *bytes.Buffer) {
@@ -309,10 +326,16 @@ func (context *SignContext) createAppearance(rect [4]float64) ([]byte, error) {
 
 	hasImage := len(context.SignData.Appearance.Image) > 0
 	shouldDisplayText := context.SignData.Appearance.ImageAsWatermark || !hasImage
+	rotation := context.SignData.Appearance.Rotation
 
 	// Create the appearance XObject
 	var appearance_buffer bytes.Buffer
-	writeAppearanceHeader(&appearance_buffer, rectWidth, rectHeight)
+	writeAppearanceHeader(&appearance_buffer, rectWidth, rectHeight, rotation)
+
+	effW, effH := rectWidth, rectHeight
+	if absRot := rotation % 360; absRot == 90 || absRot == -270 || absRot == 270 || absRot == -90 {
+		effW, effH = rectHeight, rectWidth
+	}
 
 	// Resources dictionary with font
 	appearance_buffer.WriteString("  /Resources <<\n")
@@ -350,7 +373,7 @@ func (context *SignContext) createAppearance(rect [4]float64) ([]byte, error) {
 	var appearance_stream_buffer bytes.Buffer
 
 	if hasImage {
-		drawImage(&appearance_stream_buffer, rectWidth, rectHeight)
+		drawImage(&appearance_stream_buffer, effW, effH)
 	}
 
 	if shouldDisplayText {
@@ -359,7 +382,7 @@ func (context *SignContext) createAppearance(rect [4]float64) ([]byte, error) {
 			text = context.SignData.Signature.Info.Name
 		}
 		lines := prepareTextLines(text)
-		lines, fontSize, textX, textY := computeTextLayout(lines, rectWidth, rectHeight)
+		lines, fontSize, textX, textY := computeTextLayout(lines, effW, effH)
 		drawText(&appearance_stream_buffer, lines, fontSize, textX, textY)
 	}
 

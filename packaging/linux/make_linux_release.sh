@@ -21,6 +21,7 @@ QT_REAL_BIN_PATH="${QT_REAL_BIN_PATH:-}"
 QT_RUNTIME_DIR="${QT_RUNTIME_DIR:-}"
 QT_RUNTIME_FROM_SYSTEM="${QT_RUNTIME_FROM_SYSTEM:-0}"
 BUILD_QT_REAL_FROM_SOURCE="${BUILD_QT_REAL_FROM_SOURCE:-1}"
+DIPGRA_EXTENSION_DIR="${DIPGRA_EXTENSION_DIR:-${ROOT_DIR}/../../DipgraExtension}"
 
 mkdir -p "${REL_DIR}" "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
 rm -rf "${BUNDLE_DIR}" "${PAYLOAD_DIR}"
@@ -95,30 +96,48 @@ elif [[ "${QT_RUNTIME_FROM_SYSTEM}" == "1" ]]; then
   mkdir -p "${BUNDLE_DIR}/qt-runtime/lib" "${BUNDLE_DIR}/qt-runtime/plugins"
 
   plugin_dir=""
-  for c in /usr/lib/*/qt6/plugins /usr/lib/qt6/plugins /usr/lib64/qt6/plugins; do
+  qml_dir=""
+  for c in /usr/lib/*/qt5/plugins /usr/lib/qt5/plugins /usr/lib/*/qt6/plugins /usr/lib/qt6/plugins; do
     if [[ -d "${c}" ]]; then
       plugin_dir="${c}"
       break
     fi
   done
+  for c in /usr/lib/*/qt5/qml /usr/lib/qt5/qml /usr/lib/*/qt6/qml /usr/lib/qt6/qml; do
+    if [[ -d "${c}" ]]; then
+      qml_dir="${c}"
+      break
+    fi
+  done
+
   if [[ -n "${plugin_dir}" ]]; then
-    # Conjunto mínimo de plugins para Linux/X11 + TLS.
-    declare -a plugin_candidates=(
-      "${plugin_dir}/platforms/libqxcb.so"
-      "${plugin_dir}/platforms/libqminimal.so"
-      "${plugin_dir}/tls/libqopensslbackend.so"
-    )
-    for plugin_file in "${plugin_candidates[@]}"; do
-      if [[ -f "${plugin_file}" ]]; then
-        rel_dir="$(dirname "${plugin_file#${plugin_dir}/}")"
-        mkdir -p "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}"
-        cp -f "${plugin_file}" "${BUNDLE_DIR}/qt-runtime/plugins/${rel_dir}/"
+    echo "[linux] Usando plugins desde: ${plugin_dir}"
+    # Conjunto más completo de plugins para Linux/X11 + TLS + Image Formats.
+    declare -a plugin_groups=("platforms" "tls" "imageformats" "iconengines" "xcbglintegrations")
+    for group in "${plugin_groups[@]}"; do
+      if [[ -d "${plugin_dir}/${group}" ]]; then
+        mkdir -p "${BUNDLE_DIR}/qt-runtime/plugins/${group}"
+        cp -af "${plugin_dir}/${group}/." "${BUNDLE_DIR}/qt-runtime/plugins/${group}/"
       fi
     done
   else
-    echo "[linux] Aviso: no se encontró carpeta de plugins Qt6 del sistema."
+    echo "[linux] Aviso: no se encontró carpeta de plugins Qt del sistema."
   fi
 
+  if [[ -n "${qml_dir}" ]]; then
+    echo "[linux] Usando QML desde: ${qml_dir}"
+    mkdir -p "${BUNDLE_DIR}/qt-runtime/qml"
+    # Copiamos solo los módulos necesarios para optimizar tamaño (QtQuick, QtQuick.Controls, etc)
+    declare -a qml_modules=("QtQuick" "QtQuick.2" "QtQuick.Controls" "QtQuick.Controls.2" "QtQuick.Layouts" "QtQuick.Templates.2" "QtQuick.Window.2")
+    for mod in "${qml_modules[@]}"; do
+      # Convertimos punto a barra (ej. QtQuick.Controls -> QtQuick/Controls)
+      mod_path="${mod//.//}"
+      if [[ -d "${qml_dir}/${mod_path}" ]]; then
+        mkdir -p "$(dirname "${BUNDLE_DIR}/qt-runtime/qml/${mod_path}")"
+        cp -af "${qml_dir}/${mod_path}" "${BUNDLE_DIR}/qt-runtime/qml/${mod_path}"
+      fi
+    done
+  fi
   if command -v ldd >/dev/null 2>&1; then
     should_skip_core_lib() {
       case "$(basename "$1")" in
@@ -200,6 +219,53 @@ echo "[linux] Building Native Messaging host binary..."
 
 chmod +x "${HOST_BIN_PATH}"
 
+# Qt/QML app resources
+if [[ -d "${ROOT_DIR}/cmd/qt_real/qml" ]]; then
+  mkdir -p "${BUNDLE_DIR}/qml"
+  cp -a "${ROOT_DIR}/cmd/qt_real/qml/." "${BUNDLE_DIR}/qml/"
+elif [[ -d "${ROOT_DIR}/qml" ]]; then
+  mkdir -p "${BUNDLE_DIR}/qml"
+  cp -a "${ROOT_DIR}/qml/." "${BUNDLE_DIR}/qml/"
+fi
+if [[ -d "${ROOT_DIR}/assets" ]]; then
+  mkdir -p "${BUNDLE_DIR}/assets"
+  cp -a "${ROOT_DIR}/assets/." "${BUNDLE_DIR}/assets/"
+fi
+if [[ -d "${ROOT_DIR}/config" ]]; then
+  mkdir -p "${BUNDLE_DIR}/config"
+  cp -a "${ROOT_DIR}/config/." "${BUNDLE_DIR}/config/"
+fi
+
+# Diputacion browser extensions (Chromium + Firefox), if available.
+if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" || -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+  mkdir -p "${BUNDLE_DIR}/extensiones"
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension" "${BUNDLE_DIR}/extensiones/chromium"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-chromium.zip
+        zip -qr dipgra-extension-chromium.zip chromium
+      )
+    fi
+  fi
+  if [[ -d "${DIPGRA_EXTENSION_DIR}/extension-firefox" ]]; then
+    cp -a "${DIPGRA_EXTENSION_DIR}/extension-firefox" "${BUNDLE_DIR}/extensiones/firefox"
+    if command -v zip >/dev/null 2>&1; then
+      (
+        cd "${BUNDLE_DIR}/extensiones"
+        rm -f dipgra-extension-firefox.zip
+        zip -qr dipgra-extension-firefox.zip firefox
+        rm -f dipgra-extension-firefox.xpi
+        cp -f dipgra-extension-firefox.zip dipgra-extension-firefox.xpi
+      )
+    fi
+  fi
+  echo "[linux] Extensiones Dipgra incluidas desde: ${DIPGRA_EXTENSION_DIR}"
+else
+  echo "[linux] Aviso: no se encontró DipgraExtension (DIPGRA_EXTENSION_DIR=${DIPGRA_EXTENSION_DIR})."
+fi
+
 cat > "${BUNDLE_DIR}/README.txt" <<README
 Autofirma Dipgra Linux
 
@@ -211,6 +277,9 @@ Frontend Qt nativo (opcional, si se incluyó):
   ./autofirma-desktop-qt-real
 Host nativo:
   ./autofirma-host
+Extensiones navegador:
+  ./extensiones/dipgra-extension-chromium.zip
+  ./extensiones/dipgra-extension-firefox.zip
 
 Notas de compilacion:
   - Modo autocontenido activo: ${BUILD_SELF_CONTAINED}

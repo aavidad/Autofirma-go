@@ -10,7 +10,7 @@ param(
 )
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..\\..')).Path
-$Bin = Join-Path $RootDir 'autofirma-host-smoke.exe'
+$Bin = Join-Path $RootDir 'autofirma-smoke.exe'
 $PdfTest = Join-Path $RootDir 'testdata\\original.pdf'
 
 if (-not $env:GOFLAGS -or $env:GOFLAGS -notmatch '(^|\s)-mod=') {
@@ -22,7 +22,7 @@ if (-not $env:GOCACHE -or [string]::IsNullOrWhiteSpace($env:GOCACHE)) {
 
 Set-Location $RootDir
 Write-Host '[smoke-win] compilando host nativo...'
-& go build -o $Bin ./cmd/autofirma-host
+& go build -o $Bin ./cmd/autofirma
 
 function Read-Exact([System.IO.Stream]$Stream, [int]$Count) {
   $buf = New-Object byte[] $Count
